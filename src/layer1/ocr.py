@@ -59,7 +59,7 @@ class OCRExtractor:
             return []
 
         # Real OCR inference — not a mock
-        results = self.model.ocr(image, cls=self.use_angle_cls)
+        results = self.model.ocr(image)
 
         if results is None or results[0] is None:
             return []
