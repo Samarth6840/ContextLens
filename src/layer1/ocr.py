@@ -61,16 +61,31 @@ class OCRExtractor:
         # Real OCR inference — not a mock
         results = self.model.ocr(image)
 
-        if results is None or results[0] is None:
+        if results is None:
+            return []
+
+        if isinstance(results, dict):
+            rec_texts = results.get("rec_texts", [])
+            rec_scores = results.get("rec_scores", [])
+            rec_polys = results.get("rec_polys", [])
+        elif isinstance(results, list) and len(results) > 0:
+            if isinstance(results[0], dict):
+                rec_texts = results[0].get("rec_texts", [])
+                rec_scores = results[0].get("rec_scores", [])
+                rec_polys = results[0].get("rec_polys", [])
+            else:
+                rec_texts = []
+                rec_scores = []
+                rec_polys = []
+        else:
             return []
 
         ocr_results = []
-        for line in results[0]:
-            bbox, (text, confidence) = line
+        for text, score, poly in zip(rec_texts, rec_scores, rec_polys):
             ocr_results.append({
                 "text": text,
-                "confidence": float(confidence),
-                "bbox": bbox,
+                "confidence": float(score),
+                "bbox": poly.tolist() if hasattr(poly, "tolist") else list(poly),
             })
 
         return ocr_results
