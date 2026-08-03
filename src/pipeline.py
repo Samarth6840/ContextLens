@@ -9,6 +9,7 @@ Models are lazy-loaded on first use to keep startup fast.
 """
 
 import logging
+import math
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -73,6 +74,14 @@ class VideoProcessor:
             raise IOError(f"Cannot open video: {video_path}")
 
         video_fps = cap.get(cv2.CAP_PROP_FPS)
+        if not video_fps or video_fps <= 0 or math.isnan(video_fps):
+            # Some containers/codecs report 0.0/NaN FPS — default to 30 so
+            # downstream math (frame_interval, effective_rate) never divides by zero.
+            logger.warning(
+                "Video reports invalid FPS %r — defaulting to 30.0",
+                video_fps,
+            )
+            video_fps = 30.0
         frame_interval = max(1, int(video_fps / frame_rate))
 
         frames = []
@@ -348,15 +357,59 @@ class Phase1Pipeline:
     def fusion(self):
         def _create():
             from src.layer2.fusion import QualityAwareFusion
-            return QualityAwareFusion(
+
+            fusion_cfg = self.cfg["layer2a"]["fusion"]
+            model = QualityAwareFusion(
                 audio_dim=self.cfg["layer1"]["audio_events"]["embedding_dim"],
                 video_dim=self.cfg["layer1"]["visual_embeddings"]["output_dim"],
-                hidden_dim=self.cfg["layer2a"]["fusion"]["hidden_dim"],
-                num_heads=self.cfg["layer2a"]["fusion"]["num_heads"],
-                num_layers=self.cfg["layer2a"]["fusion"]["num_layers"],
-                dropout=self.cfg["layer2a"]["fusion"]["dropout"],
-                use_learned_gating=self.cfg["layer2a"]["fusion"]["use_learned_gating"],
+                hidden_dim=fusion_cfg["hidden_dim"],
+                num_heads=fusion_cfg["num_heads"],
+                num_layers=fusion_cfg["num_layers"],
+                dropout=fusion_cfg["dropout"],
+                use_learned_gating=fusion_cfg["use_learned_gating"],
             ).to(self.device)
+
+            # Optionally load trained gating/fusion weights.
+            # strict=False semantics are implemented manually: keys whose
+            # shapes don't match (e.g. a checkpoint trained with different
+            # embedding dims by scripts/train_gating.py) are skipped so the
+            # gating network + transformer still load, while mismatched input
+            # projections fall back to random init with a warning.
+            ckpt = fusion_cfg.get("checkpoint")
+            if ckpt:
+                ckpt_path = Path(ckpt)
+                if not ckpt_path.is_file():
+                    logger.warning(
+                        "Fusion checkpoint configured but not found: %s — "
+                        "using randomly initialized weights",
+                        ckpt_path,
+                    )
+                else:
+                    import torch
+
+                    state = torch.load(
+                        str(ckpt_path), map_location=self.device, weights_only=True
+                    )
+                    model_state = model.state_dict()
+                    compat = {
+                        k: v for k, v in state.items()
+                        if k in model_state and model_state[k].shape == v.shape
+                    }
+                    skipped = sorted(set(state) - set(compat))
+                    result = model.load_state_dict(compat, strict=False)
+                    if skipped:
+                        logger.warning(
+                            "Fusion checkpoint: skipped %d incompatible/unexpected "
+                            "key(s): %s",
+                            len(skipped), skipped,
+                        )
+                    if result.missing_keys:
+                        logger.warning(
+                            "Fusion checkpoint: %d missing key(s): %s",
+                            len(result.missing_keys), result.missing_keys,
+                        )
+                    logger.info("Loaded fusion checkpoint from %s", ckpt_path)
+            return model
         return self._get_or_create("_fusion", _create)
 
     @property

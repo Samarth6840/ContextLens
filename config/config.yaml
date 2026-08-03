@@ -48,6 +48,9 @@ layer2a:
     num_layers: 3
     dropout: 0.1
     use_learned_gating: True  # vs fixed heuristic
+    # Optional path to trained gating/fusion weights (output of
+    # scripts/train_gating.py). Empty = randomly initialized.
+    checkpoint: ""
 
 layer2b:
   # Evidence sources: weight + status (implemented | scaffolded).
