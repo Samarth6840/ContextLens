@@ -1,0 +1,30 @@
+# Training Configuration for Quality-Aware Gating Network
+
+training:
+  learning_rate: 1e-4
+  weight_decay: 1e-2
+  epochs: 100
+  warmup_epochs: 10
+  patience: 15  # early stopping
+
+  # Loss weights
+  lambda_consistency: 1.0
+  lambda_quality: 0.5
+  lambda_entropy: 0.1
+
+  # Model architecture
+  fusion:
+    audio_dim: 1024
+    video_dim: 1024
+    hidden_dim: 512
+    num_heads: 8
+    num_layers: 3
+    dropout: 0.1
+
+  # Data splits
+  train_split: 0.7
+  val_split: 0.15
+
+  # Checkpointing
+  save_dir: "./outputs/training"
+  save_every: 10

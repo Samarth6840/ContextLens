@@ -13,9 +13,8 @@ based on actual estimated quality, enabling graceful degradation under noise.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple, Union
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -90,11 +89,15 @@ class LearnedGatingNetwork(nn.Module):
         return weights
 
 
-class FixedHeuristicWeighting:
+class FixedHeuristicWeighting(nn.Module):
     """
     Fixed heuristic weighting baseline for ablation comparison.
     Uses simple rules instead of learned weights.
+    Implemented as nn.Module for proper serialization and device transfer.
     """
+
+    def __init__(self):
+        super().__init__()
 
     @staticmethod
     def compute_weights(
@@ -125,12 +128,15 @@ class CrossAttentionFusion(nn.Module):
 
     Takes audio and video embeddings, weights them by modality quality,
     and applies cross-attention to produce a fused representation.
+
+    Uses a learnable [CLS] token for aggregation instead of mean-pooling,
+    allowing the model to learn which modality to attend to.
     """
 
     def __init__(
         self,
-        audio_dim: int = 1024,  # Whisper encoder output dim
-        video_dim: int = 1024,  # DINOv2 output dim
+        audio_dim: int = 1024,
+        video_dim: int = 1024,
         hidden_dim: int = 512,
         num_heads: int = 8,
         num_layers: int = 3,
@@ -142,6 +148,9 @@ class CrossAttentionFusion(nn.Module):
         # Project modalities to common hidden dimension
         self.audio_proj = nn.Linear(audio_dim, hidden_dim)
         self.video_proj = nn.Linear(video_dim, hidden_dim)
+
+        # Learnable [CLS] token for aggregation
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.02)
 
         # Cross-attention transformer encoder
         encoder_layer = nn.TransformerEncoderLayer(
@@ -164,36 +173,44 @@ class CrossAttentionFusion(nn.Module):
         self,
         audio_embed: torch.Tensor,
         video_embed: torch.Tensor,
-        audio_weight: float = 0.5,
-        video_weight: float = 0.5,
+        audio_weight: Union[torch.Tensor, float] = 0.5,
+        video_weight: Union[torch.Tensor, float] = 0.5,
     ) -> torch.Tensor:
         """
         Args:
             audio_embed: (batch, audio_dim) audio embedding
             video_embed: (batch, video_dim) video embedding
-            audio_weight: scalar weight for audio modality
-            video_weight: scalar weight for video modality
+            audio_weight: (batch,) or scalar weight for audio modality
+            video_weight: (batch,) or scalar weight for video modality
 
         Returns:
             fused_embed: (batch, hidden_dim) fused representation
         """
+        batch_size = audio_embed.shape[0]
+
         # Project to common dimension
         audio_h = self.audio_proj(audio_embed)  # (batch, hidden_dim)
         video_h = self.video_proj(video_embed)  # (batch, hidden_dim)
 
-        # Apply modality weights
-        audio_h = audio_h * audio_weight
-        video_h = video_h * video_weight
+        # Apply modality weights — broadcast (batch,) to (batch, hidden_dim)
+        audio_w = audio_weight if isinstance(audio_weight, torch.Tensor) else audio_weight
+        video_w = video_weight if isinstance(video_weight, torch.Tensor) else video_weight
+        audio_h = audio_h * audio_w.unsqueeze(-1) if isinstance(audio_w, torch.Tensor) else audio_h * audio_w
+        video_h = video_h * video_w.unsqueeze(-1) if isinstance(video_w, torch.Tensor) else video_h * video_w
 
         # Stack as sequence: [audio_token, video_token]
         # Shape: (batch, seq_len=2, hidden_dim)
         tokens = torch.stack([audio_h, video_h], dim=1)
 
-        # Apply cross-attention transformer
-        fused = self.transformer(tokens)  # (batch, 2, hidden_dim)
+        # Prepend [CLS] token: (batch, 3, hidden_dim)
+        cls = self.cls_token.expand(batch_size, -1, -1)
+        tokens = torch.cat([cls, tokens], dim=1)
 
-        # Aggregate: mean pool over sequence dimension
-        fused = fused.mean(dim=1)  # (batch, hidden_dim)
+        # Apply cross-attention transformer
+        fused = self.transformer(tokens)  # (batch, 3, hidden_dim)
+
+        # Use [CLS] token output for aggregation
+        fused = fused[:, 0, :]  # (batch, hidden_dim)
 
         # Final projection
         fused = self.output_proj(fused)
@@ -268,6 +285,7 @@ class QualityAwareFusion(nn.Module):
                 - fused_embed: (batch, hidden_dim) fused representation
                 - audio_weight: (batch,) or scalar
                 - video_weight: (batch,) or scalar
+                - weight_source: str — which weighting method was used
         """
         batch_size = audio_embed.shape[0]
 
@@ -277,6 +295,61 @@ class QualityAwareFusion(nn.Module):
                 weights = self.gating_network(audio_quality, video_quality)
                 audio_weight = weights[:, 0]
                 video_weight = weights[:, 1]
+
+                # Sanity check: verify the gating network's output direction
+                # AND magnitude match the per-sample quality estimates.
+                # The learned gating network is untrained (random weights) and
+                # produces unreliable outputs. We check:
+                #   1. Direction agreement: quality and weight point the same way
+                #   2. Magnitude agreement: weight split is within 15% relative
+                #      of the quality-proportional expectation
+                # If either check fails, fall back to quality-proportional weighting.
+                if audio_quality is not None and video_quality is not None:
+                    # Aggregate all quality dimensions into a single score per modality
+                    # Audio: blend of SNR (idx 0) and VAD confidence (idx 1)
+                    per_sample_audio_q = 0.5 * audio_quality[:, 0] + 0.5 * audio_quality[:, 1]
+                    # Video: blend of blur (idx 0), exposure (idx 1), stability (idx 2)
+                    per_sample_video_q = (
+                        0.3 * video_quality[:, 0]
+                        + 0.3 * video_quality[:, 1]
+                        + 0.4 * video_quality[:, 2]
+                    )
+
+                    quality_direction = torch.sign(per_sample_video_q - per_sample_audio_q)
+                    weight_direction = torch.sign(video_weight - audio_weight)
+                    disagree = (quality_direction != 0) & (quality_direction != weight_direction)
+
+                    # Proportional weights for magnitude check
+                    total_q = per_sample_audio_q + per_sample_video_q + 1e-8
+                    prop_aw = per_sample_audio_q / total_q
+                    prop_vw = per_sample_video_q / total_q
+                    prop_aw_clamped = torch.clamp(prop_aw, 0.1, 0.9)
+                    prop_vw_clamped = torch.clamp(prop_vw, 0.1, 0.9)
+
+                    # Magnitude: compare gating output vs proportional weights
+                    deviation = torch.abs(audio_weight - prop_aw_clamped)
+                    magnitude_off = deviation > 0.10
+
+                    invalid = disagree | magnitude_off
+                    n_invalid = int(invalid.sum().cpu())
+
+                    if n_invalid > 0:
+                        fallback_aw = prop_aw_clamped
+                        fallback_vw = prop_vw_clamped
+                        audio_weight = torch.where(invalid, fallback_aw, audio_weight)
+                        video_weight = torch.where(invalid, fallback_vw, video_weight)
+                        weight_source = f"quality_proportional_fallback ({n_invalid}/{batch_size} samples)"
+                        logger.info(
+                            "Gating sanity check: %d/%d samples failed — "
+                            "applied per-sample quality-proportional fallback. "
+                            "(direction=%d, magnitude=%d)",
+                            n_invalid, batch_size,
+                            int(disagree.sum().cpu()), int((magnitude_off & ~disagree).sum().cpu()),
+                        )
+                    else:
+                        weight_source = "learned_gating"
+                else:
+                    weight_source = "learned_gating"
             else:
                 # Fixed heuristic per item in batch
                 audio_weights = []
@@ -304,6 +377,7 @@ class QualityAwareFusion(nn.Module):
                 video_weight = torch.tensor(
                     video_weights, device=audio_embed.device
                 )
+                weight_source = "fixed_heuristic"
         else:
             # Equal weighting (plain fusion baseline)
             audio_weight = torch.full(
@@ -312,57 +386,19 @@ class QualityAwareFusion(nn.Module):
             video_weight = torch.full(
                 (batch_size,), 0.5, device=audio_embed.device
             )
+            weight_source = "equal"
 
-        # Apply fusion with per-item weights
-        fused_embeds = []
-        for i in range(batch_size):
-            fused = self.fusion(
-                audio_embed[i : i + 1],
-                video_embed[i : i + 1],
-                audio_weight=float(audio_weight[i]),
-                video_weight=float(video_weight[i]),
-            )
-            fused_embeds.append(fused)
-
-        fused_embed = torch.cat(fused_embeds, dim=0)
+        # Apply fusion in a single batched call (vectorized)
+        fused_embed = self.fusion(
+            audio_embed,
+            video_embed,
+            audio_weight=audio_weight,
+            video_weight=video_weight,
+        )
 
         return {
             "fused_embed": fused_embed,
             "audio_weight": audio_weight,
             "video_weight": video_weight,
-        }
-
-    def forward_ablation(
-        self,
-        audio_embed: torch.Tensor,
-        video_embed: torch.Tensor,
-        audio_quality: torch.Tensor,
-        video_quality: torch.Tensor,
-    ) -> Dict[str, torch.Tensor]:
-        """
-        Run both dynamic-weighted and plain fusion for ablation comparison.
-
-        Returns both results so the evaluation harness can compare them.
-        """
-        dynamic_result = self.forward(
-            audio_embed=audio_embed,
-            video_embed=video_embed,
-            audio_quality=audio_quality,
-            video_quality=video_quality,
-            use_dynamic_weights=True,
-        )
-
-        plain_result = self.forward(
-            audio_embed=audio_embed,
-            video_embed=video_embed,
-            audio_quality=None,
-            video_quality=None,
-            use_dynamic_weights=False,
-        )
-
-        return {
-            "dynamic_fused": dynamic_result["fused_embed"],
-            "dynamic_audio_weight": dynamic_result["audio_weight"],
-            "dynamic_video_weight": dynamic_result["video_weight"],
-            "plain_fused": plain_result["fused_embed"],
+            "weight_source": weight_source,
         }

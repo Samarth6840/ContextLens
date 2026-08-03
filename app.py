@@ -4,20 +4,36 @@ Upload a video and see the pipeline results in real time.
 """
 
 import os
+import signal
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
-import cv2
-import numpy as np
+# Force torchvision transforms to fully initialize before Streamlit's import
+# hooks can create a circular-import situation. Streamlit + ultralytics +
+# torchvision have an interaction where torchvision.transforms can end up
+# as a partially initialized module, causing:
+#   "cannot import name 'InterpolationMode' from partially initialized module"
+import torchvision.transforms  # noqa: F401
+
 import streamlit as st
 import torch
-from PIL import Image
 
 # Ensure src is on path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.pipeline import Phase1Pipeline, VideoProcessor
+from src.pipeline import Phase1Pipeline
+
+# Suppress Streamlit's SIGINT handler during interpreter shutdown.
+# Streamlit registers a signal handler at import time that tries to stop
+# its server. During Python's atexit phase (threading cleanup), the asyncio
+# event loop is already closed, so Streamlit's handler crashes with
+# "RuntimeError: Event loop is closed". We restore the default handler
+# after Streamlit's import so Ctrl+C during shutdown is handled cleanly.
+_original_sigint = signal.getsignal(signal.SIGINT)
+if threading.current_thread() is threading.main_thread():
+    signal.signal(signal.SIGINT, signal.default_int_handler)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
@@ -41,9 +57,9 @@ st.sidebar.header("⚙️ Settings")
 
 device_choice = st.sidebar.radio(
     "Device",
-    options=["auto", "cpu", "cuda"],
+    options=["auto", "cpu", "mps"],
     index=0,
-    help="'auto' uses GPU if available, else CPU.",
+    help="'auto' uses MPS (Apple Silicon GPU) if available, else CPU.",
 )
 
 frame_rate = st.sidebar.slider(
@@ -67,7 +83,12 @@ show_raw = st.sidebar.checkbox(
 def load_pipeline(device: str):
     """Load the Phase 1 pipeline (cached across reruns)."""
     if device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        if torch.backends.mps.is_available():
+            device = "mps"
+        elif torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
     st.sidebar.info(f"Pipeline device: {device}")
     return Phase1Pipeline(device_override=device)
 
@@ -88,186 +109,197 @@ if uploaded_file is not None:
         tmp.write(uploaded_file.read())
         video_path = tmp.name
 
-    st.video(video_path)
+    # Read video into memory so st.video survives temp file cleanup
+    with open(video_path, "rb") as f:
+        video_bytes = f.read()
 
-    # ── Run pipeline ─────────────────────────────────────────────────────────
+    # ── Run pipeline (wrapped in try/finally for temp file cleanup) ──────────
+    try:
+        st.video(video_bytes)
+        # ── Run pipeline ─────────────────────────────────────────────────────
 
-    if st.button("🚀 Run Pipeline", type="primary"):
-        with st.spinner("Running Phase 1 pipeline... This may take a while."):
-            try:
-                pipeline = load_pipeline(device_choice)
-                result = pipeline.process_video(video_path)
-            except Exception as e:
-                st.error(f"Pipeline error: {e}")
+        if st.button("🚀 Run Pipeline", type="primary"):
+            with st.spinner("Running Phase 1 pipeline... This may take a while."):
+                try:
+                    pipeline = load_pipeline(device_choice)
+                    result = pipeline.process_video(video_path, frame_rate=frame_rate)
+                except Exception as e:
+                    st.error(f"Pipeline error: {e}")
+                    st.stop()
+
+            # ── Display results ──────────────────────────────────────────────
+
+            if "error" in result:
+                st.error(result["error"])
                 st.stop()
 
-        # ── Display results ──────────────────────────────────────────────────
+            st.success("Pipeline completed successfully!")
 
-        if "error" in result:
-            st.error(result["error"])
-            st.stop()
+            # Layout: two columns
+            col1, col2 = st.columns(2)
 
-        st.success("Pipeline completed successfully!")
+            # ── Column 1: Layer 1 results ────────────────────────────────────
 
-        # Layout: two columns
-        col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("📹 Layer 1 — Multimodal Understanding")
 
-        # ── Column 1: Layer 1 results ────────────────────────────────────────
+                # Video info
+                st.markdown(
+                    f"**Video:** {uploaded_file.name}  "
+                    f"| **Frames:** {result['num_frames']}  "
+                    f"| **FPS:** {result['video_fps']:.1f}  "
+                    f"| **Audio:** {'✅' if result['has_audio'] else '❌'}"
+                )
 
-        with col1:
-            st.subheader("📹 Layer 1 — Multimodal Understanding")
+                # Detections
+                l1 = result["layer1"]
+                total_scene_objects = sum(
+                    len(dets) for dets in l1["scene_object_detections"]
+                )
+                total_logos = sum(
+                    len(dets) for dets in l1["logo_detections"]
+                )
+                st.metric("Logo / brand detections (total)", total_logos)
+                st.metric("Scene objects detected (total)", total_scene_objects)
 
-            # Video info
-            st.markdown(
-                f"**Video:** {uploaded_file.name}  "
-                f"| **Frames:** {result['num_frames']}  "
-                f"| **FPS:** {result['video_fps']:.1f}  "
-                f"| **Audio:** {'✅' if result['has_audio'] else '❌'}"
-            )
+                if total_logos > 0:
+                    st.markdown("**Logo detections per frame:**")
+                    for i, dets in enumerate(l1["logo_detections"]):
+                        if dets:
+                            labels = ", ".join(
+                                f"{d['class_name']} ({d['confidence']:.2f})"
+                                for d in dets
+                            )
+                            st.markdown(f"  • Frame {i}: {labels}")
 
-            # Detections
-            l1 = result["layer1"]
-            total_detections = sum(
-                len(dets) for dets in l1["detections"]
-            )
-            st.metric("Brand detections (total)", total_detections)
+                # OCR
+                total_ocr = sum(len(ocr) for ocr in l1["ocr_results"])
+                st.metric("OCR texts found", total_ocr)
 
-            if total_detections > 0:
-                st.markdown("**Detected brands per frame:**")
-                for i, dets in enumerate(l1["detections"]):
-                    if dets:
-                        labels = ", ".join(
-                            f"{d['class_name']} ({d['confidence']:.2f})"
-                            for d in dets
+                if total_ocr > 0:
+                    st.markdown("**OCR results (first 5 frames):**")
+                    for i, ocrs in enumerate(l1["ocr_results"][:5]):
+                        if ocrs:
+                            texts = ", ".join(
+                                f"'{r['text']}' ({r['confidence']:.2f})"
+                                for r in ocrs
+                            )
+                            st.markdown(f"  • Frame {i}: {texts}")
+
+                # Transcript
+                if l1["transcript"]:
+                    st.markdown("**Transcript:**")
+                    st.text(l1["transcript"][:500])
+                else:
+                    st.info("No transcript (no audio or ASR not run).")
+
+                # Brand mentions
+                if l1["brand_mentions"]:
+                    st.markdown("**Brand mentions in speech:**")
+                    for m in l1["brand_mentions"]:
+                        st.markdown(f"  • **{m['brand']}** — `...{m['text_snippet']}...`")
+
+                # Audio events
+                if l1["audio_events"]:
+                    st.markdown("**Audio events:**")
+                    for ev in l1["audio_events"][:10]:
+                        st.markdown(
+                            f"  • {ev['event']} ({ev['confidence']:.2f})"
                         )
-                        st.markdown(f"  • Frame {i}: {labels}")
 
-            # OCR
-            total_ocr = sum(len(ocr) for ocr in l1["ocr_results"])
-            st.metric("OCR texts found", total_ocr)
+            # ── Column 2: Layer 2 results ────────────────────────────────────
 
-            if total_ocr > 0:
-                st.markdown("**OCR results (first 5 frames):**")
-                for i, ocrs in enumerate(l1["ocr_results"][:5]):
-                    if ocrs:
-                        texts = ", ".join(
-                            f"'{r['text']}' ({r['confidence']:.2f})"
-                            for r in ocrs
-                        )
-                        st.markdown(f"  • Frame {i}: {texts}")
+            with col2:
+                st.subheader("🔬 Layer 2 — Brand & Context Intelligence")
 
-            # Transcript
-            if l1["transcript"]:
-                st.markdown("**Transcript:**")
-                st.text(l1["transcript"][:500])
-            else:
-                st.info("No transcript (no audio or ASR not run).")
+                # Quality estimates
+                l2a = result["layer2a"]
+                st.markdown("**Modality Quality Estimates:**")
 
-            # Brand mentions
-            if l1["brand_mentions"]:
-                st.markdown("**Brand mentions in speech:**")
-                for m in l1["brand_mentions"]:
-                    st.markdown(f"  • **{m['brand']}** — `...{m['text_snippet']}...`")
+                aq = l2a["audio_quality"]
+                vq = l2a["video_quality"]
 
-            # Audio events
-            if l1["audio_events"]:
-                st.markdown("**Audio events:**")
-                for ev in l1["audio_events"][:10]:
-                    st.markdown(
-                        f"  • {ev['event']} ({ev['confidence']:.2f})"
+                # Audio quality
+                st.markdown("**Audio:**")
+                st.markdown(
+                    f"  • SNR: {aq.get('snr_db', 0):.1f} dB  "
+                    f"| VAD: {aq.get('vad_confidence', 0):.2f}  "
+                    f"| Quality: {aq.get('quality_score', 0):.2f}"
+                )
+
+                # Video quality
+                st.markdown("**Video:**")
+                st.markdown(
+                    f"  • Blur: {vq.get('mean_blur_score', 0):.1f}  "
+                    f"| Exposure: {vq.get('mean_pixel', 0):.0f}  "
+                    f"| Stability: {vq.get('detection_stability', 0):.2f}  "
+                    f"| Quality: {vq.get('quality_score', 0):.2f}"
+                )
+
+                # Fusion weights
+                st.markdown("**Fusion Weights (Layer 2a):**")
+                aw = l2a["fusion_audio_weight"]
+                vw = l2a["fusion_video_weight"]
+                weight_source = l2a.get("weight_source", "unknown")
+                st.markdown(f"  • Audio weight: {aw:.2f}")
+                st.markdown(f"  • Video weight: {vw:.2f}")
+                st.caption(f"Weighting method: {weight_source}")
+
+                # Visual bar
+                st.progress(
+                    int(aw * 100),
+                    text=f"Audio weight: {aw:.0%}",
+                )
+                st.progress(
+                    int(vw * 100),
+                    text=f"Video weight: {vw:.0%}",
+                )
+
+                # Confidence
+                l2b = result["layer2b"]
+                st.markdown("---")
+                st.markdown("**Evidence-Based Confidence (Layer 2b):**")
+
+                conf = l2b["confidence"]
+                status = l2b["status"]
+                is_confident = l2b["is_confident"]
+
+                # Big confidence display
+                if is_confident:
+                    st.metric(
+                        "Confidence",
+                        f"{conf:.1%}",
+                        delta="Confident ✅",
+                        delta_color="normal",
+                    )
+                else:
+                    st.metric(
+                        "Confidence",
+                        f"{conf:.1%}",
+                        delta="No confident evidence ⚠️",
+                        delta_color="inverse",
                     )
 
-        # ── Column 2: Layer 2 results ────────────────────────────────────────
+                # Evidence breakdown
+                st.markdown("**Evidence breakdown:**")
+                breakdown = l2b["evidence_breakdown"]
+                for ev_type, ev_data in breakdown.items():
+                    contrib = ev_data["contribution"]
+                    st.markdown(
+                        f"  • **{ev_type}**: "
+                        f"strength={ev_data['strength']:.2f}, "
+                        f"weight={ev_data['modulated_weight']:.2f}, "
+                        f"contribution={contrib:.2f}"
+                    )
 
-        with col2:
-            st.subheader("🔬 Layer 2 — Brand & Context Intelligence")
+            # ── Raw JSON ─────────────────────────────────────────────────────
 
-            # Quality estimates
-            l2a = result["layer2a"]
-            st.markdown("**Modality Quality Estimates:**")
+            if show_raw:
+                st.subheader("📄 Raw Pipeline Output")
+                st.json(result)
 
-            aq = l2a["audio_quality"]
-            vq = l2a["video_quality"]
-
-            # Audio quality
-            st.markdown("**Audio:**")
-            st.markdown(
-                f"  • SNR: {aq.get('snr_db', 0):.1f} dB  "
-                f"| VAD: {aq.get('vad_confidence', 0):.2f}  "
-                f"| Quality: {aq.get('quality_score', 0):.2f}"
-            )
-
-            # Video quality
-            st.markdown("**Video:**")
-            st.markdown(
-                f"  • Blur: {vq.get('mean_blur_score', 0):.1f}  "
-                f"| Exposure: {vq.get('mean_pixel', 0):.0f}  "
-                f"| Stability: {vq.get('detection_stability', 0):.2f}  "
-                f"| Quality: {vq.get('quality_score', 0):.2f}"
-            )
-
-            # Fusion weights
-            st.markdown("**Fusion Weights (Layer 2a):**")
-            aw = l2a["fusion_audio_weight"]
-            vw = l2a["fusion_video_weight"]
-            st.markdown(f"  • Audio weight: {aw:.2f}")
-            st.markdown(f"  • Video weight: {vw:.2f}")
-
-            # Visual bar
-            st.progress(
-                int(aw * 100),
-                text=f"Audio weight: {aw:.0%}",
-            )
-            st.progress(
-                int(vw * 100),
-                text=f"Video weight: {vw:.0%}",
-            )
-
-            # Confidence
-            l2b = result["layer2b"]
-            st.markdown("---")
-            st.markdown("**Evidence-Based Confidence (Layer 2b):**")
-
-            conf = l2b["confidence"]
-            status = l2b["status"]
-            is_confident = l2b["is_confident"]
-
-            # Big confidence display
-            if is_confident:
-                st.metric(
-                    "Confidence",
-                    f"{conf:.1%}",
-                    delta="Confident ✅",
-                    delta_color="normal",
-                )
-            else:
-                st.metric(
-                    "Confidence",
-                    f"{conf:.1%}",
-                    delta="No confident evidence ⚠️",
-                    delta_color="inverse",
-                )
-
-            # Evidence breakdown
-            st.markdown("**Evidence breakdown:**")
-            breakdown = l2b["evidence_breakdown"]
-            for ev_type, ev_data in breakdown.items():
-                contrib = ev_data["contribution"]
-                st.markdown(
-                    f"  • **{ev_type}**: "
-                    f"strength={ev_data['strength']:.2f}, "
-                    f"weight={ev_data['modulated_weight']:.2f}, "
-                    f"contribution={contrib:.2f}"
-                )
-
-        # ── Raw JSON ─────────────────────────────────────────────────────────
-
-        if show_raw:
-            st.subheader("📄 Raw Pipeline Output")
-            st.json(result)
-
-        # ── Cleanup ──────────────────────────────────────────────────────────
-
+    finally:
+        # ── Cleanup temp file (always runs, even on error/st.stop()) ──────────
         os.unlink(video_path)
 
 else:
@@ -278,8 +310,9 @@ else:
     st.markdown("### How it works")
     st.markdown(
         """
-        1. **Layer 1** extracts frames, runs YOLO logo detection, DINOv2 visual
-           embeddings, PaddleOCR, Whisper ASR, and BEATs audio events.
+        1. **Layer 1** extracts frames, runs YOLO-World logo/brand detection,
+           YOLO scene object detection, DINOv2 visual embeddings, PaddleOCR,
+           Whisper ASR, and BEATs audio events.
         2. **Layer 2a** estimates per-modality quality (SNR, blur, exposure,
            detection stability), then fuses audio + video embeddings via a
            learned gating network and cross-attention transformer.

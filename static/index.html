@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ADSCENE — Raw Video Intelligence</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+  <!-- ── Navigation ─────────────────────────────────────────── -->
+  <header class="nav">
+    <div class="nav-inner">
+      <a class="nav-logo" href="#/">ADSCENE</a>
+      <nav class="nav-links">
+        <a class="nav-link" href="#/analyse">ANALYSE</a>
+        <a class="nav-link" href="#/pipeline">PIPELINE</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app">
+
+    <!-- ── Landing ──────────────────────────────────────────── -->
+    <section id="view-landing" class="view view-landing">
+      <div class="landing-inner">
+        <h1 class="landing-logo">ADSCENE</h1>
+        <p class="landing-sub">
+          RAW VIDEO INTELLIGENCE.<br>
+          UNCOVER BRAND SPONSORSHIP OPPORTUNITIES<br>
+          FROM YOUR ARCHIVES<br>
+          USING AI-DRIVEN SCENE ANALYSIS.
+        </p>
+        <div class="landing-actions">
+          <a class="btn btn-primary" href="#/analyse">ANALYSE VIDEO</a>
+          <a class="btn" href="#/pipeline">RUN PIPELINE</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Analyse ──────────────────────────────────────────── -->
+    <section id="view-analyse" class="view">
+      <div class="container analyse-grid">
+        <div class="analyse-left">
+          <h2 class="page-title">ANALYSE</h2>
+          <p class="page-copy">
+            UPLOAD A VIDEO FOR INTELLIGENCE EXTRACTION.<br>
+            THE SYSTEM WILL PARSE AUDIO AND VISUAL SIGNALS<br>
+            TO DETECT SCENES, OBJECTS,<br>
+            AND BRAND OPPORTUNITIES.
+          </p>
+        </div>
+        <div class="analyse-right">
+          <form id="analyse-form" class="analyse-form">
+            <div class="field">
+              <label class="field-label">VIDEO FILE <span>(MP4 / MOV / WEBM — MAX 200 MB)</span></label>
+              <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Select video file">
+                <span>DRAG &amp; DROP OR CLICK TO SELECT</span>
+                <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden>
+              </div>
+              <div id="file-status" class="file-status"></div>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="video-title">VIDEO TITLE</label>
+              <input id="video-title" class="input" type="text" placeholder="VIDEO TITLE" autocomplete="off">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="video-creator">CREATOR</label>
+              <input id="video-creator" class="input" type="text" placeholder="CREATOR NAME" autocomplete="off">
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="video-duration">DURATION <span>OPTIONAL — AUTO-DETECTED FROM FILE</span></label>
+              <input id="video-duration" class="input" type="text" placeholder="DURATION IN SECONDS" autocomplete="off">
+            </div>
+
+            <button id="btn-extract" class="btn btn-primary btn-block" type="submit">START EXTRACTION</button>
+            <div id="analyse-status" class="status-line" hidden></div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Pipeline Dashboard ───────────────────────────────── -->
+    <section id="view-pipeline" class="view">
+      <div class="container" id="pipeline-root"></div>
+    </section>
+
+    <!-- ── Outreach ─────────────────────────────────────────── -->
+    <section id="view-outreach" class="view">
+      <div class="container">
+        <div id="outreach-root" class="outreach-grid"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

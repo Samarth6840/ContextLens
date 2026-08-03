@@ -1,41 +1,27 @@
 # Phase 1 Dependencies
 # Layer 1 - Multimodal Understanding
 torch>=2.1.0
-torchvision>=0.16.0
+torchvision>=0.16.0  # required by app.py (circular import guard)
 transformers>=4.36.0
 opencv-python>=4.8.0
 Pillow>=10.0.0
 numpy>=1.24.0
 
-# Object/Logo Detection
-# RF-DETR or YOLO26 - using torchvision's detection models as base
-# YOLO via ultralytics
-ultralytics>=8.0.0
+# Object/Logo Detection (YOLO via ultralytics)
+# YOLO-World (yolov8s-worldv2.pt + set_classes) requires >=8.0.100
+ultralytics>=8.0.100
 
-# Visual Embeddings - DINOv3
-# Comes via transformers (facebook/dinov2)
-
-# OCR
+# OCR (PaddleOCR 3.7.0+ API required)
 paddlepaddle>=2.6.0
-paddleocr>=2.7.0
+paddleocr>=3.7.0
 
 # Speech-to-Text
-openai-whisper>=20231117
-tiktoken>=0.12.0
-
-# Audio Events
-# BEATs - custom implementation, requires fairseq
-fairseq>=0.12.2
+mlx-whisper>=0.4.0  # Apple Silicon GPU acceleration via Metal (primary on MPS)
+faster-whisper>=1.0.0  # INT8-quantized Whisper for CPU efficiency (fallback)
+openai-whisper>=20231117  # kept as final fallback
 
 # Layer 2 - Quality-aware Fusion
 scikit-learn>=1.3.0
-scipy>=1.11.0
-
-# Evaluation
-matplotlib>=3.7.0
-seaborn>=0.13.0
-pandas>=2.0.0
-tqdm>=4.65.0
 
 # Audio processing
 librosa>=0.10.0
@@ -47,7 +33,12 @@ pytest-cov>=4.1.0
 
 # Utilities
 pyyaml>=6.0
-einops>=0.7.0
+
+# Audio events (BEATs) — torchaudio for audio feature extraction
+torchaudio>=2.1.0
 
 # Streamlit UI
 streamlit>=1.28.0
+
+# ADSCENE web UI (Flask API server + static frontend)
+flask>=3.0.0

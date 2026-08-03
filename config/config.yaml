@@ -2,61 +2,46 @@
 # Context-Aware Multimodal Brand Collaboration Recommendation System
 # Phase 1: Layer 1 + Layer 2a/2b
 
-paths:
-  model_cache: "./models"
-  data_root: "./data"
-  output_dir: "./outputs"
-  test_fixtures: "./tests/fixtures"
-
 layer1:
   object_detection:
-    model: "yolov8x.pt"  # YOLOv8x — best available; swap to YOLO26 when released
+    model: "yolov8x.pt"  # YOLOv8x — generic scene objects (COCO classes)
     confidence_threshold: 0.25
     iou_threshold: 0.45
-    device: "cuda"  # fallback to cpu if unavailable
+
+  logo_detection:
+    backend: "yolo_world"  # zero-shot logo detection (YOLO-World)
+    model: "yolov8s-worldv2.pt"
+    confidence_threshold: 0.10  # lowered from 0.30: YOLO-World's zero-shot confidence for abstract "logo" queries maxes out at ~0.27 on real video frames; 0.10 captures genuine text/logo detections while excluding noise floor (0.01-0.03)
+    sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
+    max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
+    text_queries:
+      - "Samsung logo"
+      - "brand logo"
+      - "company logo"
+      - "text logo"
+      - "product logo"
 
   visual_embeddings:
-    model: "facebook/dinov2-large"  # DINOv3 equivalent
-    output_dim: 1024
-    device: "cuda"
+    model: "facebook/dinov2-base"
+    output_dim: 768
 
   ocr:
-    model: "paddleocr"  # PaddleOCR
     lang: "en"
     use_angle_cls: True
     det_db_thresh: 0.3
     rec_batch_num: 6
+    max_frames: 30  # max frames to run OCR on (sampled uniformly from detections)
 
   speech_to_text:
-    model: "large-v3"  # Whisper large-v3
-    device: "cuda"
-    compute_dtype: "float16"
-    language: null  # auto-detect
+    model: "medium"
+    compute_dtype: "int8"  # faster-whisper INT8 quantization (CPU-efficient)
 
   audio_events:
-    model: "beats"  # BEATs
     checkpoint: "BEATs_iter3_plus_AS2M.pt"
-    device: "cuda"
     sample_rate: 16000
+    embedding_dim: 256  # 128 mel bins × 2 stats (mean + std)
 
 layer2a:
-  modality_weights:
-    initial_video_weight: 0.5
-    initial_audio_weight: 0.5
-    min_weight: 0.1
-    max_weight: 0.9
-
-  quality_estimation:
-    # Audio quality signals
-    audio_snr_threshold: 15.0  # dB
-    audio_vad_confidence_threshold: 0.6
-
-    # Video quality signals
-    blur_threshold: 100.0  # Laplacian variance
-    exposure_low: 40.0     # mean pixel value
-    exposure_high: 210.0   # mean pixel value
-    detection_confidence_variance_window: 10  # frames
-
   fusion:
     hidden_dim: 512
     num_heads: 8
@@ -65,34 +50,34 @@ layer2a:
     use_learned_gating: True  # vs fixed heuristic
 
 layer2b:
-  evidence_weights:
-    logo_detected: 0.45
-    speech_mention: 0.20
-    ocr_hit: 0.15
-    scene_context: 0.10
-    product_retrieval: 0.10
+  # Evidence sources: weight + status (implemented | scaffolded).
+  # Scaffolded sources contribute zero and are excluded from scoring;
+  # implemented-source weights are renormalized to sum to 1.0 so
+  # that strong evidence from the available sources can reach a fair
+  # confidence score.
+  evidence_sources:
+    logo_detected:
+      weight: 0.45
+      status: implemented  # YOLO-World logo detector
+    speech_mention:
+      weight: 0.20
+      status: scaffolded   # requires Layer 2c temporal/intent linking
+    ocr_hit:
+      weight: 0.15
+      status: implemented  # PaddleOCR text extraction
+    scene_context:
+      weight: 0.10
+      status: implemented  # BEATs audio event detector (confirmed working)
+    product_retrieval:
+      weight: 0.10
+      status: scaffolded   # requires product-embedding retrieval
 
   aggregation: "weighted_sum"  # weighted_sum | learned_calibration | noisy_or
-  min_evidence_threshold: 0.30
-  calibration:
-    n_bins: 10
-    use_reliability_diagrams: True
+  min_evidence_threshold: 0.55
 
 evaluation:
   audio_sample_rate: 16000
   video_frame_rate: 1  # frames per second to sample
+  max_frames: 300  # absolute maximum frames loaded (prevents OOM on long videos)
+  max_audio_seconds: 600  # truncate audio beyond this (prevents OOM from 9+ GiB buffers)
   batch_size: 8
-  num_workers: 4
-  seed: 42
-  train_split: 0.70
-  val_split: 0.15
-  test_split: 0.15
-
-  # Fusion ablation
-  ablation:
-    compare_modalities: True
-    dynamic_weighting: True
-    plain_fusion: True
-    synthetic_noise_levels: [0.0, 0.1, 0.3, 0.5]
-    synthetic_blur_levels: [0, 5, 15, 30]
-    success_bar_relative_drop: 10.0  # percent

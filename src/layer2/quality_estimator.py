@@ -9,7 +9,7 @@ All estimates are computed from actual signal properties — no hardcoded values
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import cv2
 import numpy as np

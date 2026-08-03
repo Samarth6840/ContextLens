@@ -3,10 +3,10 @@ Model download script for Phase 1.
 Downloads real pretrained model weights — no stubs or placeholders.
 
 Models:
-- YOLO11: downloaded on first use by ultralytics (auto-download)
+- YOLOv8x: downloaded on first use by ultralytics (auto-download)
 - DINOv2: from HuggingFace transformers
 - PaddleOCR: downloaded on first use by PaddleOCR (auto-download)
-- Whisper large-v3: downloaded on first use by openai-whisper (auto-download)
+- Whisper medium: primary ASR model (mlx-whisper / faster-whisper / openai-whisper fallback chain)
 - BEATs: requires manual download from Microsoft UNILM repository
 
 This script triggers the auto-downloads and verifies they work.
@@ -36,19 +36,19 @@ def download_dinov2():
     """Trigger DINOv2 model download from HuggingFace."""
     logger.info("Downloading DINOv2 model from HuggingFace...")
     from transformers import AutoImageProcessor, AutoModel
-    model_name = "facebook/dinov2-large"
-    processor = AutoImageProcessor.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
+    model_name = "facebook/dinov2-base"  # matches config.yaml
+    AutoImageProcessor.from_pretrained(model_name)
+    AutoModel.from_pretrained(model_name)
     logger.info(f"DINOv2 model '{model_name}' downloaded successfully.")
     return True
 
 
 def download_whisper():
-    """Trigger Whisper model download."""
-    logger.info("Downloading Whisper large-v3...")
+    """Trigger Whisper model download (openai-whisper fallback)."""
+    logger.info("Downloading Whisper medium (openai-whisper fallback)...")
     import whisper
-    model = whisper.load_model("large-v3")
-    logger.info("Whisper large-v3 downloaded successfully.")
+    whisper.load_model("medium")
+    logger.info("Whisper medium downloaded successfully.")
     return True
 
 
@@ -56,7 +56,7 @@ def download_paddleocr():
     """Trigger PaddleOCR model download."""
     logger.info("Downloading PaddleOCR models...")
     from paddleocr import PaddleOCR
-    ocr = PaddleOCR(use_angle_cls=True, lang="en")
+    PaddleOCR(use_angle_cls=True, lang="en")
     logger.info("PaddleOCR models downloaded successfully.")
     return True
 

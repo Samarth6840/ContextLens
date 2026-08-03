@@ -15,24 +15,34 @@ success bar.
 All results are logged to timestamped JSON files for traceability.
 """
 
+import sys
+from pathlib import Path
+
+# Ensure project root is on path (this script lives in scripts/)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import argparse
 import json
 import logging
-import time
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import numpy as np
 import torch
+from copy import deepcopy
+
 from sklearn.metrics import (
     accuracy_score,
-    average_precision_score,
-    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
     roc_auc_score,
+)
+from src.layer2.fusion import QualityAwareFusion
+from src.training.losses import (
+    CrossModalConsistencyLoss,
+    EntropyRegularization,
+    QualityAlignmentLoss,
 )
 
 logging.basicConfig(
@@ -59,7 +69,6 @@ class SyntheticEvaluator:
     def generate_synthetic_brand_data(
         self,
         n_samples: int = 100,
-        n_brands: int = 10,
         seed: int = 42,
     ) -> Dict:
         """
@@ -148,7 +157,7 @@ class SyntheticEvaluator:
         Run the centerpiece fusion ablation experiment.
 
         Compares:
-        - Dynamic-weighted fusion (learned gating from quality signals)
+        - Dynamic-weighted fusion (trained gating network from quality signals)
         - Plain fusion (equal weights, no quality information)
 
         Under varying synthetic noise and blur levels.
@@ -160,11 +169,9 @@ class SyntheticEvaluator:
         if blur_levels is None:
             blur_levels = [0, 5, 15, 30]
 
-        from src.layer2.fusion import QualityAwareFusion
-
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-        # Initialize fusion models
+        # Initialize fusion model with learned gating
         dynamic_fusion = QualityAwareFusion(
             audio_dim=1024,
             video_dim=1024,
@@ -174,14 +181,8 @@ class SyntheticEvaluator:
             use_learned_gating=True,
         ).to(device)
 
-        plain_fusion = QualityAwareFusion(
-            audio_dim=1024,
-            video_dim=1024,
-            hidden_dim=512,
-            num_heads=8,
-            num_layers=3,
-            use_learned_gating=True,
-        ).to(device)
+        # Plain fusion uses the same weights — only the forward pass differs
+        plain_fusion = deepcopy(dynamic_fusion)
 
         results = {
             "experiment": "fusion_ablation",
@@ -198,6 +199,50 @@ class SyntheticEvaluator:
         # Generate clean data
         data = self.generate_synthetic_brand_data(n_samples=n_samples)
 
+        # Split into disjoint train and evaluation subsets
+        n_train = int(n_samples * 0.7)
+        train_idx = list(range(n_train))
+        eval_idx = list(range(n_train, n_samples))
+
+        train_data = {k: v[train_idx] if isinstance(v, np.ndarray) else v
+                      for k, v in data.items()}
+        eval_data = {k: v[eval_idx] if isinstance(v, np.ndarray) else v
+                     for k, v in data.items()}
+
+        # === Phase 1: Train gating network on TRAIN subset ===
+        logger.info("Training gating network on synthetic corruption data...")
+        dynamic_fusion = self._train_gating_network(
+            dynamic_fusion, train_data, device, epochs=150, lr=1e-3
+        )
+        plain_fusion = deepcopy(dynamic_fusion)
+        logger.info("Gating network training complete.")
+
+        # === Phase 2: Train linear classifier on TRAIN fused embeddings ===
+        logger.info("Training linear classifier on clean TRAIN embeddings...")
+        audio_embeds = torch.from_numpy(train_data["audio_embeds"]).float().to(device)
+        video_embeds = torch.from_numpy(train_data["video_embeds"]).float().to(device)
+        audio_q = torch.from_numpy(train_data["audio_quality"]).float().to(device)
+        video_q = torch.from_numpy(train_data["video_quality"]).float().to(device)
+
+        with torch.no_grad():
+            clean_dynamic = dynamic_fusion(
+                audio_embeds, video_embeds, audio_q, video_q,
+                use_dynamic_weights=True,
+            )
+            clean_plain = plain_fusion(
+                audio_embeds, video_embeds,
+                use_dynamic_weights=False,
+            )
+
+        # Train separate classifiers for dynamic and plain
+        dyn_classifier = self._train_linear_classifier(
+            clean_dynamic["fused_embed"].cpu().numpy(), train_data["labels"]
+        )
+        plain_classifier = self._train_linear_classifier(
+            clean_plain["fused_embed"].cpu().numpy(), train_data["labels"]
+        )
+        logger.info("Linear classifiers trained.")
+
         for noise_level in noise_levels:
             for blur_level in blur_levels:
                 condition = f"noise_{noise_level}_blur_{blur_level}"
@@ -205,70 +250,82 @@ class SyntheticEvaluator:
                     f"Evaluating condition: {condition}"
                 )
 
-                # Degrade quality signals
-                audio_q = data["audio_quality"].copy()
-                video_q = data["video_quality"].copy()
+                # Degrade quality signals (from eval subset to match embedding dimensions)
+                audio_q_deg = eval_data["audio_quality"].copy()
+                video_q_deg = eval_data["video_quality"].copy()
 
                 # Apply synthetic noise degradation to quality
-                rng = np.random.RandomState(42)
-                audio_q[:, 0] = np.clip(
-                    audio_q[:, 0] - noise_level, 0, 1
+                audio_q_deg[:, 0] = np.clip(
+                    audio_q_deg[:, 0] - noise_level, 0, 1
                 )
-                audio_q[:, 1] = np.clip(
-                    audio_q[:, 1] - noise_level, 0, 1
+                audio_q_deg[:, 1] = np.clip(
+                    audio_q_deg[:, 1] - noise_level, 0, 1
                 )
 
                 # Apply synthetic blur degradation to video quality
                 blur_factor = blur_level / 30.0
-                video_q[:, 0] = np.clip(
-                    video_q[:, 0] - blur_factor, 0, 1
+                video_q_deg[:, 0] = np.clip(
+                    video_q_deg[:, 0] - blur_factor, 0, 1
                 )
-                video_q[:, 2] = np.clip(
-                    video_q[:, 2] - blur_factor, 0, 1
+                video_q_deg[:, 2] = np.clip(
+                    video_q_deg[:, 2] - blur_factor, 0, 1
                 )
 
+                # Also corrupt the embeddings themselves to match the degraded quality
+                audio_embeds_deg = eval_data["audio_embeds"].copy()
+                video_embeds_deg = eval_data["video_embeds"].copy()
+                audio_embeds_deg += noise_level * np.random.randn(*audio_embeds_deg.shape).astype(np.float32)
+                video_embeds_deg += blur_factor * np.random.randn(*video_embeds_deg.shape).astype(np.float32)
+
                 # Convert to tensors
-                audio_embeds = torch.from_numpy(
-                    data["audio_embeds"]
+                audio_embeds_t = torch.from_numpy(
+                    audio_embeds_deg
                 ).float().to(device)
-                video_embeds = torch.from_numpy(
-                    data["video_embeds"]
+                video_embeds_t = torch.from_numpy(
+                    video_embeds_deg
                 ).float().to(device)
-                audio_quality_t = torch.from_numpy(audio_q).float().to(device)
-                video_quality_t = torch.from_numpy(video_q).float().to(device)
+                audio_quality_t = torch.from_numpy(audio_q_deg).float().to(device)
+                video_quality_t = torch.from_numpy(video_q_deg).float().to(device)
 
                 # Dynamic-weighted fusion
                 with torch.no_grad():
                     dynamic_out = dynamic_fusion(
-                        audio_embeds,
-                        video_embeds,
+                        audio_embeds_t,
+                        video_embeds_t,
                         audio_quality_t,
                         video_quality_t,
                         use_dynamic_weights=True,
                     )
 
                     plain_out = plain_fusion(
-                        audio_embeds,
-                        video_embeds,
+                        audio_embeds_t,
+                        video_embeds_t,
                         audio_quality=None,
                         video_quality=None,
                         use_dynamic_weights=False,
                     )
 
-                # Compute classification metrics using a simple classifier
-                # on top of fused embeddings
+                # Compute classification scores using trained classifiers
                 dynamic_scores = self._compute_scores(
-                    dynamic_out["fused_embed"]
+                    dynamic_out["fused_embed"], dyn_classifier
                 )
                 plain_scores = self._compute_scores(
-                    plain_out["fused_embed"]
+                    plain_out["fused_embed"], plain_classifier
                 )
 
-                labels = data["labels"]
+                labels = eval_data["labels"]
 
                 # Dynamic metrics
                 dyn_metrics = self._compute_classification_metrics(
                     dynamic_scores, labels
+                )
+
+                # Record fusion weight statistics
+                dyn_metrics["mean_audio_weight"] = float(
+                    dynamic_out["audio_weight"].mean().cpu()
+                )
+                dyn_metrics["mean_video_weight"] = float(
+                    dynamic_out["video_weight"].mean().cpu()
                 )
                 results["dynamic_weighted"][condition] = dyn_metrics
 
@@ -303,11 +360,145 @@ class SyntheticEvaluator:
 
         return results
 
-    def _compute_scores(self, embeddings: torch.Tensor) -> np.ndarray:
-        """Compute simple classification scores from embeddings."""
-        # Use norm as a proxy score (higher norm = more signal)
-        scores = torch.norm(embeddings, dim=1).cpu().numpy()
-        return (scores - scores.min()) / (scores.max() - scores.min() + 1e-8)
+    def _train_gating_network(
+        self,
+        fusion_model: "QualityAwareFusion",
+        data: Dict,
+        device: str,
+        epochs: int = 150,
+        lr: float = 1e-3,
+    ) -> "QualityAwareFusion":
+        """
+        Train the gating network on synthetic corruption data.
+
+        Uses cross-modal consistency loss: when one modality is degraded,
+        the fused embedding should be closer to the uncorrupted modality's
+        embedding. Also uses quality alignment loss and entropy regularization.
+        """
+        # Prepare data
+        audio_embeds = torch.from_numpy(data["audio_embeds"]).float().to(device)
+        video_embeds = torch.from_numpy(data["video_embeds"]).float().to(device)
+        audio_q = torch.from_numpy(data["audio_quality"]).float().to(device)
+        video_q = torch.from_numpy(data["video_quality"]).float().to(device)
+
+        # Create corruption labels: 0=audio degraded, 1=video degraded, 2=both clean
+        n = len(data["audio_embeds"])
+        corruption_type = torch.zeros(n, dtype=torch.long, device=device)
+        corruption_type[:n // 3] = 0  # audio degraded
+        corruption_type[n // 3: 2 * n // 3] = 1  # video degraded
+        corruption_type[2 * n // 3:] = 2  # both clean
+
+        # Collect all trainable parameters (gating network + fusion transformer)
+        params = list(fusion_model.gating_network.parameters()) + \
+                 list(fusion_model.fusion.parameters())
+
+        optimizer = torch.optim.AdamW(params, lr=lr, weight_decay=1e-2)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+        # Reusable loss modules from src/training/losses.py
+        consistency_loss = CrossModalConsistencyLoss()
+        quality_loss = QualityAlignmentLoss()
+        entropy_reg = EntropyRegularization()
+
+        fusion_model.train()
+        for epoch in range(epochs):
+            optimizer.zero_grad()
+
+            result = fusion_model(
+                audio_embeds, video_embeds,
+                audio_q, video_q,
+                use_dynamic_weights=True,
+            )
+            fused = result["fused_embed"]  # (n, hidden_dim)
+            w_audio = result["audio_weight"]  # (n,)
+            w_video = result["video_weight"]  # (n,)
+
+            # Projected embeddings for consistency loss
+            audio_proj = fusion_model.fusion.audio_proj(audio_embeds)
+            video_proj = fusion_model.fusion.video_proj(video_embeds)
+
+            # 1. Cross-modal consistency loss (vectorized via shared module)
+            l_consistency = consistency_loss(fused, audio_proj, video_proj, corruption_type)
+
+            # 2. Quality alignment loss
+            l_quality = quality_loss(w_audio, audio_q, video_q)
+
+            # 3. Entropy regularization (prevent collapse)
+            l_entropy = entropy_reg(w_audio, w_video)
+
+            # Combined loss
+            total_loss = 1.0 * l_consistency + 0.5 * l_quality + 0.1 * l_entropy
+
+            total_loss.backward()
+            optimizer.step()
+            scheduler.step()
+
+            if (epoch + 1) % 50 == 0:
+                logger.info(
+                    f"  Epoch {epoch+1}/{epochs}: "
+                    f"loss={total_loss.item():.4f}, "
+                    f"consistency={l_consistency.item():.4f}, "
+                    f"quality={l_quality.item():.4f}, "
+                    f"entropy={l_entropy.item():.4f}"
+                )
+
+        fusion_model.eval()
+        return fusion_model
+
+    def _train_linear_classifier(
+        self,
+        embeddings: np.ndarray,
+        labels: np.ndarray,
+        epochs: int = 200,
+        lr: float = 1e-3,
+    ) -> torch.nn.Module:
+        """
+        Train a linear classifier on fused embeddings.
+
+        This provides a meaningful downstream metric: can a simple classifier
+        distinguish positive/negative samples from the fused representation?
+        """
+        device = "cpu"
+        input_dim = embeddings.shape[1]
+        classifier = torch.nn.Linear(input_dim, 1).to(device)
+        optimizer = torch.optim.Adam(classifier.parameters(), lr=lr)
+        criterion = torch.nn.BCEWithLogitsLoss()
+
+        X = torch.from_numpy(embeddings).float().to(device)
+        y = torch.from_numpy(labels).float().to(device)
+
+        classifier.train()
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            logits = classifier(X).squeeze(-1)
+            loss = criterion(logits, y)
+            loss.backward()
+            optimizer.step()
+
+        classifier.eval()
+        return classifier
+
+    def _compute_scores(
+        self, embeddings: torch.Tensor, classifier: torch.nn.Module
+    ) -> np.ndarray:
+        """
+        Compute classification scores using a trained linear classifier.
+
+        Moves embeddings to the classifier's device (CPU) before inference.
+
+        Args:
+            embeddings: (n_samples, hidden_dim) fused embeddings
+            classifier: Trained Linear(in_features=hidden_dim, out_features=1)
+
+        Returns:
+            scores: (n_samples,) probability scores in [0, 1]
+        """
+        classifier_device = next(classifier.parameters()).device
+        embeddings_on_device = embeddings.to(device=classifier_device)
+        with torch.no_grad():
+            logits = classifier(embeddings_on_device).squeeze(-1)
+            probs = torch.sigmoid(logits)
+        return probs.cpu().numpy()
 
     def _compute_classification_metrics(
         self, scores: np.ndarray, labels: np.ndarray
@@ -316,14 +507,18 @@ class SyntheticEvaluator:
         threshold = 0.5
         predictions = (scores >= threshold).astype(int)
 
+        unique_labels = np.unique(labels)
+        if len(unique_labels) < 2:
+            roc_auc_val = 0.5  # undefined for single class
+        else:
+            roc_auc_val = float(roc_auc_score(labels, scores))
+
         metrics = {
             "accuracy": float(accuracy_score(labels, predictions)),
             "precision": float(precision_score(labels, predictions, zero_division=0)),
             "recall": float(recall_score(labels, predictions, zero_division=0)),
             "f1": float(f1_score(labels, predictions, zero_division=0)),
-            "roc_auc": float(
-                roc_auc_score(labels, scores)
-            ),
+            "roc_auc": roc_auc_val,
             "mean_score": float(np.mean(scores)),
             "std_score": float(np.std(scores)),
         }

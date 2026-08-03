@@ -5,8 +5,9 @@ Loads real model weights — no mock/stub/placeholder inference.
 """
 
 import logging
-from typing import List, Optional, Tuple
+from typing import List
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,6 @@ class OCRExtractor:
         rec_batch_num: int = 6,
     ):
         self.lang = lang
-        self.use_angle_cls = use_angle_cls
-        self.det_db_thresh = det_db_thresh
-        self.rec_batch_num = rec_batch_num
 
         # Lazy import PaddleOCR — it has heavy dependencies
         logger.info(f"Initializing PaddleOCR (lang={lang})")
@@ -58,35 +56,39 @@ class OCRExtractor:
         if image is None or image.size == 0:
             return []
 
-        # Real OCR inference — not a mock
-        results = self.model.ocr(image)
+        # PaddleOCR expects BGR input; VideoProcessor.load_video produces RGB
+        if image.ndim == 3 and image.shape[2] == 3:
+            image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        else:
+            image_bgr = image
+
+        # PaddleOCR 3.7.0: use predict() instead of deprecated ocr()
+        results = self.model.predict(image_bgr)
 
         if results is None:
             return []
 
-        if isinstance(results, dict):
-            rec_texts = results.get("rec_texts", [])
-            rec_scores = results.get("rec_scores", [])
-            rec_polys = results.get("rec_polys", [])
-        elif isinstance(results, list) and len(results) > 0:
-            if isinstance(results[0], dict):
-                rec_texts = results[0].get("rec_texts", [])
-                rec_scores = results[0].get("rec_scores", [])
-                rec_polys = results[0].get("rec_polys", [])
-            else:
-                rec_texts = []
-                rec_scores = []
-                rec_polys = []
-        else:
-            return []
-
+        # PaddleOCR 3.7.0+ predict() returns OCRResult objects (attribute access)
+        # Older versions may return dict-like objects. Handle both formats.
         ocr_results = []
-        for text, score, poly in zip(rec_texts, rec_scores, rec_polys):
-            ocr_results.append({
-                "text": text,
-                "confidence": float(score),
-                "bbox": poly.tolist() if hasattr(poly, "tolist") else list(poly),
-            })
+        for result in results:
+            if hasattr(result, "get"):
+                # Dict-like object (legacy format)
+                rec_texts = result.get("rec_texts", [])
+                rec_scores = result.get("rec_scores", [])
+                rec_polys = result.get("rec_polys", [])
+            else:
+                # OCRResult dataclass (PaddleOCR 3.7.0+)
+                rec_texts = getattr(result, "rec_texts", [])
+                rec_scores = getattr(result, "rec_scores", [])
+                rec_polys = getattr(result, "rec_polys", [])
+
+            for text, score, poly in zip(rec_texts, rec_scores, rec_polys):
+                ocr_results.append({
+                    "text": text,
+                    "confidence": float(score),
+                    "bbox": poly.tolist() if hasattr(poly, "tolist") else list(poly),
+                })
 
         return ocr_results
 
@@ -96,33 +98,3 @@ class OCRExtractor:
     ) -> List[List[dict]]:
         """Run OCR on a batch of frames."""
         return [self.extract_text(frame) for frame in frames]
-
-    def extract_brand_texts(
-        self,
-        image: np.ndarray,
-        brand_keywords: Optional[List[str]] = None,
-    ) -> List[dict]:
-        """
-        Extract text and filter for potential brand mentions.
-
-        Args:
-            image: RGB image
-            brand_keywords: Optional list of brand names to look for.
-                            If None, returns all OCR results.
-
-        Returns:
-            List of OCR results matching brand keywords (or all if no filter)
-        """
-        ocr_results = self.extract_text(image)
-
-        if brand_keywords is None:
-            return ocr_results
-
-        brand_keywords_lower = [kw.lower() for kw in brand_keywords]
-        filtered = []
-        for result in ocr_results:
-            text_lower = result["text"].lower()
-            if any(kw in text_lower for kw in brand_keywords_lower):
-                filtered.append(result)
-
-        return filtered
