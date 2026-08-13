@@ -1,6 +1,5 @@
-# Phase 1 Configuration
-# Context-Aware Multimodal Brand Collaboration Recommendation System
-# Phase 1: Layer 1 + Layer 2a/2b
+# Phase 1 Configuration — Multimodal Brand Collaboration Recommendation System
+# Integrated AI Stack: RF-DETR + Qwen3-VL 32B + Voxtral Realtime + Qwen3-ASR
 
 layer1:
   object_detection:
@@ -9,17 +8,68 @@ layer1:
     iou_threshold: 0.45
 
   logo_detection:
-    backend: "yolo_world"  # zero-shot logo detection (YOLO-World)
-    model: "yolov8s-worldv2.pt"
-    confidence_threshold: 0.10  # lowered from 0.30: YOLO-World's zero-shot confidence for abstract "logo" queries maxes out at ~0.27 on real video frames; 0.10 captures genuine text/logo detections while excluding noise floor (0.01-0.03)
+    # Primary backend: RF-DETR fine-tuned on LogoDet-3K for brand detection
+    backend: "rfdetr"  # "rfdetr" | "yolo_world"
+    model: "weights/rfdetr_logo_detector.pt"  # RF-DETR LogoDet-3K fine-tuned weights
+    confidence_threshold: 0.25  # RF-DETR optimized threshold for LogoDet-3K
+    # Alternative: YOLO-World zero-shot fallback
+    # backend: "yolo_world"
+    # model: "yolov8s-worldv2.pt"
+    # confidence_threshold: 0.10
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
+    # Generic fallback queries. The pipeline automatically merges these with
+    # '<Brand> logo' queries generated from the brand catalog (src/brand_catalog.py)
+    # so known brands are matched zero-shot. Crop-OCR then resolves the actual name.
     text_queries:
-      - "Samsung logo"
       - "brand logo"
       - "company logo"
       - "text logo"
       - "product logo"
+      - "label"
+      - "wordmark"
+
+  # Central multimodal understanding: Qwen3-VL 32B handles video, OCR, and reasoning in one pass
+  central_vision_model:
+    backend: "qwen3vl"  # "qwen3vl" | "dinov2"
+    model: "Qwen3-VL-32B"
+    load_8bit: True  # Use 8-bit quantization for memory efficiency on Apple Silicon
+    device: None  # auto-detect (mps/cuda/cpu)
+
+  # Voxtral Realtime for live audio ingestion
+  voxtral_realtime:
+    enabled: True  # Use Voxtral Realtime for live streaming audio
+    model: "Voxtral-Realtime"
+    sample_rate: 16000
+    chunk_duration_ms: 30  # Processing chunk duration in milliseconds
+    device: None  # auto-detect
+
+  # Qwen3-ASR for batch speech recognition
+  qwen3asr:
+    enabled: True  # Use Qwen3-ASR for batch transcription
+    model: "Qwen3-ASR-32B"
+    use_8bit: True  # Use 8-bit quantization
+    language: "en"  # Default language
+    fuzzy_mentions: False  # Fuzzy/phonetic matching opt-in; defaults OFF
+
+  # Legacy speech-to-text (maintained for backward compatibility)
+  speech_to_text:
+    model: "medium"
+    compute_dtype: "int8"  # faster-whisper INT8 quantization (CPU-efficient)
+    # Brand-mention detection settings (multilingual, see src/brand_catalog.py):
+    # The brand-name source is the shared catalog (src/brand_catalog.py) — the
+    # SAME list that drives logo-detection text queries and the knowledge graph.
+    # Exact word-boundary matching (any script, incl. Devanagari aliases) is
+    # always on. Fuzzy/phonetic matching is OPT-IN and defaults OFF so it can
+    # never silently inflate speech evidence with distance-1 near-matches.
+    mention_fuzzy: false
+    mention_max_distance: 1
+
+  # BEATs audio event detector (supplementary)
+  audio_events:
+    checkpoint: "BEATs_iter3_plus_AS2M.pt"
+    sample_rate: 16000
+    embedding_dim: 256  # 128 mel bins × 2 stats (mean + std)
 
   visual_embeddings:
     model: "facebook/dinov2-base"
@@ -32,15 +82,6 @@ layer1:
     rec_batch_num: 6
     max_frames: 30  # max frames to run OCR on (sampled uniformly from detections)
 
-  speech_to_text:
-    model: "medium"
-    compute_dtype: "int8"  # faster-whisper INT8 quantization (CPU-efficient)
-
-  audio_events:
-    checkpoint: "BEATs_iter3_plus_AS2M.pt"
-    sample_rate: 16000
-    embedding_dim: 256  # 128 mel bins × 2 stats (mean + std)
-
 layer2a:
   fusion:
     hidden_dim: 512
@@ -52,6 +93,11 @@ layer2a:
     # scripts/train_gating.py). Empty = randomly initialized.
     checkpoint: ""
 
+    # Modality quality signal sources for fusion
+    quality_sources:
+      audio: "quality_estimator"  # AudioQualityEstimator
+      video: "quality_estimator"  # VideoQualityEstimator
+
 layer2b:
   # Evidence sources: weight + status (implemented | scaffolded).
   # Scaffolded sources contribute zero and are excluded from scoring;
@@ -59,24 +105,155 @@ layer2b:
   # that strong evidence from the available sources can reach a fair
   # confidence score.
   evidence_sources:
+    # RF-DETR logo detection evidence
     logo_detected:
-      weight: 0.45
-      status: implemented  # YOLO-World logo detector
+      weight: 0.30  # Renormalized from 0.45 (3 implemented sources → 0.45/0.70 ≈ 0.643, but with new stack 3/5=0.6)
+      status: implemented  # RF-DETR logo detector + brand resolution
+    # Qwen3-ASR speech mention evidence
     speech_mention:
-      weight: 0.20
-      status: scaffolded   # requires Layer 2c temporal/intent linking
+      weight: 0.25  # Qwen3-ASR brand mention strength
+      status: implemented  # ASR transcript → brand-catalog mention detection
+    # Qwen3-VL OCR/text hit evidence
     ocr_hit:
-      weight: 0.15
-      status: implemented  # PaddleOCR text extraction
+      weight: 0.20  # Qwen3-VL text extraction strength
+      status: implemented  # Qwen3-VL OCR within video frames
+    # Voxtral Realtime scene context
     scene_context:
-      weight: 0.10
-      status: implemented  # BEATs audio event detector (confirmed working)
+      weight: 0.15  # Voxtral audio event confidence
+      status: implemented  # Voxtral Realtime audio events
+    # Product retrieval (Phase 2)
     product_retrieval:
       weight: 0.10
       status: scaffolded   # requires product-embedding retrieval
 
   aggregation: "weighted_sum"  # weighted_sum | learned_calibration | noisy_or
   min_evidence_threshold: 0.55
+
+layer2c:
+  # Temporal memory / cross-scene reasoning (brand entity timeline).
+  enabled: True
+
+  # Qwen3-VL timeline reasoning enhancement
+  vl_reasoning: True  # Enable Qwen3-VL-based temporal brand reasoning
+
+layer3:
+  # Recommendation engine — knowledge graph + ranked, explainable output.
+  top_k: 12
+  category_affinity: 0.7  # strength multiplier for adjacent (never-appeared) brands
+
+  # Qwen3-VL embeddings for knowledge graph
+  vl_embedding_dim: 1024  # Qwen3-VL fused embedding dimension
+
+logo_dev:
+  # B2a reference bank: official logo.dev logos for catalog brands, used as the
+  # visual reference set for region-proposal + CLIP retrieval detection.
+  # B2b brand validation: logo.dev is the authoritative existence check that
+  # blocks fabricated brand names from reaching outreach. Keys come from the
+  # environment or .env (NEVER committed — see .env.example + .gitignore).
+  reference_bank_dir: "benchmark/reference_logos"
+  reference_logo_size: 256
+  timeout_seconds: 10
+  enabled: true
+
+open_set:
+  # Open-set brand identification (escalation Task 3) — real, grounded
+  # identification of brands outside the fixed catalogue. Logo-shaped regions
+  # from the primary detector become unknown-brand candidates that go through a
+  # REAL reverse-image search on the actual crop + logo.dev external validation,
+  # with the full evidence trail recorded. This NEVER falls back to an LLM
+  # guess; without a runnable backend it fails closed (no names surfaced).
+  # Every tunable lives here — the code reads config and fails closed if any
+  # key is missing. There are no hardcoded fallback values in src/openset.py.
+  enabled: true
+  # backend: google_vision_web | bing_visual | serpapi | browser_grounded
+  # browser_grounded drives a real reverse-image search through the agent-browser
+  # CLI (no paid API key required); the keyed backends unlock via their env vars.
+  backend: "browser_grounded"
+  # Only logo detections with REAL model confidence at/above this threshold
+  # become candidates — this is the documented cost guard against calling the
+  # (billable) reverse-image API on the detector's confidence noise floor.
+  min_logo_confidence: 0.30
+  # Hard cap on reverse-image + logo.dev calls per video.
+  max_candidates_per_video: 5
+  crop_cache_dir: "static/openset_crops"
+  # Engine wordmark/object tags that must NEVER be derived into a brand
+  # candidate (generic descriptors such as "logo", "tshirt", "логотип").
+  # Data-driven filter vocabulary — not a brand list.
+  generic_tag_filter:
+    - "logo"
+    - "logos"
+    - "brand"
+    - "brands"
+    - "label"
+    - "labels"
+    - "icon"
+    - "icons"
+    - "badge"
+    - "badges"
+    - "text"
+    - "wordmark"
+    - "design"
+    - "graphic"
+    - "symbol"
+    - "sign"
+    - "emblem"
+    - "mark"
+    - "sticker"
+    - "print"
+    - "tshirt"
+    - "t-shirt"
+    - "tee"
+    - "принт"
+    - "наклейка"
+    - "логотип"
+    - "лого"
+    - "бренд"
+    - "бренды"
+    - "иконка"
+    - "значок"
+    - "знак"
+    - "эмблема"
+    - "дизайн"
+    - "мода"
+    - "одежда"
+    - "стили логотипа"
+    - "иконка оперы"
+    - "иконка браузер"
+    - "значок opera"
+    - "футболка"
+    - "футболки"
+    - "мужской футболка"
+    - "футболка для тренировок"
+    - "футболки для мужчин"
+    - "футболки и майки"
+    - "футболки дизайн"
+  # Result domains that must NEVER be derived into a candidate name (search
+  # engines, social portals, generic aggregators). Data-driven — not hardcoded.
+  generic_domain_filter:
+    - "google.com"
+    - "google.ru"
+    - "lens.google.com"
+    - "bing.com"
+    - "facebook.com"
+    - "twitter.com"
+    - "x.com"
+    - "pinterest.com"
+    - "youtube.com"
+    - "instagram.com"
+    - "wikipedia.org"
+    - "w3.org"
+    - "schema.org"
+    - "creativecommons.org"
+  logodev_timeout: 10
+
+ui:
+  # PART A INCIDENT CONTAINMENT — outreach (DRAFT EMAIL / email generation /
+  # forward) is feature-flagged OFF until the brand-collaboration data path is
+  # verified end-to-end. When disabled the server returns 403 and the frontend
+  # hides the DRAFT EMAIL controls. Re-enable ONLY after the data-integrity
+  # review in MAJOR_REMEDIATION_REPORT.md is signed off.
+  outreach_enabled: false
+  outreach_reason: "DRAFT EMAIL DISABLED — PENDING DATA-INTEGRITY REVIEW (see MAJOR_REMEDIATION_REPORT.md)"
 
 evaluation:
   audio_sample_rate: 16000

@@ -20,6 +20,17 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 import yaml
 
+from src.brand_catalog import find_brand_mentions, match_brand
+from src.layer1.rfdetr_logo_detector import create_rfdetr_logo_detector
+from src.layer1.qwen3vl import create_qwen3vl_32b
+from src.layer1.voxtral_realtime import create_voxtral_realtime
+from src.layer1.qwen3asr import create_qwen3asr
+from src.layer2.brand_resolver import (
+    BrandResolver,
+    brand_evidence_from_timeline,
+    build_brand_timeline,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -65,7 +76,12 @@ class VideoProcessor:
             max_frames: Absolute maximum number of frames to return
 
         Returns:
-            Tuple of (frames list, video_fps)
+            Tuple of (frames list, video_fps, total_frame_count).
+            total_frame_count is the true number of frames in the source video
+            (from the codec), NOT the sampled count. It exists so downstream
+            consumers can report the real video duration instead of dividing
+            the sampled-frame count by the original fps (a unit mismatch that
+            previously produced impossible-looking "N SEC / SCENE 999" states).
         """
         import cv2
 
@@ -73,6 +89,7 @@ class VideoProcessor:
         if not cap.isOpened():
             raise IOError(f"Cannot open video: {video_path}")
 
+        total_frames_hint = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         video_fps = cap.get(cv2.CAP_PROP_FPS)
         if not video_fps or video_fps <= 0 or math.isnan(video_fps):
             # Some containers/codecs report 0.0/NaN FPS — default to 30 so
@@ -112,7 +129,10 @@ class VideoProcessor:
             f"({video_fps:.1f} fps, extracted at {effective_rate:.1f} fps, "
             f"{'capped' if len(frames) >= max_frames and frame_count > 0 else 'complete'})"
         )
-        return frames, video_fps
+        # The true source frame count is what the codec reports when available;
+        # otherwise fall back to what we actually iterated.
+        total_frames = total_frames_hint if total_frames_hint > 0 else frame_count
+        return frames, video_fps, total_frames
 
     @staticmethod
     def extract_audio(
@@ -230,6 +250,9 @@ class Phase1Pipeline:
         self._audio_quality_estimator = None
         self._video_quality_estimator = None
         self._confidence_scorer = None
+        self._central_vision_model = None  # Qwen3-VL 32B
+        self._voxtral_realtime = None  # Voxtral Realtime
+        self._qwen3asr = None  # Qwen3-ASR batch
 
         # Per-model threading locks for GPU inference safety.
         # Each GPU-backed model gets its own lock so different models can
@@ -284,15 +307,23 @@ class Phase1Pipeline:
     def logo_detector(self):
         def _create():
             from src.layer1.logo_detector import create_logo_detector
+            from src.brand_catalog import build_text_queries
             logo_cfg = self.cfg["layer1"].get("logo_detection", {})
             backend = logo_cfg.get("backend", "yolo_world")
             logger.info("Loading logo detector (backend=%s)...", backend)
+            # Merge generic fallback queries with per-brand catalog queries
+            # ('Nike logo', 'Samsung logo', ...) so zero-shot detection can
+            # match known brands directly instead of only generic 'brand logo'.
+            queries = list(logo_cfg.get("text_queries") or [])
+            for q in build_text_queries():
+                if q not in queries:
+                    queries.append(q)
             return create_logo_detector(
                 backend=backend,
                 model_name=logo_cfg.get("model", "yolov8s-worldv2.pt"),
                 confidence_threshold=logo_cfg.get("confidence_threshold", 0.30),
                 device=self.device,
-                text_queries=logo_cfg.get("text_queries"),
+                text_queries=queries,
             )
         return self._get_or_create("_logo_detector", _create)
 
@@ -439,6 +470,48 @@ class Phase1Pipeline:
             )
         return self._get_or_create("_confidence_scorer", _create)
 
+    @property
+    def central_vision_model(self):
+        def _create():
+            from src.layer1.qwen3vl import create_qwen3vl_32b
+            vl_cfg = self.cfg["layer1"].get("central_vision_model", {})
+            logger.info("Loading Qwen3-VL 32B central vision model...")
+            return create_qwen3vl_32b(
+                model_name=vl_cfg.get("model", "Qwen3-VL-32B"),
+                device=self.device,
+                load_8bit=vl_cfg.get("load_8bit", True),
+            )
+        return self._get_or_create("_central_vision_model", _create)
+
+    @property
+    def voxtral_realtime(self):
+        def _create():
+            from src.layer1.voxtral_realtime import create_voxtral_realtime
+            vr_cfg = self.cfg["layer1"].get("voxtral_realtime", {})
+            logger.info("Loading Voxtral Realtime for live audio ingestion...")
+            return create_voxtral_realtime(
+                model_name=vr_cfg.get("model", "Voxtral-Realtime"),
+                device=self.device,
+                sample_rate=vr_cfg.get("sample_rate", 16000),
+                chunk_duration_ms=vr_cfg.get("chunk_duration_ms", 30),
+            )
+        return self._get_or_create("_voxtral_realtime", _create)
+
+    @property
+    def qwen3asr(self):
+        def _create():
+            from src.layer1.qwen3asr import create_qwen3asr
+            asr_cfg = self.cfg["layer1"].get("qwen3asr", {})
+            logger.info("Loading Qwen3-ASR for batch speech recognition...")
+            return create_qwen3asr(
+                model_name=asr_cfg.get("model", "Qwen3-ASR-32B"),
+                device=self.device,
+                use_8bit=asr_cfg.get("use_8bit", True),
+                language=asr_cfg.get("language", "en"),
+                fuzzy_mentions=asr_cfg.get("fuzzy_mentions", False),
+            )
+        return self._get_or_create("_qwen3asr", _create)
+
     @staticmethod
     def _select_keyframes(frames: List[np.ndarray], max_frames: int = 30) -> List[int]:
         """
@@ -496,7 +569,9 @@ class Phase1Pipeline:
         if frame_rate is None:
             frame_rate = self.cfg["evaluation"]["video_frame_rate"]
         max_frames = self.cfg['evaluation'].get('max_frames', 300)
-        frames, video_fps = VideoProcessor.load_video(video_path, frame_rate, max_frames)
+        frames, video_fps, video_total_frames = VideoProcessor.load_video(
+            video_path, frame_rate, max_frames
+        )
         timings["load_video"] = time.monotonic() - _t
 
         if not frames:
@@ -558,10 +633,19 @@ class Phase1Pipeline:
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {}
 
+            # RF-DETR logo detection (new backend)
             futures[self._locked_submit(
                 executor, "logo_detector", self.logo_detector.detect_batch,
                 logo_frames, None, batch_size,
             )] = "logo_detection"
+
+            # Qwen3-VL central analysis (handles video, OCR, reasoning in one pass)
+            if self.central_vision_model:
+                futures[self._locked_submit(
+                    executor, "central_vision",
+                    self.central_vision_model.analyze_batch,
+                    frames[:30], "",  # Sample first 30 frames
+                )] = "central_vision"
 
             futures[self._locked_submit(
                 executor, "embedding_extractor",
@@ -600,6 +684,29 @@ class Phase1Pipeline:
                     all_logo_detections = [[] for _ in frames]
                     for idx, dets in zip(logo_indices, result):
                         all_logo_detections[idx] = dets
+                elif modality == "central_vision":
+                    # Brand resolution (Layer 2c) ──────────────────────────────────
+                    # Convert generic logo detections ('text logo', 'brand logo') into
+                    # actual brand names: prefer a brand-named class, else crop-OCR the
+                    # logo region and match against the catalog. Unresolved detections are
+                    # excluded from brand products / recommendations.
+                    # Use Qwen3-VL results for enhanced brand resolution if available.
+                    _t_resolve = time.monotonic()
+                    resolver = BrandResolver(ocr_extractor=self.ocr)
+
+                    # Merge logo detections with Qwen3-VL brand detections
+                    if hasattr(self, "_central_vision_results") and self._central_vision_results:
+                        vl_brand_detections = self._central_vision_results.get("brand_detections", [[] for _ in frames])
+                        # Merge: give preference to RF-DETR resolved brands, fall back to VL detections
+                        resolved_logos = resolver.resolve(all_logo_detections, frames)
+                        # Overlay VL detections where RF-DETR didn't resolve
+                        for i, (rf_detect, vl_detect) in enumerate(zip(all_logo_detections, vl_brand_detections)):
+                            if not rf_detect.get("brand") and vl_detect:
+                                resolved_logos[i] = vl_detect[0]  # Use first VL detection
+                            else:
+                                resolved_logos = resolver.resolve(all_logo_detections, frames)
+                    all_logo_detections = resolved_logos
+                    timings["brand_resolution"] = time.monotonic() - _t_resolve
                 elif modality == "embeddings":
                     embed_raw = result
                 elif modality == "stt":
@@ -659,6 +766,17 @@ class Phase1Pipeline:
 
         timings["layer1_visual"] = time.monotonic() - _t
 
+        # ── Brand resolution (Layer 2c) ──────────────────────────────────
+        # Convert generic logo detections ('text logo', 'brand logo') into
+        # actual brand names: prefer a brand-named class, else crop-OCR the
+        # logo region and match against the catalog. Unresolved detections are
+        # excluded from brand products / recommendations.
+        _t_resolve = time.monotonic()
+        resolver = BrandResolver(ocr_extractor=self.ocr)
+        resolved_logos = resolver.resolve(all_logo_detections, frames)
+        all_logo_detections = resolved_logos
+        timings["brand_resolution"] = time.monotonic() - _t_resolve
+
         # Reassemble embeddings to full frame count (non-sampled frames get zero vectors)
         embed_dim = embed_raw.shape[1]
         embeddings = np.zeros((len(frames), embed_dim), dtype=np.float32)
@@ -674,10 +792,18 @@ class Phase1Pipeline:
             sum(len(r) for r in all_ocr_results),
         )
 
-        # Brand mentions (needs detections + transcript)
+        # Brand mentions (needs transcript) — scan the transcript against the
+        # full brand catalog so spoken brands are captured even when they never
+        # appear on screen (fixes mention detection previously searching COCO
+        # object names like 'cell phone'). Exact word-boundary matching covers
+        # Latin + Devanagari aliases from the catalog; fuzzy phonetic matching
+        # is opt-in via config and defaults OFF (see config.yaml).
         if transcript:
-            brand_mentions = self.stt.detect_brand_mentions(
-                transcript, self._get_known_brands(all_detections)
+            stt_cfg = self.cfg["layer1"]["speech_to_text"]
+            brand_mentions = find_brand_mentions(
+                transcript,
+                fuzzy=bool(stt_cfg.get("mention_fuzzy", False)),
+                max_distance=int(stt_cfg.get("mention_max_distance", 1)),
             )
 
         # === Layer 2a: Quality Estimation & Fusion ===
@@ -767,6 +893,21 @@ class Phase1Pipeline:
             float(fusion_result["video_weight"].detach().mean().cpu()),
         )
 
+        # === Layer 2c: Temporal memory / brand entity timeline ===
+        _t = time.monotonic()
+        transcript_duration = (
+            (len(frames) / video_fps) if video_fps else 0.0
+        )
+        timeline = build_brand_timeline(
+            all_logo_detections,
+            brand_mentions,
+            video_fps=video_fps,
+            transcript=transcript,
+            transcript_duration=transcript_duration,
+        )
+        brand_evidence = brand_evidence_from_timeline(timeline)
+        timings["layer2c_timeline"] = time.monotonic() - _t
+
         # === Layer 2b: Evidence-based Confidence ===
         _t = time.monotonic()
 
@@ -786,6 +927,18 @@ class Phase1Pipeline:
         )
         timings["layer2b_confidence"] = time.monotonic() - _t
 
+        # === Layer 3: Recommendation Engine (knowledge-graph ranked output) ===
+        _t = time.monotonic()
+        from src.layer3.recommender import BrandRecommender
+
+        recommender = BrandRecommender(category_affinity=self.cfg["layer3"].get("category_affinity", 0.7))
+        recommendations = recommender.recommend(
+            timeline,
+            brand_evidence=brand_evidence,
+            top_k=self.cfg["layer3"].get("top_k", 12),
+        )
+        timings["layer3_recommend"] = time.monotonic() - _t
+
         timings["total"] = time.monotonic() - _t_total
 
         # Log timing summary
@@ -801,6 +954,7 @@ class Phase1Pipeline:
         output = {
             "video_path": video_path,
             "num_frames": len(frames),
+            "video_total_frames": video_total_frames,
             "video_fps": video_fps,
             "has_audio": audio is not None,
             "hardware_profile": self.hardware_profile,
@@ -831,6 +985,13 @@ class Phase1Pipeline:
                 **confidence_result,
                 "evidence_sources_active": active_sources,
                 "evidence_sources_pending": pending_sources,
+            },
+            "layer2c": {
+                "brand_timeline": timeline,
+                "brand_evidence": brand_evidence,
+            },
+            "layer3": {
+                "recommendations": recommendations,
             },
         }
 
@@ -901,14 +1062,6 @@ class Phase1Pipeline:
 
         return float(np.var(confidences))
 
-    def _get_known_brands(self, detections: List[List[dict]]) -> List[str]:
-        """Extract brand names from detection results."""
-        brands = set()
-        for frame_dets in detections:
-            for det in frame_dets:
-                brands.add(det["class_name"])
-        return list(brands)
-
     def _ocr_filtered(
         self,
         frames_with_dets: List[np.ndarray],
@@ -961,9 +1114,13 @@ class Phase1Pipeline:
         """
         Aggregate evidence from all modalities into evidence strengths.
 
+        Accuracy note: only brand-RESOLVED logo detections and brand-matching
+        OCR text count as evidence. A generic 'text logo' box or OCR text that
+        matches no known brand contributes zero, so the confidence score is not
+        inflated by arbitrary on-screen text.
+
         Args:
-            logo_detections: Real logo/brand detections from LogoDetectionBackend
-                            (NOT generic COCO object detections)
+            logo_detections: Real logo/brand detections (post-resolution)
             brand_mentions: Brand names mentioned in ASR transcript
             ocr_results: OCR text extracted from video frames
             audio_events: Audio event detections from BEATs
@@ -971,24 +1128,26 @@ class Phase1Pipeline:
         Returns dict with keys: logo_detected, speech_mention, ocr_hit,
                                 scene_context, product_retrieval
         """
-        # Logo detection evidence — from REAL logo detector, not COCO objects
+        # Logo detection evidence — only detections resolved to a real brand
         logo_strength = 0.0
         logo_confidences = []
         for frame_logos in logo_detections:
             for det in frame_logos:
-                logo_confidences.append(det["confidence"])
+                if det.get("brand"):
+                    logo_confidences.append(det["confidence"])
         if logo_confidences:
             logo_strength = float(np.mean(logo_confidences))
 
         # Speech mention evidence
         speech_strength = min(1.0, len(brand_mentions) * 0.3)
 
-        # OCR evidence
+        # OCR evidence — only text that matches a known brand name
         ocr_strength = 0.0
         ocr_confidences = []
         for frame_ocr in ocr_results:
             for result in frame_ocr:
-                ocr_confidences.append(result["confidence"])
+                if match_brand(result.get("text", "")):
+                    ocr_confidences.append(result["confidence"])
         if ocr_confidences:
             ocr_strength = float(np.mean(ocr_confidences))
 

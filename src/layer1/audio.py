@@ -285,15 +285,14 @@ class SpeechToText:
     def detect_brand_mentions(
         self, transcript: str, brand_names: List[str]
     ) -> List[dict]:
-        """
-        Detect brand mentions in transcribed text.
+        """DEPRECATED — brand-mention detection moved to the shared catalog.
 
-        Args:
-            transcript: Full transcribed text
-            brand_names: List of brand names to search for
-
-        Returns:
-            List of mention dicts with brand and approximate position
+        This method is retained only for backward-compatibility and is NOT
+        called by the pipeline. Use src.brand_catalog.find_brand_mentions(),
+        which matches against the single shared brand catalogue (the same list
+        that drives logo-detection queries and the knowledge graph) and
+        supports multilingual (Devanagari) aliases. Keeping a second matcher
+        here would risk the two lists drifting apart.
         """
         mentions = []
         transcript_lower = transcript.lower()
