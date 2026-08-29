@@ -22,7 +22,7 @@ new models — only a bounded amount of per-logo inference.
 """
 
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -56,10 +56,19 @@ class BrandResolver:
         ocr_extractor=None,
         class_confidence=DEFAULT_CLASS_CONFIDENCE,
         crop_scale=DEFAULT_CROP_SCALE,
+        retrieval_index=None,
+        retrieval_min_similarity: float = 0.22,
     ):
         self.ocr = ocr_extractor
         self.class_confidence = float(class_confidence)
         self.crop_scale = float(crop_scale)
+        # Optional CLIP logo-retrieval index (Phase 1/2). When provided it is
+        # used as the icon-only fallback: if neither the class label nor OCR
+        # names a brand, the crop is matched by CLIP retrieval against a
+        # per-brand reference bank. Retrieval is the PRIMARY classifier for
+        # icon-only / stylized marks where there is no readable text.
+        self.retrieval_index = retrieval_index
+        self.retrieval_min_similarity = float(retrieval_min_similarity)
 
     @staticmethod
     def _crop(frame: np.ndarray, bbox) -> Optional[np.ndarray]:
@@ -144,90 +153,110 @@ class BrandResolver:
         out["brand"] = None
         class_name = str(det.get("class_name") or "")
         confidence = float(det.get("confidence", 0.0))
+        class_brand = match_brand(class_name)
 
-        # 1. The prompt/class may already name a brand ('Samsung logo'). Trusted
-        #    above the class-confidence gate, but ALWAYS cross-checked against
-        #    crop-OCR below: YOLO-World sometimes confidently (>= gate) mislabels
-        #    a logo region as a spurious brand (e.g. 'SUPREME logo' on a Samsung
-        #    foldable at 0.45-0.60). OCR reads the real on-screen wordmark, so if
-        #    it names a DIFFERENT catalog brand we prefer the OCR ground truth.
-        brand = match_brand(class_name)
-        if brand and confidence >= self.class_confidence:
-            # Cross-check with crop-OCR before committing to the class label.
-            crop = self._crop(frame, det.get("bbox"))
-            ocr_brand = None
-            if crop is not None:
+        # 1. Gather signals ONCE from the logo crop, reused by every path:
+        #      * OCR  — reads the real on-screen wordmark (ground-truth-adjacent)
+        #      * CLIP — image retrieval against the per-brand reference bank
+        #      * class — YOLO-World's zero-shot brand guess (LEAST trustworthy:
+        #        it confidently mislabels icon/stylized marks, e.g. "SUPREME logo"
+        #        on a Samsung foldable at 0.45-0.60).
+        #    Phase 3 visibility: every resolution records all three signals so a
+        #    disagreement (the SUPREME-style failure mode) is never silent.
+        crop = self._crop(frame, det.get("bbox"))
+        ocr_brand, joined_ocr = None, ""
+        retrieval_candidates: List[Tuple[str, float]] = []
+        retrieval_brand, retrieval_sim = None, 0.0
+        if crop is not None:
+            if self.ocr is not None:
                 texts = self._ocr_crop_texts(crop)
-                joined = " ".join(texts)
-                ocr_brand = match_brand(joined) if texts else None
-            if ocr_brand and ocr_brand != brand:
-                logger.info(
-                    "Brand cross-check override: class='%s' (conf=%.2f, gate=%.2f) "
-                    "ocr_text=%r -> %s (was %s)",
-                    class_name, confidence, self.class_confidence, joined[:40],
-                    ocr_brand, brand,
-                )
-                out["brand"] = ocr_brand
-                out["class_name"] = ocr_brand
-                out["ocr_text"] = joined[:40]
-                out["class_confirmed"] = False
+                joined_ocr = " ".join(texts)
+                if texts:
+                    ocr_brand = match_brand(joined_ocr)
+                if texts and not ocr_brand:
+                    self._log_near_misses(joined_ocr, class_name, confidence)
+            if self.retrieval_index is not None and not self.retrieval_index.is_empty:
+                retrieval_candidates = self._retrieval_query(crop)
+                if retrieval_candidates:
+                    retrieval_brand, retrieval_sim = retrieval_candidates[0]
+                    retrieval_candidates = retrieval_candidates[:3]
+
+        # 2. Fusion priority (plan §11): OCR wins when text is present and names
+        #    a brand; else CLIP retrieval (icon-only / corrects spurious class
+        #    labels); else the class label above the confidence gate; else keep
+        #    the detection unresolved.
+        if ocr_brand:
+            out["brand"] = ocr_brand
+            out["class_name"] = ocr_brand
+            out["class_confirmed"] = False
+            out["resolution_source"] = "ocr"
+            out["ocr_text"] = joined_ocr[:40]
+            out["retrieval_top3"] = retrieval_candidates
+            if class_brand and class_brand != ocr_brand:
                 out["resolved_vs_class"] = {
-                    "class_brand": brand,
+                    "class_brand": class_brand,
                     "class_confidence": round(confidence, 3),
                 }
-                return out
-            out["brand"] = brand
-            out["class_name"] = brand
-            out["class_confirmed"] = True
-            logger.debug(
-                "Resolver: class '%s' -> %s (conf=%.2f, gate %.2f)",
-                class_name, brand, confidence, self.class_confidence,
+            logger.info(
+                "Brand resolved via OCR: class='%s' (conf=%.2f) ocr_text=%r -> %s",
+                class_name, confidence, joined_ocr[:40], ocr_brand,
             )
             return out
 
-        # 2. Crop-OCR the logo region and match the recognized text. This is the
-        #    ground-truth path: it reads the actual on-screen wordmark, so it
-        #    works for generic labels ('text logo') AND disconfirms spurious
-        #    class-name hits below the gate.
-        crop = self._crop(frame, det.get("bbox"))
-        if crop is not None:
-            texts = self._ocr_crop_texts(crop)
-            joined = " ".join(texts)
-            brand = match_brand(joined)
-            if texts:
-                logger.debug(
-                    "Resolver: crop-OCR (%d text(s)) -> %s (class='%s', conf=%.2f)",
-                    len(texts), brand, class_name, confidence,
-                )
+        if retrieval_brand:
+            out["brand"] = retrieval_brand
+            out["class_name"] = retrieval_brand
+            out["class_confirmed"] = False
+            out["resolution_source"] = "clip_retrieval"
+            out["retrieval_top3"] = retrieval_candidates
+            out["retrieval_similarity"] = retrieval_sim
+            if class_brand and class_brand != retrieval_brand:
+                out["resolved_vs_class"] = {
+                    "class_brand": class_brand,
+                    "class_confidence": round(confidence, 3),
+                }
+            logger.info(
+                "Brand resolved via CLIP retrieval: class='%s' (conf=%.2f) "
+                "crop->%s sim=%.3f candidates=%s",
+                class_name, confidence, retrieval_brand, retrieval_sim,
+                retrieval_candidates,
+            )
+            return out
 
-            if brand:
-                out["brand"] = brand
-                out["class_name"] = brand
-                out["ocr_text"] = joined[:40]
-                out["class_confirmed"] = False
-                # If the detector had tentatively named a DIFFERENT brand, note
-                # the override so the diagnosis is traceable.
-                if brand and class_name and match_brand(class_name) not in (None, brand):
-                    out["resolved_vs_class"] = {
-                        "class_brand": match_brand(class_name),
-                        "class_confidence": round(confidence, 3),
-                    }
-                logger.info(
-                    "Brand resolved via crop-OCR: class='%s' (conf=%.2f) "
-                    "ocr_text=%r -> %s",
-                    class_name, confidence, joined[:40], brand,
-                )
-                return out
-
-            # 2b. Near-miss diagnosis (check #4): log OCR text that is close to
-            #     a catalog brand but didn't exactly match, so real matches that
-            #     fall just under the alias cutoff are visible in the logs rather
-            #     than silently dropped.
-            if texts:
-                self._log_near_misses(joined, class_name, confidence)
+        if class_brand and confidence >= self.class_confidence:
+            out["brand"] = class_brand
+            out["class_name"] = class_brand
+            out["class_confirmed"] = True
+            if retrieval_candidates:
+                out["retrieval_top3"] = retrieval_candidates
+            logger.debug(
+                "Resolver: class '%s' -> %s (conf=%.2f, gate %.2f)",
+                class_name, class_brand, confidence, self.class_confidence,
+            )
+            return out
 
         # 3. Unresolved — keep the raw label, brand stays None so it is
         #    excluded from brand products and recommendations.
+        return out
+
+    def _retrieval_query(self, crop: np.ndarray) -> List[Tuple[str, float]]:
+        """Top retrieval candidates for a crop, filtered by min similarity.
+
+        Returns [(brand, similarity), ...] desc by similarity, truncated to the
+        index's top-k. Logs the top-3 with the YOLO class guess so a wrong
+        zero-shot label is visible against the retrieval signal (Phase 3).
+        """
+        if self.retrieval_index is None:
+            return []
+        candidates = self.retrieval_index.query(crop)
+        out = [
+            (b, float(s)) for (b, s) in candidates
+            if float(s) >= self.retrieval_min_similarity
+        ]
+        if out:
+            logger.debug(
+                "Retrieval top-3: %s", [(b, round(s, 3)) for b, s in out[:3]]
+            )
         return out
 
     def _log_near_misses(self, joined: str, class_name: str, confidence: float) -> None:

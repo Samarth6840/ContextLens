@@ -41,6 +41,25 @@ layer1:
     # Crop upscale factor applied before OCR so small/low-res logo text reads.
     crop_scale: 2.0
 
+  # CLIP logo-retrieval index (Phase 1/2 — the brand-resolution precision fix).
+  # YOLO-World is weak on icon-only / stylized marks where there is no text for
+  # OCR to rescue, and can confidently mislabel such marks (SUPREME on Samsung).
+  # This makes CLIP embedding retrieval against a per-brand reference bank the
+  # PRIMARY classifier for the icon-only case: crop -> CLIP embed -> nearest
+  # reference logo -> brand. OCR still wins when it reads a wordmark; retrieval
+  # fires only when OCR finds none (see src/layer2/brand_resolver.py).
+  # reference_dir: benchmark/reference_logos_bank  # per-brand subdirectories
+  logo_retrieval:
+    enabled: True
+    # Reference bank: a directory with one subdirectory per canonical brand
+    # (SUB_DIR = brand name, e.g. SAMSUNG/, APPLE/, ...). If this dir is absent
+    # the pipeline falls back to the flat benchmark/reference_logos (grouped by
+    # <BRAND>_N.png filename). Fail-closed: no bank => no retrieval.
+    # Built from the LogoDet-3K train split by scripts/build_train_bank.py.
+    reference_dir: "benchmark/reference_logos_bank/reference"
+    min_similarity: 0.22   # minimum CLIP cosine to accept a retrieval candidate
+    # checkpoint_path: ""  # optional open_clip ViT-B/32 weights; uses built-in CLIP otherwise
+
   # Spatial / temporal label stabilization for scene objects (secondary
   # remediation). The COCO object detector flips the label of one physical
   # device across adjacent frames; this smooths those flips and tags object

@@ -285,6 +285,7 @@ class Phase1Pipeline:
         self._video_quality_estimator = None
         self._confidence_scorer = None
         self._product_index = None  # DINOv2 product-catalog index (Phase 2.5)
+        self._logo_retrieval = None  # CLIP logo-retrieval index (Phase 1/2)
         self._central_vision_model = None  # Qwen3-VL 32B
 
         # Per-model threading locks for GPU inference safety.
@@ -353,6 +354,7 @@ class Phase1Pipeline:
             ("_stt", self._stt_factory),
             ("_audio_events", self._audio_events_factory),
             ("_product_index", self._product_index_factory),
+            ("_logo_retrieval", self._logo_retrieval_factory),
         ]
         to_load = [(a, f) for a, f in attrs if getattr(self, a) is None]
         wall: Dict[str, float] = {}
@@ -455,6 +457,43 @@ class Phase1Pipeline:
         )
         index.build(self.embedding_extractor)
         return index
+
+    def _logo_retrieval_factory(self):
+        from src.layer1.logo_retrieval import LogoRetrievalIndex
+        lr_cfg = self.cfg["layer1"].get("logo_retrieval", {})
+        ref_dir = lr_cfg.get("reference_dir", "benchmark/reference_logos_bank")
+        base = Path(ref_dir)
+        # If the per-brand subdirectory bank doesn't exist, fall back to the
+        # flat legacy reference_logos grouped by <BRAND>_N.png filename so the
+        # feature still works out of the box. Fail closed (empty index) if
+        # neither layout is present.
+        if not base.is_dir() and Path(ref_dir).parent.joinpath("reference_logos").is_dir():
+            flat_dir = Path(ref_dir).parent.joinpath("reference_logos")
+            bank = flat_dir
+            import shutil
+            build_dir = Path("/tmp") / "adscene_lr_bank"
+            shutil.rmtree(build_dir, ignore_errors=True)
+            for f in sorted(flat_dir.glob("*.png")):
+                brand = f.name.split("_")[0].upper()
+                (build_dir / brand).mkdir(parents=True, exist_ok=True)
+                shutil.copy(f, build_dir / brand / f.name)
+            ref_dir = str(build_dir)
+        index = LogoRetrievalIndex.build_from_dir(
+            reference_dir=ref_dir,
+            device=self.device,
+            checkpoint_path=lr_cfg.get("checkpoint_path"),
+        )
+        if index.is_empty:
+            logger.warning(
+                "Logo retrieval index empty (no reference bank at %s). "
+                "Icon-only logo resolution via CLIP disabled; failing closed.",
+                ref_dir,
+            )
+        return index
+
+    @property
+    def logo_retrieval(self):
+        return self._get_or_create("_logo_retrieval", self._logo_retrieval_factory)
 
     @property
     def detector(self):
@@ -894,10 +933,13 @@ class Phase1Pipeline:
         # excluded from brand products / recommendations.
         _t_resolve = time.monotonic()
         _br_cfg = self.cfg["layer1"].get("logo_detection", {})
+        _lr_cfg = self.cfg["layer1"].get("logo_retrieval", {})
         resolver = BrandResolver(
             ocr_extractor=self.ocr,
             class_confidence=_br_cfg.get("class_confidence", 0.40),
             crop_scale=_br_cfg.get("crop_scale", 2.0),
+            retrieval_index=self.logo_retrieval if _lr_cfg.get("enabled", True) else None,
+            retrieval_min_similarity=_lr_cfg.get("min_similarity", 0.22),
         )
         resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos

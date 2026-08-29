@@ -1,0 +1,78 @@
+{
+  "test_crops": 159,
+  "top1_accuracy": 0.836,
+  "top3_accuracy": 0.836,
+  "mean_top1_similarity": 0.941,
+  "per_brand": {
+    "ADIDAS": {
+      "total": 6,
+      "top1_accuracy": 0.667,
+      "top3_accuracy": 0.667
+    },
+    "APPLE": {
+      "total": 26,
+      "top1_accuracy": 0.962,
+      "top3_accuracy": 0.962
+    },
+    "ASICS": {
+      "total": 10,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "BMW": {
+      "total": 6,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "COCA-COLA": {
+      "total": 14,
+      "top1_accuracy": 0.0,
+      "top3_accuracy": 0.0
+    },
+    "GOOGLE": {
+      "total": 3,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "LEVI'S": {
+      "total": 4,
+      "top1_accuracy": 0.0,
+      "top3_accuracy": 0.0
+    },
+    "LULULEMON": {
+      "total": 10,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "NEW BALANCE": {
+      "total": 34,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "PEPSI": {
+      "total": 5,
+      "top1_accuracy": 0.8,
+      "top3_accuracy": 0.8
+    },
+    "ROLEX": {
+      "total": 6,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "SAMSUNG": {
+      "total": 11,
+      "top1_accuracy": 1.0,
+      "top3_accuracy": 1.0
+    },
+    "UNDER ARMOUR": {
+      "total": 7,
+      "top1_accuracy": 0.714,
+      "top3_accuracy": 0.714
+    },
+    "ZARA": {
+      "total": 17,
+      "top1_accuracy": 0.882,
+      "top3_accuracy": 0.882
+    }
+  }
+}

@@ -606,6 +606,7 @@ class TestPipelineLazyHandles:
         for attr in (
             "_detector", "_logo_detector", "_embedding_extractor",
             "_ocr", "_stt", "_audio_events", "_product_index",
+            "_logo_retrieval",
         ):
             assert getattr(p, attr) is None, attr
 
@@ -618,6 +619,7 @@ class TestPipelineLazyHandles:
         for attr in (
             "_detector", "_logo_detector", "_embedding_extractor",
             "_ocr", "_stt", "_audio_events", "_product_index",
+            "_logo_retrieval",
         ):
             setattr(p, attr, object())
         assert p.warmup() == {}

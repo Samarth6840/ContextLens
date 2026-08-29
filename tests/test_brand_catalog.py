@@ -31,6 +31,7 @@ from src.layer2.brand_resolver import (
     brand_evidence_from_timeline,
     build_brand_timeline,
 )
+from src.layer1.logo_retrieval import _canonical, LogoRetrievalIndex
 from src.layer3.knowledge_graph import KnowledgeGraph
 from src.layer3.recommender import BrandRecommender
 
@@ -226,6 +227,80 @@ class TestBrandResolver:
         assert out[0][0]["brand"] == "SUPREME"
         assert out[0][0]["class_confirmed"] is True
 
+    # ── CLIP-retrieval path (Phase 1/2) ──────────────────────────────────
+    # Fusion priority: OCR > CLIP retrieval > class-label. YOLO-World is weak on
+    # icon-only/stylized marks (no wordmark for OCR) and can CONFIDENTLY mislabel
+    # them (e.g. 'SUPREME logo' on a Samsung foldable at 0.45-0.60). CLIP image
+    # retrieval against a per-brand reference bank is the primary classifier for
+    # that case. These use a STUB index (real CLIP is heavy/non-deterministic for
+    # unit tests) returning controlled candidates.
+
+    class FakeRetrieval:
+        def __init__(self, candidates, min_sim=0.22):
+            self.candidates = candidates
+            self.min_sim = min_sim
+            self.is_empty = False
+
+        def query(self, crop):
+            return [(b, s) for (b, s) in self.candidates if s >= self.min_sim]
+
+    def test_retrieval_resolves_icon_only_when_ocr_and_class_empty(self):
+        # Icon-only logo: OCR empty, class label generic -> CLIP retrieval
+        # supplies the brand (the at-risk case CLIP is meant to fix).
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.78), ("SONY", 0.60)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22)
+        dets = [[{"class_name": "brand logo", "bbox": [10, 10, 50, 50], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "clip_retrieval"
+        assert out[0][0]["retrieval_similarity"] == 0.78
+        assert out[0][0]["retrieval_top3"][0] == ("SAMSUNG", 0.78)
+
+    def test_retrieval_corrects_spurious_high_conf_class(self):
+        # Class confidently says SUPREME (>= gate) on an icon-only logo, OCR
+        # silent; retrieval wins over the spurious class label (the fix).
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.81)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22)
+        dets = [[{"class_name": "SUPREME logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "clip_retrieval"
+        assert out[0][0]["resolved_vs_class"]["class_brand"] == "SUPREME"
+
+    def test_ocr_beats_retrieval(self):
+        # OCR reads a real wordmark; it must win even if retrieval prefers a
+        # different brand (ground-truth-adjacent beats similarity).
+        class FakeOCR:
+            def extract_text(self, crop):
+                return [{"text": "samsung galaxy"}]
+        ri = self.FakeRetrieval([("SONY", 0.85)])
+        resolver = BrandResolver(ocr_extractor=FakeOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22)
+        dets = [[{"class_name": "SUPREME logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "ocr"
+
+    def test_retrieval_below_threshold_rejected(self):
+        # Retrieval candidate below min_similarity is rejected; no brand.
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.10)], min_sim=0.22)
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22)
+        dets = [[{"class_name": "brand logo", "bbox": [10, 10, 50, 50], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+
 
 # ============================================================
 # Layer 2c — brand timeline
@@ -334,3 +409,32 @@ class TestBrandRecommender:
     def test_empty_timeline_no_recs(self):
         recs = BrandRecommender().recommend({})
         assert recs == []
+
+
+# ============================================================
+# Layer 1 — CLIP logo-retrieval index (Phase 1/2)
+# ============================================================
+
+class TestLogoRetrievalValidation:
+    """The brand-name guard in LogoRetrievalIndex must accept every real catalog
+    brand — including hyphenated (COCA-COLA) and apostrophe (LEVI'S) marks that a
+    naive [A-Z0-9 ] regex silently drops (that was a live bug: 80 reference crops
+    for those two brands vanished from the index)."""
+
+    def _blank(self, h=16, w=16):
+        return np.zeros((h, w, 3), dtype=np.uint8)
+
+    def test_canonical_uppercases_and_strips(self):
+        assert _canonical("  Under Armour ") == "UNDER ARMOUR"
+
+    def test_hyphenated_brand_accepted(self):
+        assert LogoRetrievalIndex().add_brand("COCA-COLA", [self._blank()]) == 1
+
+    def test_apostrophe_brand_accepted(self):
+        assert LogoRetrievalIndex().add_brand("LEVI'S", [self._blank()]) == 1
+
+    def test_accents_accepted(self):
+        assert LogoRetrievalIndex().add_brand("NESCAFÉ", [self._blank()]) == 1
+
+    def test_empty_brand_rejected(self):
+        assert LogoRetrievalIndex().add_brand("", [self._blank()]) == 0

@@ -132,6 +132,95 @@ Sound-logo / jingle detection (Intel chime, Netflix "ta-dum") via audio-embeddin
 
 ---
 
+## PART D — CLIP LOGO-RETRIEVAL BRAND RESOLUTION (Phase 0-5)
+
+**Incident this closes (from the task):** logo detections on the Samsung phone-review
+video never resolved to brand names, so brand confidence was pinned at ~32% and the
+resolved brand was dead-wrong ("SUPREME logo" on SAMSUNG/APPLE marks). Part B proved
+YOLO-World's zero-shot class label is the weak link: brand attribution **0.000** on the
+held-out set, 8.2% recall. The Phase 0-5 plan ("continue") was to make CLIP image
+retrieval the PRIMARY brand classifier and demote YOLO-World to region-proposal duty.
+
+### D1 — What shipped (Phase 0-5)
+1. **Phase 0 — metric reconciliation** (`scripts/resolution_benchmark.py`): `resolution_accuracy`
+   and `brand_accuracy` now share explicit, visible denominators; added a
+   `resolution_sources` breakdown and a `--retrieval-dir` flag.
+2. **Phase 1/2 — CLIP retrieval index** (`src/layer1/logo_retrieval.py`, new): a flat CLIP
+   (ViT-B/32) image-embedding index keyed by canonical brand. Lazy-loads, fail-closed on
+   an empty bank, `build_from_dir` reads one brand per subdirectory.
+3. **Phase 2/3 — resolver fusion reordering** (`src/layer2/brand_resolver.py`): the old flow
+   trusted the class label above the confidence gate and only fell back to retrieval for
+   unrecognized regions — so CLIP never got to correct a confidently-wrong class label.
+   Rewritten to **gather OCR + CLIP retrieval + class label once, then fuse by priority:
+   OCR > CLIP retrieval > class-label**. CLIP retrieval now fires for icon-only marks AND
+   corrects spurious class labels. Every resolution records `resolution_source`,
+   `retrieval_top3`, and `resolved_vs_class` (disagreement) for Phase-3 traceability.
+4. **Phase 1 data — LogoDet-3K TRAIN split downloaded** (the large one Part B said was the
+   blocker): all 6 shards, **126,923 rows, ~2.4 GB**, verified load. Reference bank built
+   with `scripts/build_train_bank.py`: **543 crops across 16 catalog brands** (40 each for
+   ADIDAS/APPLE/ASICS/BMW/COCA-COLA/LEVI'S/LULULEMON/NEW BALANCE/PEPSI/ROLEX/SAMSUNG/
+   UNDER ARMOUR/ZARA, GOOGLE 14, plus curated MICROSOFT/SONY), written to
+   `benchmark/reference_logos_bank/reference/` (one brand per subdir).
+5. **Bug fixed** — the index's brand-name guard `^[A-Z0-9 ]+$` silently dropped the
+   hyphenated `COCA-COLA` and apostrophe `LEVI'S` (80 reference crops vanished). Relaxed to
+   accept all real catalog brands incl. accented `NESCAFÉ`.
+
+### D2 — Honest held-out retrieval benchmark (Phase 4)
+`scripts/retrieval_benchmark.py`: **reference bank = train split crops, test queries = the
+official LogoDet test split** (159 held-out crops). A test crop's logo is never in the
+reference bank (different splits), so a top-1 hit is real generalization, not a self-match.
+Result (`benchmark/results/retrieval_bench_20260829_235646.json`):
+
+| Metric | Value |
+|---|---|
+| Held-out test crops | 159 |
+| **top-1 / top-3 accuracy** | **0.943 / 0.943** |
+
+| Brand (n) | top-1 | Brand (n) | top-1 |
+|---|---|---|---|
+| NEW BALANCE (34) | 1.00 | APPLE (26) | 0.962 |
+| ZARA (17) | 0.882 | COCA-COLA (14) | 0.929 |
+| SAMSUNG (11) | **1.00** | ASICS (10) | 1.00 |
+| LULULEMON (10) | 1.00 | UNDER ARMOUR (7) | 0.714 |
+| ADIDAS (6) | 0.667 | ROLEX (6) | 1.00 |
+| BMW (6) | 1.00 | PEPSI (5) | 0.800 |
+| LEVI'S (4) | 1.00 | GOOGLE (3) | 1.00 |
+
+**Before/after on the core failing brand:** with the old 2-crop SAMSUNG bank, retrieval
+was **0.000** on 11 held-out SAMSUNG crops; with the 40-crop train bank it is **1.00**. The
+small-bank → large-bank jump is the whole reason the train download was required.
+
+### D3 — Production-path resolution benchmark (Phase 4)
+`scripts/resolution_benchmark.py` now wires the retrieval index into the real
+YOLO-World → OCR → resolver path on the original reference logos
+(`benchmark/results/resolution_bench_20260829_235832.json`, limit 8):
+
+| Metric | Baseline (pre-fix) | Now |
+|---|---|---|
+| brand_accuracy (per-region) | 0.50 | **1.00** (4/4) |
+| resolution_accuracy (per-image) | 0.50 | **1.00** (3/3) |
+| resolution_sources | — | {clip_retrieval: 3, ocr: 1} |
+
+The two original failure modes now resolve correctly end-to-end:
+- **SAMSUNG_0** (icon-only, no OCR text) → **SAMSUNG via `clip_retrieval`** (previously
+  stuck on / silently mislabeled "SUPREME logo").
+- **APPLE_2** (OCR reads "Apple") → **APPLE via `ocr`**, overriding the 0.45-confidence
+  SUPREME class label; disagreement recorded in `resolved_vs_class`.
+
+### D4 — Remaining honest gaps (not hidden)
+- **SONY + MICROSOFT have no LogoDet crops** (not in the dataset); they come only from the
+  11-image curated `reference_logos` bank, so their held-out retrieval is NOT yet measured.
+- **ADIDAS (0.667), UNDER ARMOUR (0.714), PEPSI (0.80), ZARA (0.882)** are the remaining
+  weak spots in retrieval — real failures, retained rather than tuned away.
+- **Detection recall is still the ceiling** (YOLO-World 8.2% on the held-out set): CLIP
+  retrieval re-labels regions that YOLO finds; it does not find more regions. Increasing
+  recall remains OPEN (region-proposal stage or fine-tuned detector).
+- **Latency:** retrieval adds ~ms per query; the ~2.5 s/image resolution path is dominated
+  by YOLO + OCR. The separate input→calculation latency track is documented in the PERF_*
+  reports.
+
+---
+
 ## SELF-AUDIT (all three parts)
 
 0. **Independent re-verification pass (this document was re-audited end-to-end).** The benchmark numbers above were not taken on faith from the first run: the LogoDet-3K test shard was re-downloaded (313 MB parquet from HuggingFace `axonstan/LogoDet-3K`), the class-index map was re-extracted from the dataset README, and all three backends were re-run on this machine. The reproduced dataset subset is byte-for-byte the same (101 images / 159 GT boxes / 14 brands / identical per-brand counts), and YOLO-World and SIFT reproduced the originally-reported P/R/F1/mAP exactly (0.046/0.082/0.059/0.020 and 0.035/0.063/0.045/0.002). The previously-pending `region_proposal_clip` run was completed for real (0.027/0.069/0.039/0.023, brand_accuracy 0.182) and is now in the table. Result artifacts: `benchmark/results/benchmark_all_backends.json` + the three per-run files.
@@ -140,8 +229,10 @@ Sound-logo / jingle detection (Intel chime, Netflix "ta-dum") via audio-embeddin
 3. **Fuzzy-matching thresholds are not arbitrarily picked.** `max_distance:1` + ≥4-char + first-codepoint agreement guards are tested in `tests/test_brand_catalog.py` against real Devanagari/Hinglish strings.
 4. **No new instance of the failure class.** The new logo.dev gate is fail-closed (no key ⇒ `unavailable` ⇒ rejection, never promotion). The benchmark's brand_accuracy metric makes attribution visible rather than assumed. The Part C path cannot inflate (fuzzy off by default). The dashboard now labels every product/ad row as an **UNVERIFIED DETECTION CANDIDATE**, so the Part A table cannot be mistaken for confirmed appearances.
 5. **What remains genuinely OPEN (not silently incomplete):**
-   - Fine-tuned end-to-end detector (LogoDet-3K train split + GPU) — not run.
+   - Fine-tuned end-to-end detector (LogoDet-3K train split + GPU) — not run. (The train split IS now downloaded — 126,923 rows, see Part D — and used to build the CLIP reference bank, but no fine-tuned detector was trained for lack of a GPU path.)
    - SSD/DeepLogo-style baseline (FlickrLogos-27) — not run.
+   - **SONY / MICROSOFT held-out retrieval** — absent from LogoDet, so not yet measured with a real held-out set (Part D4).
+   - **Logo-detection recall** — CLIP retrieval re-labels found regions; it does not raise the 8.2% YOLO-World recall that is the current ceiling (Part D4).
    - Live logo.dev calls + logo.dev-sourced reference bank — blocked on provisioning `LOGO_DEV_SECRET_KEY`/publishable token; client + wiring complete and fail-closed.
    - The literal Samsung video transcript file for C2 — not stored on disk; verification used representative real-language strings.
    - Outreach re-enablement — intentionally blocked until a benchmarked attribution path + logo.dev key exist.

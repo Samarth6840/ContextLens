@@ -32,6 +32,7 @@ import json
 import logging
 import sys
 import time
+from collections import Counter
 from datetime import datetime
 from pathlib import Path
 
@@ -60,9 +61,10 @@ def load_images(refdir: str):
     return images
 
 
-def run(refdir: str, device: str, limit: int):
+def run(refdir: str, device: str, limit: int, retrieval_dir: str = None):
     from src.brand_catalog import build_text_queries
     from src.layer1.logo_detector import create_logo_detector
+    from src.layer1.logo_retrieval import LogoRetrievalIndex
     from src.layer1.ocr import OCRExtractor
     from src.layer2.brand_resolver import BrandResolver
 
@@ -81,7 +83,20 @@ def run(refdir: str, device: str, limit: int):
     )
     logger.info("Loading PaddleOCR...")
     ocr = OCRExtractor(lang="en", use_angle_cls=True, det_db_thresh=0.3, rec_batch_num=6)
-    resolver = BrandResolver(ocr_extractor=ocr, class_confidence=0.40, crop_scale=2.0)
+
+    retrieval_index = None
+    if retrieval_dir and Path(retrieval_dir).is_dir():
+        logger.info("Loading CLIP logo-retrieval index from %s", retrieval_dir)
+        retrieval_index = LogoRetrievalIndex.build_from_dir(retrieval_dir, device="cpu")
+        logger.info("  index: %d crops / %d brands",
+                    retrieval_index._embeddings.shape[0], len(retrieval_index.brands))
+    resolver = BrandResolver(
+        ocr_extractor=ocr,
+        class_confidence=0.40,
+        crop_scale=2.0,
+        retrieval_index=retrieval_index,
+        retrieval_min_similarity=0.22,
+    )
 
     images = load_images(refdir)
     if limit:
@@ -102,59 +117,100 @@ def run(refdir: str, device: str, limit: int):
     elapsed = time.monotonic() - t0
 
     # ── Aggregate ────────────────────────────────────────────────────────
-    n = len(rows)
-    detected = [r for r in rows if r["n_regions"] > 0]
-    resolved_any = [r for r in rows if r["resolved"]]
-    correct = []
+    # Metric conventions (made explicit so the denominators can't silently
+    # disagree):
+    #   * a "region" is a YOLO logo-box proposal handed to the resolver.
+    #   * a "brand resolve attempt" is a region whose resolver output carries a
+    #     NON-None `brand` (i.e. we committed to a brand identity for it).
+    #   * resolution_accuracy and brand_accuracy share that same denominator,
+    #     differing only in granularity:
+    #       - brand_accuracy: per-REGION  (correct resolves / brand attempts)
+    #       - resolution_accuracy: per-IMAGE (best region's resolve vs GT),
+    #         correct / images-that-resolved-a-brand. Reported with numerator &
+    #         denominator visible so it can be audited.
+    n_images = len(rows)
+    images_detected = [r for r in rows if r["n_regions"] > 0]
 
+    total_regions = sum(r["n_regions"] for r in rows)
+    brand_attempts = 0
+    correct_regions = 0
+    images_with_brand = 0
+    images_correct = 0
+    correct_confidences: List[float] = []
+    resolution_sources: Counter = Counter()
+
+    # Per-region stats keyed by (file, GT) for the sample breakdown.
     per_brand: dict = {}
     for r in rows:
         key = r["gt_brand"]
         b = per_brand.setdefault(
-            key, {"images": 0, "detected": 0, "resolved": 0, "correct": 0, "confs": []}
+            key, {"images": 0, "regions": 0, "attempts": 0,
+                  "correct": 0, "confs": []}
         )
         b["images"] += 1
-        b["detected"] += 1 if r["n_regions"] > 0 else 0
+        b["regions"] += r["n_regions"]
 
+        resolved = r["resolved"]
+        # Best (highest-confidence) brand-bearing region for THIS image.
         best = None
-        for d in r["resolved"]:
-            cand = (d.get("brand"), float(d.get("confidence", 0.0)))
-            if cand[0]:
-                if best is None or cand[1] > best[1]:
-                    best = cand
-        if best:
-            b["resolved"] += 1
-            if (best[0] or "").upper() == r["gt_brand"]:
-                b["correct"] += 1
-                b["confs"].append(best[1])
-                correct.append(r)
+        for d in resolved:
+            if not d.get("brand"):
+                continue
+            brand_attempts += 1
+            resolution_sources[d.get("resolution_source", "class_label")] += 1
+            dconf = float(d.get("confidence", 0.0))
+            if best is None or dconf > best[1]:
+                best = (d["brand"], dconf)
 
-    total_correct = sum(b["correct"] for b in per_brand.values())
-    total_resolved = sum(b["resolved"] for b in per_brand.values())
+        if best:
+            images_with_brand += 1
+            is_correct = best[0].upper() == r["gt_brand"]
+            if is_correct:
+                images_correct += 1
+            # Per-REGION correctness: count every region resolved to GT.
+            for d in resolved:
+                if d.get("brand") and d["brand"].upper() == r["gt_brand"]:
+                    b["correct"] += 1
+                    correct_regions += 1
+                    correct_confidences.append(float(d.get("confidence", 0.0)))
+                    b["confs"].append(float(d.get("confidence", 0.0)))
+            b["attempts"] += len([d for d in resolved if d.get("brand")])
 
     aggregate = {
-        "images": n,
-        "detected_rate": round(len(detected) / n, 3) if n else 0.0,
-        "resolve_rate": round(len(resolved_any) / n, 3) if n else 0.0,
-        "resolution_accuracy": round(total_correct / len(resolved_any), 3)
-        if resolved_any else 0.0,
-        "brand_accuracy": round(total_correct / total_resolved, 3)
-        if total_resolved else 0.0,
-        "mean_correct_conf": round(
-            sum(c for b in per_brand.values() for c in b["confs"]) / total_correct, 3
-        ) if total_correct else 0.0,
+        "images": n_images,
+        "regions_total": total_regions,
+        "regions_detected_rate": round(len(images_detected) / n_images, 3)
+        if n_images else 0.0,
+        # Per-region brand metrics (shared denominator = brand resolve attempts)
+        "brand_attempts": brand_attempts,
+        "brand_correct": correct_regions,
+        "brand_accuracy": round(correct_regions / brand_attempts, 3)
+        if brand_attempts else 0.0,
+        "resolution_sources": dict(sorted(resolution_sources.items())),
+        # Per-image resolution metrics (denominator = images that resolved a brand)
+        "images_resolved_brand": images_with_brand,
+        "images_correct": images_correct,
+        "resolution_accuracy": round(images_correct / images_with_brand, 3)
+        if images_with_brand else 0.0,
+        # Confidence of CORRECT regions — note this is the detector/class
+        # confidence, NOT a dedicated match-conf; see Phase 2 (CLIP similarity).
+        "mean_correct_detection_conf": round(
+            sum(correct_confidences) / len(correct_confidences), 3
+        ) if correct_confidences else 0.0,
         "latency_total_s": round(elapsed, 3),
-        "latency_ms_per_image": round(elapsed / n * 1000, 1) if n else None,
+        "latency_ms_per_image": round(elapsed / n_images * 1000, 1)
+        if n_images else None,
         "per_brand": {
             k: {
                 "images": v["images"],
-                "detected": v["detected"],
-                "resolved": v["resolved"],
+                "regions": v["regions"],
+                "attempts": v["attempts"],
                 "correct": v["correct"],
-                "accuracy": round(v["correct"] / v["resolved"], 3)
-                if v["resolved"] else 0.0,
-                "mean_correct_conf": round(sum(v["confs"]) / len(v["confs"]), 3)
-                if v["confs"] else 0.0,
+                "accuracy": round(v["correct"] / v["attempts"], 3)
+                if v["attempts"] else 0.0,
+                "mean_correct_detection_conf": round(
+                    sum(v["confs"]) / len(v["confs"]), 3
+                ) if v["confs"] else 0.0,
             }
             for k, v in sorted(per_brand.items())
         },
@@ -166,7 +222,9 @@ def run(refdir: str, device: str, limit: int):
         for d in r["resolved"]:
             if d.get("brand") and (best is None or d["confidence"] > best["confidence"]):
                 best = {"brand": d["brand"], "confidence": round(d["confidence"], 3),
-                        "ocr_text": d.get("ocr_text")}
+                        "ocr_text": d.get("ocr_text"),
+                        "resolution_source": d.get("resolution_source"),
+                        "retrieval_top3": d.get("retrieval_top3")}
         sample.append({
             "file": r["file"],
             "gt": r["gt_brand"],
@@ -187,6 +245,8 @@ def run(refdir: str, device: str, limit: int):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--refdir", default="benchmark/reference_logos")
+    p.add_argument("--retrieval-dir", default="benchmark/reference_logos_bank/reference")
+    p.add_argument("--no-retrieval", action="store_true")
     p.add_argument("--device", default=None)
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--output", default="benchmark/results")
@@ -195,7 +255,8 @@ def main():
     if not Path(args.refdir).is_dir():
         sys.exit(f"FATAL: reference dir not found: {args.refdir}")
 
-    result = run(args.refdir, args.device, args.limit)
+    result = run(args.refdir, args.device, args.limit,
+                 retrieval_dir=None if args.no_retrieval else args.retrieval_dir)
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"resolution_bench_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -204,10 +265,12 @@ def main():
     print("\nPer-image:")
     for it in result["per_image"]:
         mark = "✓" if it["correct"] else ("—" if it["resolved"] else "✗")
+        r = it["resolved"]
+        src = r.get("resolution_source") if r else None
         print(
             f"  {it['file']:18s} gt={it['gt']:10s} regions={it['n_regions']} "
-            f"resolved={str(it['resolved'].get('brand') if it['resolved'] else None):12s} "
-            f"conf={it['resolved'].get('confidence') if it['resolved'] else None}  {mark}"
+            f"resolved={str(r.get('brand') if r else None):12s} src={str(src):14s} "
+            f"conf={r.get('confidence') if r else None}  {mark}"
         )
     print(f"\nWrote {out_file}")
 
