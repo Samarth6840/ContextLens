@@ -8,14 +8,16 @@ layer1:
     iou_threshold: 0.45
 
   logo_detection:
-    # Primary backend: RF-DETR fine-tuned on LogoDet-3K for brand detection
-    backend: "rfdetr"  # "rfdetr" | "yolo_world"
-    model: "weights/rfdetr_logo_detector.pt"  # RF-DETR LogoDet-3K fine-tuned weights
-    confidence_threshold: 0.25  # RF-DETR optimized threshold for LogoDet-3K
-    # Alternative: YOLO-World zero-shot fallback
-    # backend: "yolo_world"
-    # model: "yolov8s-worldv2.pt"
-    # confidence_threshold: 0.10
+    # NOTE: The RF-DETR backend is NOT wired into the pipeline loader (the only
+    # runnable backend is yolo_world via src/layer1/logo_detector.py) and its
+    # weights (weights/rfdetr_logo_detector.pt) are not present in the repo.
+    # Pointing config at 'rfdetr' previously made every upload fail with
+    # "Unknown logo detection backend: 'rfdetr'". Until RF-DETR is properly
+    # integrated + weights shipped, the shipped default remains YOLO-World
+    # (yolov8s-worldv2.pt is present at repo root).
+    backend: "yolo_world"  # "yolo_world" (shipped) | "rfdetr" (not yet wired)
+    model: "yolov8s-worldv2.pt"  # YOLO-World zero-shot weights (present at repo root)
+    confidence_threshold: 0.10
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with
@@ -32,6 +34,10 @@ layer1:
   # Central multimodal understanding: Qwen3-VL 32B handles video, OCR, and reasoning in one pass
   central_vision_model:
     backend: "qwen3vl"  # "qwen3vl" | "dinov2"
+    # OFF by default: the Qwen3-VL 32B integration is not yet wired (its loader
+    # in src/layer1/qwen3vl.py is a stub that fails closed) and its output is
+    # not consumed downstream. Set enabled: true only after it is integrated.
+    enabled: False
     model: "Qwen3-VL-32B"
     load_8bit: True  # Use 8-bit quantization for memory efficiency on Apple Silicon
     device: None  # auto-detect (mps/cuda/cpu)
@@ -120,7 +126,7 @@ layer2b:
     # Voxtral Realtime scene context
     scene_context:
       weight: 0.15  # Voxtral audio event confidence
-      status: implemented  # Voxtral Realtime audio events
+      status: scaffolded  # BEATs audio event detector (pending product/scene relevance mapping)
     # Product retrieval (Phase 2)
     product_retrieval:
       weight: 0.10

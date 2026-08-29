@@ -236,13 +236,21 @@ async function renderJobIndex(root) {
 }
 
 function renderDashboard(root, d, activeTab) {
-  const tabs = ['scenes', 'products', 'ads', 'outreach']
+  // Part A containment flag — outreach (DRAFT EMAIL) controls are gated on
+  // the server-provided flag, which defaults OFF until the brand-collaboration
+  // data path passes the integrity review.
+  outreachEnabled = d.outreach_enabled === true;
+  outreachDisabledReason = d.outreach_reason || 'DRAFT EMAIL DISABLED — PENDING DATA-INTEGRITY REVIEW';
+
+  const tabs = ['scenes', 'products', 'openset', 'recommend', 'ads', 'outreach']
     .map((t) => `<button class="tab${t === activeTab ? ' is-active' : ''}" data-tab="${t}">${t}</button>`)
     .join('');
 
   const panels = {
     scenes: scenesPanel(d),
     products: productsPanel(d),
+    openset: openSetPanel(d),
+    recommend: recommendPanel(d),
     ads: adsPanel(d),
     outreach: outreachPanel(d),
   };
@@ -258,6 +266,8 @@ function renderDashboard(root, d, activeTab) {
     <div class="tabs">${tabs}</div>
     <div class="tab-panel is-active" data-panel="scenes">${panels.scenes}</div>
     <div class="tab-panel" data-panel="products">${panels.products}</div>
+    <div class="tab-panel" data-panel="openset">${panels.openset}</div>
+    <div class="tab-panel" data-panel="recommend">${panels.recommend}</div>
     <div class="tab-panel" data-panel="ads">${panels.ads}</div>
     <div class="tab-panel" data-panel="outreach">${panels.outreach}</div>
   `;
@@ -273,20 +283,27 @@ function renderDashboard(root, d, activeTab) {
   });
 }
 
+function sceneThumbUrl(jobId, frameIndex) {
+  return `/api/scene/${encodeURIComponent(jobId)}/${frameIndex}`;
+}
+
 function scenesPanel(d) {
   if (!d.scenes || !d.scenes.length) {
     return `<div class="empty">NO SCENES DETECTED</div>`;
   }
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.scenes.length} SCENES · ${d.num_frames} FRAMES · ${(d.video_fps || 0).toFixed(1)} FPS</span></div>`;
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.scenes.length} SCENES · ${d.num_frames} FRAMES · ${(d.video_fps || 0).toFixed(1)} FPS — CLICK A FRAME TO OPEN THE SOURCE IMAGE</span></div>`;
   const rows = d.scenes.map((s) => `
     <div class="card">
       <div class="card-head">
         <div class="card-title">${fmtScene(s.n)}</div>
         <div class="tag"><span class="tag-label">TIME</span> ${fmtTime(s.timestamp)}</div>
       </div>
+      <a class="scene-thumb-link" href="${sceneThumbUrl(d.job_id, s.frame_index)}" target="_blank">
+        <img class="scene-thumb" src="${sceneThumbUrl(d.job_id, s.frame_index)}" alt="${fmtScene(s.n)} — ANNOTATED FRAME" loading="lazy">
+      </a>
       <div class="scene-objects">
         ${s.objects.slice(0, 12).map((o) => chip(`${o.class_name} ${(o.confidence * 100).toFixed(0)}%`)).join('') || chip('NO OBJECTS', 'chip-ghost')}
-        ${s.logos && s.logos.length ? s.logos.map((o) => chip(`${o.class_name} LOGO ${(o.confidence * 100).toFixed(0)}%`, 'chip-accent')).join('') : ''}
+        ${s.logos && s.logos.length ? s.logos.map((o) => chip(`${o.class_name} ${(o.confidence * 100).toFixed(0)}%`, 'chip-accent')).join('') : ''}
       </div>
     </div>`).join('');
   return head + rows;
@@ -294,27 +311,55 @@ function scenesPanel(d) {
 
 function productsPanel(d) {
   if (!d.products || !d.products.length) {
-    return `<div class="empty">NO BRAND PRODUCTS DETECTED</div>`;
+    const reason = d.products_status_reason
+      || 'BRAND ATTRIBUTION IS NOT YET PRODUCTION-VALIDATED (see MAJOR_REMEDIATION_REPORT.md Part B).';
+    const status = d.products_status || 'NOT_AVAILABLE';
+    return `
+      <div class="empty" style="text-align:left">
+        <div class="error-title">${status} — NO BRAND CAN BE ASSERTED AS AN ON-SCREEN APPEARANCE</div>
+        ${escapeHtml(reason)}
+      </div>`;
   }
+  const integrityBanner = `
+    <div class="error-box" style="margin-bottom:16px">
+      <div class="error-title">UNVERIFIED DETECTION CANDIDATES — NOT CONFIRMED APPEARANCES</div>
+      ${escapeHtml(d.products_status_reason || 'BRAND ATTRIBUTION IS NOT YET PRODUCTION-VALIDATED (see MAJOR_REMEDIATION_REPORT.md Part B).')}
+    </div>`;
   const rows = d.products.map((p) => `
     <tr>
       <td>
-        <span class="cell-brand">${escapeHtml(p.brand)}</span>
-        <span class="cell-cat">${escapeHtml(p.category || 'UNKNOWN')}</span>
+        <div class="brand-cell">
+          ${p.first_frame != null ? `<img class="mini-thumb" src="${sceneThumbUrl(d.job_id, p.first_frame)}" loading="lazy" alt="">` : ''}
+          <div>
+            <span class="cell-brand">${escapeHtml(p.brand)}</span>
+            <span class="cell-cat">${escapeHtml(p.category || 'UNKNOWN')}</span>
+          </div>
+        </div>
       </td>
       <td>${escapeHtml(p.product || p.brand)}</td>
       <td>
         <div class="chips">
-          ${p.appearances.slice(0, 10).map((sc) => chip(sc)).join('')}
-          ${p.appearances.length > 10 ? chip('+' + (p.appearances.length - 10), 'chip-ghost') : ''}
+          ${p.appearances.slice(0, 8).map((sc) => chip(sc)).join('')}
+          ${p.appearances.length > 8 ? chip('+' + (p.appearances.length - 8), 'chip-ghost') : ''}
         </div>
       </td>
-      <td><button class="btn-mini" data-brand="${escapeHtml(p.brand)}" data-job="${escapeHtml(d.job_id)}">DRAFT EMAIL</button></td>
+      <td>
+        <div class="cell-contact">
+          ${p.contact_email ? escapeHtml(p.contact_email) : '<span class="muted">NO KNOWN CONTACT</span>'}
+          ${p.contact_verified ? '' : '<span class="muted">(UNVERIFIED — EDIT BEFORE SENDING)</span>'}
+        </div>
+      </td>
+      <td>
+        ${outreachEnabled
+          ? `<button class="btn-mini" data-brand="${escapeHtml(p.brand)}" data-job="${escapeHtml(d.job_id)}">DRAFT EMAIL</button>`
+          : '<span class="muted">OUTREACH DISABLED</span>'}
+      </td>
     </tr>`).join('');
   const html = `
+    ${integrityBanner}
     <div class="table-wrap">
       <table class="table">
-        <thead><tr><th>BRAND</th><th>PRODUCT</th><th>APPEARANCES</th><th>ACTION</th></tr></thead>
+        <thead><tr><th>BRAND</th><th>PRODUCT</th><th>APPEARANCES</th><th>CONTACT</th><th>ACTION</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </div>`;
@@ -328,11 +373,91 @@ function productsPanel(d) {
   return wrap.innerHTML;
 }
 
+function openSetPanel(d) {
+  const os = d.open_set || {};
+  const cands = os.candidates || [];
+  if (!os.available) {
+    return `
+      <div class="empty" style="text-align:left">
+        <div class="error-title">OPEN-SET IDENTIFICATION UNAVAILABLE</div>
+        ${escapeHtml(os.reason || 'No runnable reverse-image-search backend.')}
+      </div>`;
+  }
+  if (!cands.length) {
+    return `
+      <div class="empty">NO UNKNOWN-BRAND CANDIDATES ABOVE THE CONFIDENCE GATE (min ${escapeHtml(String(os.min_confidence))}).</div>`;
+  }
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">UNKNOWN-BRAND CANDIDATES — REAL REVERSE-IMAGE SEARCH (${escapeHtml(String(os.backend))}) + logo.dev VALIDATION. CANDIDATES ARE LOWER-TRUST EVIDENCE, NEVER CONFIRMED APPEARANCES.</span></div>`;
+  const rows = cands.map((c) => {
+    const results = c.search_results || [];
+    const trail = results
+      .filter((r) => r.url)
+      .slice(0, 6)
+      .map((r) => `<div class="chip chip-ghost"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></div>`)
+      .join('');
+    const tags = results
+      .filter((r) => !r.url)
+      .slice(0, 8)
+      .map((r) => chip(escapeHtml(r.title), 'chip-accent'))
+      .join('');
+    const validation = c.logo_dev_validation || {};
+    return `
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(c.candidate_name || 'UNRESOLVED CROP')}</div>
+          <div class="tag ${c.status === 'candidate_verified' ? 'tag-accent' : ''}"><span class="tag-label">STATUS</span> ${escapeHtml(c.status)}</div>
+        </div>
+        <div class="card-body">
+          <div class="scene-objects">
+            <span class="chip chip-ghost">FRAME ${c.frame_index}</span>
+            <span class="chip chip-ghost">DET CONF ${(c.confidence * 100).toFixed(0)}%</span>
+            <span class="chip chip-ghost">logo.dev ${escapeHtml(String(validation.status || 'n/a'))}</span>
+            ${validation.domain ? `<span class="chip chip-ghost">${escapeHtml(validation.domain)}</span>` : ''}
+          </div>
+          ${tags ? `<div class="scene-objects">ENGINE TAGS: ${tags}</div>` : ''}
+          ${trail ? `<div class="scene-objects">SOURCE LINKS: ${trail}</div>` : ''}
+          ${c.crop_url ? `<div class="scene-objects"><a href="${escapeHtml(c.crop_url)}" target="_blank" rel="noopener">VIEW CROP</a></div>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  return head + rows;
+}
+
+function recommendPanel(d) {
+  const recs = d.recommendations || [];
+  if (!recs.length) {
+    return `<div class="empty">NO RECOMMENDATIONS YET.<br><br>RUN ANALYSIS ON A VIDEO WITH BRAND EVIDENCE.<br><a href="#/analyse">ANALYSE A VIDEO</a></div>`;
+  }
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">RANKED COLLABORATION OPPORTUNITIES — ${recs.length} BRANDS · DIRECT (EVIDENCE) + SUGGESTED (KNOWLEDGE GRAPH)</span></div>`;
+  const cards = recs.map((r, i) => `
+    <div class="card rec-card">
+      <div class="rec-rank">${String(i + 1).padStart(2, '0')}</div>
+      <div class="rec-main">
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(r.brand)}</div>
+          <div class="chips">
+            <span class="chip ${r.type === 'DIRECT' ? 'chip-accent' : ''}">${escapeHtml(r.type)}</span>
+            <span class="chip chip-ghost">${(r.score * 100).toFixed(0)}% FIT</span>
+          </div>
+        </div>
+        <div class="card-body">
+          ${escapeHtml(r.product || r.brand)} — ${escapeHtml(r.category || 'GENERAL')}${r.appearances ? ' · ' + r.appearances + ' APPEARANCES' : ' · NEVER ON SCREEN'}
+        </div>
+        <div class="rec-reasons">
+          ${r.reasons.map((reason) => chip(reason)).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+  const wrap = document.createElement('div');
+  wrap.innerHTML = head + cards;
+  return wrap.innerHTML;
+}
+
 function adsPanel(d) {
   if (!d.ads || !d.ads.length) {
     return `<div class="empty">NO AD OPPORTUNITIES DETECTED</div>`;
   }
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.ads.length} OPPORTUNITIES · AUTO-DERIVED FROM SCENE ANALYSIS</span></div>`;
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.ads.length} OPPORTUNITIES · UNVERIFIED DETECTION CANDIDATES — NOT CONFIRMED ON-SCREEN APPEARANCES (brand attribution pending Part B validation)</span></div>`;
   const rows = d.ads.map((a) => `
     <div class="card">
       <div class="card-head">
@@ -350,6 +475,9 @@ function adsPanel(d) {
 }
 
 function outreachPanel(d) {
+  if (!outreachEnabled) {
+    return `<div class="error-box"><div class="error-title">OUTREACH DISABLED</div>${escapeHtml(outreachDisabledReason)}</div>`;
+  }
   if (!d.products || !d.products.length) {
     return `<div class="empty">NO BRANDS TO CONTACT</div>`;
   }
@@ -359,6 +487,8 @@ function outreachPanel(d) {
 /* ── Outreach page ────────────────────────────────────────── */
 
 let outreachState = { id: null, data: null, brand: null };
+let outreachEnabled = false;
+let outreachDisabledReason = 'DRAFT EMAIL DISABLED — PENDING DATA-INTEGRITY REVIEW';
 
 async function renderOutreach(id, params) {
   const root = $('#outreach-root');
@@ -371,6 +501,12 @@ async function renderOutreach(id, params) {
   try {
     const data = await api(`/api/pipeline/${encodeURIComponent(id)}`);
     outreachState.data = data;
+    outreachEnabled = data.outreach_enabled === true;
+    outreachDisabledReason = data.outreach_reason || outreachDisabledReason;
+    if (!outreachEnabled) {
+      root.innerHTML = `<div class="error-box"><div class="error-title">OUTREACH DISABLED</div>${escapeHtml(outreachDisabledReason)}<br><br><a href="#/pipeline/${encodeURIComponent(id)}">BACK TO DASHBOARD</a></div>`;
+      return;
+    }
     renderOutreachEditor(root, data);
   } catch (err) {
     root.innerHTML = errorHtml(err.message);
@@ -386,6 +522,7 @@ function renderOutreachEditor(root, d) {
         <div class="brand-row${p.brand === active ? ' is-active' : ''}" data-brand="${escapeHtml(p.brand)}">
           <div class="brand-name">${escapeHtml(p.brand)}</div>
           <div class="brand-product">${escapeHtml(p.product || p.brand)} · ${escapeHtml(p.category || 'GENERAL')} · ${p.appearances.length} SCENES</div>
+          <div class="brand-contact">${p.contact_email ? escapeHtml(p.contact_email) : 'NO KNOWN CONTACT — ADD MANUALLY'}</div>
         </div>`).join('')
     : `<div class="empty">NO BRANDS</div>`;
 
@@ -394,8 +531,9 @@ function renderOutreachEditor(root, d) {
     <div class="outreach-editor">
       <div class="editor-toolbar">
         <div class="editor-target">
-          <span class="editor-label">TARGET</span>
-          <input class="editor-target-name" id="target-name" value="" spellcheck="false" placeholder="E.G. PARTNERSHIPS TEAM">
+          <span class="editor-label">TARGET EMAIL</span>
+          <input class="editor-target-name" id="target-name" value="" spellcheck="false" placeholder="AUTO-FILLED FROM BRAND CATALOG — EDITABLE">
+          <span class="editor-hint" id="target-hint"></span>
         </div>
         <div class="editor-actions">
           <button class="btn btn-sm" id="btn-generate">GENERATE DRAFT</button>
@@ -416,6 +554,15 @@ function renderOutreachEditor(root, d) {
     $$('.brand-row', root).forEach((r) =>
       r.classList.toggle('is-active', r.dataset.brand === brand)
     );
+    const p = products.find((x) => x.brand === brand);
+    const hint = $('#target-hint');
+    if (p && p.contact_email) {
+      $('#target-name').value = p.contact_email;
+      hint.textContent = `CONTACT AUTO-FILLED FROM CATALOG${p.contact_verified ? '' : ' (UNVERIFIED — CONFIRM BEFORE SENDING)'}${p.contact_website ? ' · ' + p.contact_website : ''}`;
+    } else {
+      $('#target-name').value = '';
+      hint.textContent = 'NO KNOWN CONTACT — ENTER THE BRAND EMAIL MANUALLY';
+    }
     history.replaceState(null, '', `#/outreach/${encodeURIComponent(d.job_id)}?brand=${encodeURIComponent(brand)}`);
   };
 
@@ -430,11 +577,14 @@ function renderOutreachEditor(root, d) {
   const generateBtn = $('#btn-generate');
   const forwardBtn = $('#btn-forward');
 
+  // Prefill the active brand's contact on load
+  selectBrand(active);
+
   generateBtn.addEventListener('click', async () => {
     if (!outreachState.brand) return;
     const target = targetInput.value.trim();
     if (!target) {
-      foot.textContent = 'ENTER A TARGET BEFORE GENERATING';
+      foot.textContent = 'ENTER A TARGET EMAIL BEFORE GENERATING';
       return;
     }
     generateBtn.disabled = true;
@@ -452,7 +602,7 @@ function renderOutreachEditor(root, d) {
       });
       subject.textContent = res.subject;
       body.textContent = res.body;
-      foot.textContent = `DRAFT GENERATED · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      foot.textContent = `DRAFT GENERATED · TO ${escapeHtml(res.target)} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     } catch (err) {
       foot.textContent = `GENERATE FAILED — ${err.message}`;
     } finally {

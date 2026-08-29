@@ -1,0 +1,3563 @@
+{
+  "dataset": {
+    "name": "LogoDet-3K test split (axonstan mirror)",
+    "parquet": "/tmp/adscene_bench/test-00000-of-00002.parquet",
+    "n_images": 101,
+    "n_gt_boxes": 159,
+    "gt_brand_counts": {
+      "NEW BALANCE": 34,
+      "APPLE": 26,
+      "ZARA": 17,
+      "COCA-COLA": 14,
+      "SAMSUNG": 11,
+      "LULULEMON": 10,
+      "ASICS": 10,
+      "UNDER ARMOUR": 7,
+      "ADIDAS": 6,
+      "ROLEX": 6,
+      "BMW": 6,
+      "PEPSI": 5,
+      "LEVI'S": 4,
+      "GOOGLE": 3
+    }
+  },
+  "timestamp": "2026-08-05T15:25:41",
+  "backends": {
+    "yolo_world": {
+      "aggregate": {
+        "precision": 0.045936395759717315,
+        "recall": 0.08176100628930817,
+        "f1": 0.058823529411764705,
+        "tp": 13,
+        "fp": 270,
+        "fn": 146,
+        "n_images": 101,
+        "brand_correct": 0,
+        "brand_accuracy": 0.0,
+        "map50": 0.020440251572327043,
+        "iou_threshold": 0.5,
+        "conf_threshold": "backend_default"
+      },
+      "per_image": [
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.13589154183864594
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.4760037362575531,
+            0.3078097403049469,
+            0.2432577759027481,
+            0.197719007730484
+          ],
+          "tp_flags": [
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.20218178629875183,
+            0.14295899868011475,
+            0.12382055819034576
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2286328822374344
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.18791905045509338,
+            0.15073895454406738,
+            0.1264794021844864,
+            0.10731147229671478
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.10871215164661407
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.4742121398448944
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 9,
+          "tp": 0,
+          "fp": 9,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.2619990110397339,
+            0.2598249018192291,
+            0.25396886467933655,
+            0.19020120799541473,
+            0.17660211026668549,
+            0.17176201939582825,
+            0.13663460314273834,
+            0.13332493603229523,
+            0.11890964955091476
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 7,
+          "tp": 0,
+          "fp": 7,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.41894203424453735,
+            0.1436617374420166,
+            0.12153757363557816,
+            0.11685550212860107,
+            0.1154567077755928,
+            0.11419626325368881,
+            0.10154818743467331
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 5,
+          "tp": 1,
+          "fp": 4,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.45137161016464233,
+            0.35283151268959045,
+            0.33467480540275574,
+            0.1812647581100464,
+            0.1675504744052887
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.36018064618110657,
+            0.17495088279247284,
+            0.10493737459182739
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.19004569947719574
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.1549026072025299,
+            0.14260007441043854,
+            0.1387096345424652,
+            0.12911371886730194,
+            0.10279805958271027
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.39600563049316406,
+            0.3148132264614105,
+            0.14771467447280884,
+            0.10991626232862473
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.10354342311620712
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 17,
+          "tp": 0,
+          "fp": 17,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.28821876645088196,
+            0.17572170495986938,
+            0.15695227682590485,
+            0.15236018598079681,
+            0.14107708632946014,
+            0.1365051567554474,
+            0.13080251216888428,
+            0.1290915310382843,
+            0.12523098289966583,
+            0.12388792634010315,
+            0.11763953417539597,
+            0.11510733515024185,
+            0.11312948167324066,
+            0.10898448526859283,
+            0.10738031566143036,
+            0.10558546334505081,
+            0.10107392817735672
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3020690977573395,
+            0.13800612092018127
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2280491143465042,
+            0.16823428869247437,
+            0.12000412493944168
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 8,
+          "tp": 0,
+          "fp": 8,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.4895226061344147,
+            0.39310988783836365,
+            0.3365857005119324,
+            0.21211564540863037,
+            0.20055995881557465,
+            0.1817752569913864,
+            0.14388950169086456,
+            0.12779600918293
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 6,
+          "tp": 1,
+          "fp": 5,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.19326534867286682,
+            0.15518245100975037,
+            0.13558773696422577,
+            0.1302943378686905,
+            0.11484342068433762,
+            0.11096101254224777
+          ],
+          "tp_flags": [
+            false,
+            false,
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.30412015318870544,
+            0.19336503744125366,
+            0.12483597546815872,
+            0.11846598982810974
+          ],
+          "tp_flags": [
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.14349527657032013,
+            0.14323386549949646,
+            0.10096008330583572
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.14002634584903717
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.31806838512420654,
+            0.11503828316926956,
+            0.10828845947980881,
+            0.10726311802864075
+          ],
+          "tp_flags": [
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2723836898803711,
+            0.22006119787693024,
+            0.12355034798383713
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.15210768580436707,
+            0.13954678177833557,
+            0.11659013479948044,
+            0.11136601120233536
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2116127759218216,
+            0.17329789698123932,
+            0.1402256041765213,
+            0.11447541415691376
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.22809620201587677,
+            0.17718683183193207
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.13441677391529083
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2031359076499939,
+            0.1062232181429863
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3061197102069855,
+            0.29188960790634155,
+            0.15693245828151703,
+            0.12553934752941132
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 7,
+          "tp": 1,
+          "fp": 6,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.3644207715988159,
+            0.3502746522426605,
+            0.1715928167104721,
+            0.16219916939735413,
+            0.16043314337730408,
+            0.10172782838344574,
+            0.10091444104909897
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            true
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.12558861076831818,
+            0.11769115924835205
+          ],
+          "tp_flags": [
+            false,
+            true
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.11899171024560928,
+            0.11828161776065826
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.22778353095054626,
+            0.18885883688926697,
+            0.1447950303554535,
+            0.10996298491954803
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.29457610845565796,
+            0.25096333026885986,
+            0.2164144366979599,
+            0.1731606423854828,
+            0.11669793725013733
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.1301998496055603,
+            0.11256789416074753,
+            0.10172121971845627
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 9,
+          "tp": 1,
+          "fp": 8,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.4303795099258423,
+            0.3850663900375366,
+            0.34673717617988586,
+            0.29729795455932617,
+            0.19960080087184906,
+            0.197757750749588,
+            0.1466655284166336,
+            0.14069122076034546,
+            0.10995004326105118
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            true,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.15092363953590393,
+            0.13702905178070068,
+            0.12191108614206314
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.23602019250392914,
+            0.13051007688045502,
+            0.12887237966060638
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 1,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3151301145553589,
+            0.25645244121551514
+          ],
+          "tp_flags": [
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.16297486424446106,
+            0.1577574461698532,
+            0.1387835443019867,
+            0.12638376653194427
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.44332948327064514,
+            0.10084125399589539
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.24054652452468872,
+            0.19679808616638184,
+            0.12204080075025558,
+            0.11804194003343582
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.7142179012298584,
+            0.2629689872264862,
+            0.19554269313812256
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 1,
+          "fp": 2,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.29394522309303284,
+            0.11558938026428223,
+            0.11501090228557587
+          ],
+          "tp_flags": [
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.342617928981781,
+            0.20980165898799896,
+            0.18246598541736603,
+            0.12672542035579681
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.22659136354923248,
+            0.12067916989326477,
+            0.1015494167804718
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 7,
+          "tp": 0,
+          "fp": 7,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.37938329577445984,
+            0.33216041326522827,
+            0.21459496021270752,
+            0.1604725867509842,
+            0.1465354710817337,
+            0.13490575551986694,
+            0.10084661841392517
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.10485794395208359
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 7,
+          "tp": 0,
+          "fp": 7,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.333862841129303,
+            0.2745879888534546,
+            0.19367268681526184,
+            0.12062766402959824,
+            0.11762942373752594,
+            0.1139419749379158,
+            0.10695436596870422
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.22065649926662445,
+            0.16666221618652344,
+            0.15629595518112183,
+            0.15276707708835602
+          ],
+          "tp_flags": [
+            false,
+            true,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.10823008418083191
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2502170503139496,
+            0.14304344356060028,
+            0.10002076625823975
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.29679834842681885,
+            0.20702621340751648,
+            0.14849136769771576
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.15101465582847595
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.18406379222869873,
+            0.13502995669841766,
+            0.12152937799692154,
+            0.1078806221485138
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.18956218659877777,
+            0.12599578499794006,
+            0.11440751701593399,
+            0.11337485164403915
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.24212390184402466,
+            0.20027358829975128,
+            0.14325159788131714,
+            0.10552868992090225
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.11848168075084686
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.22660323977470398
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3885194659233093,
+            0.15081772208213806,
+            0.13932408392429352,
+            0.13756448030471802,
+            0.10535471886396408
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.23721195757389069,
+            0.19397558271884918,
+            0.11091801524162292,
+            0.1065649539232254,
+            0.10649841278791428
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.21866561472415924,
+            0.21042263507843018,
+            0.17807073891162872,
+            0.10191439092159271
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.27877822518348694,
+            0.162502720952034,
+            0.16180531680583954
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 6,
+          "tp": 0,
+          "fp": 6,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.25060656666755676,
+            0.19237659871578217,
+            0.18465331196784973,
+            0.117481529712677,
+            0.1068551316857338,
+            0.10399465262889862
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.39576753973960876,
+            0.3657853901386261,
+            0.30835333466529846,
+            0.18021470308303833,
+            0.12062280625104904
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.37171438336372375
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.11148767173290253
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 1,
+          "tp": 1,
+          "fp": 0,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.18944008648395538
+          ],
+          "tp_flags": [
+            true
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.26837673783302307,
+            0.24553169310092926,
+            0.15902142226696014,
+            0.11157943308353424
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.8725425004959106
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.21915073692798615,
+            0.14785009622573853,
+            0.12767831981182098,
+            0.10844151675701141
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 7,
+          "tp": 0,
+          "fp": 7,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3313964903354645,
+            0.3279551565647125,
+            0.2852289378643036,
+            0.2081764042377472,
+            0.13149891793727875,
+            0.13077442348003387,
+            0.11135128140449524
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 1,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.25641700625419617
+          ],
+          "tp_flags": [
+            true
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.1675381064414978,
+            0.1313868761062622,
+            0.12377478182315826,
+            0.12018284946680069
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.1426861435174942
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.13859011232852936
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.112422876060009
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 6,
+          "tp": 0,
+          "fp": 6,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.27577874064445496,
+            0.24389997124671936,
+            0.2122253179550171,
+            0.11578319221735,
+            0.10968984663486481,
+            0.10926874727010727
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        }
+      ],
+      "latency_s_total": 6.795,
+      "latency_ms_per_image": 67.3,
+      "boxes_per_image": 2.8
+    },
+    "sift_match": {
+      "aggregate": {
+        "precision": 0.0353356890459364,
+        "recall": 0.06289308176100629,
+        "f1": 0.04524886877828054,
+        "tp": 10,
+        "fp": 273,
+        "fn": 149,
+        "n_images": 101,
+        "brand_correct": 0,
+        "brand_accuracy": 0.0,
+        "map50": 0.0019182897096326622,
+        "iou_threshold": 0.5,
+        "conf_threshold": "backend_default"
+      },
+      "per_image": [
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.36,
+            1.28,
+            0.33,
+            0.15,
+            1.33
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.29,
+            0.09
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.66,
+            0.11,
+            0.12
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.11,
+            0.14,
+            0.38
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.04,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.15,
+            0.18,
+            0.08
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.26,
+            0.08,
+            0.1
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 1,
+          "fp": 1,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.12,
+            0.1
+          ],
+          "tp_flags": [
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            1.53
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.26,
+            0.19,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.06,
+            0.08,
+            0.17
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.16
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.2,
+            0.43,
+            0.42
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 6,
+          "tp": 1,
+          "fp": 5,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.15,
+            0.12,
+            0.2,
+            0.13,
+            0.16,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            true,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.06
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.27,
+            0.31,
+            0.68
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 7,
+          "tp": 0,
+          "fp": 7,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.21,
+            0.2,
+            0.19,
+            0.63,
+            0.35,
+            0.29,
+            0.15
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.39,
+            0.2,
+            0.65,
+            0.12
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.06,
+            0.12,
+            0.08,
+            0.06,
+            1.05
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.33,
+            0.93,
+            1.39
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 1,
+          "fp": 4,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.13,
+            0.13,
+            0.11,
+            0.07,
+            0.12
+          ],
+          "tp_flags": [
+            true,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 6,
+          "tp": 0,
+          "fp": 6,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.38,
+            0.16,
+            0.77,
+            0.27,
+            0.12,
+            1.27
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.19
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.36,
+            0.2,
+            0.26,
+            0.41
+          ],
+          "tp_flags": [
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.16,
+            0.13,
+            0.18,
+            0.21,
+            0.79
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.76,
+            0.14,
+            0.26,
+            0.11
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.16,
+            0.21,
+            0.18,
+            0.21
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.22
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.32,
+            0.42
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.26,
+            0.21,
+            0.17,
+            0.14,
+            0.11
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.08,
+            0.38
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.15,
+            0.32,
+            0.2
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.3,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.06,
+            0.18,
+            0.1,
+            0.13
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.1,
+            0.1,
+            0.13,
+            0.29
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.19
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.07
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.11,
+            0.27,
+            0.1,
+            0.56,
+            0.13
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 5,
+          "tp": 1,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.34,
+            0.16,
+            0.07,
+            0.13
+          ],
+          "tp_flags": [
+            true,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.44,
+            1.77
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.08,
+            0.31,
+            0.13,
+            1.57,
+            0.16
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.19,
+            0.04,
+            0.18
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.33,
+            0.37,
+            0.06
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.08
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.19,
+            0.06,
+            0.07,
+            0.08,
+            0.14
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.1,
+            1.19,
+            0.28
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.16
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.76,
+            0.19
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.12,
+            0.1,
+            0.12
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.12,
+            0.07,
+            0.29,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 5,
+          "tp": 1,
+          "fp": 4,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            1.12,
+            0.15,
+            0.14,
+            0.2,
+            0.17
+          ],
+          "tp_flags": [
+            false,
+            true,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.08,
+            0.11
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.17,
+            0.06
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.43
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            1.47,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.16,
+            0.13,
+            0.21,
+            0.69,
+            0.22
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.18,
+            0.1,
+            0.04,
+            0.05
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.14
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.26
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.13
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.2,
+            0.06
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.04
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.42
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 3,
+          "tp": 1,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.13,
+            0.33,
+            0.23
+          ],
+          "tp_flags": [
+            true,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.91,
+            0.13,
+            1.2,
+            0.11
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.17,
+            0.22,
+            0.15
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.06,
+            0.04,
+            0.15
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 5,
+          "tp": 1,
+          "fp": 4,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.12,
+            0.16,
+            0.04,
+            0.07,
+            0.04
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.37,
+            0.26,
+            0.33,
+            0.33
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 1,
+          "tp": 1,
+          "fp": 0,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.19
+          ],
+          "tp_flags": [
+            true
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 1,
+          "fp": 3,
+          "fn": 0,
+          "brand_correct": 0,
+          "confidences": [
+            0.07,
+            0.15,
+            0.21,
+            0.06
+          ],
+          "tp_flags": [
+            false,
+            false,
+            true,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.11,
+            0.1,
+            0.08,
+            1.52
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 5,
+          "tp": 0,
+          "fp": 5,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.2,
+            0.1,
+            0.1,
+            0.06,
+            0.23
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.14,
+            0.36,
+            0.05
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 1,
+          "tp": 0,
+          "fp": 1,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.65
+          ],
+          "tp_flags": [
+            false
+          ]
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.07,
+            0.4
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 0,
+          "tp": 0,
+          "fp": 0,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [],
+          "tp_flags": []
+        },
+        {
+          "gt_count": 4,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 4,
+          "brand_correct": 0,
+          "confidences": [
+            0.17,
+            0.31,
+            0.13,
+            0.78
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.2,
+            0.3
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.15,
+            0.35,
+            0.31
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.09,
+            0.2
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.26,
+            0.11,
+            1.51
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 3,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 3,
+          "brand_correct": 0,
+          "confidences": [
+            0.1,
+            0.1
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.08,
+            0.42,
+            0.21,
+            0.08
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.19,
+            0.09,
+            0.14
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.25,
+            0.4
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 4,
+          "tp": 0,
+          "fp": 4,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.17,
+            0.78,
+            0.28,
+            0.68
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.2,
+            0.08,
+            0.29
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 2,
+          "pred_count": 6,
+          "tp": 0,
+          "fp": 6,
+          "fn": 2,
+          "brand_correct": 0,
+          "confidences": [
+            0.06,
+            0.11,
+            0.21,
+            0.08,
+            0.29,
+            0.09
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false,
+            false,
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.1,
+            0.07
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 2,
+          "tp": 0,
+          "fp": 2,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.22,
+            0.22
+          ],
+          "tp_flags": [
+            false,
+            false
+          ]
+        },
+        {
+          "gt_count": 1,
+          "pred_count": 3,
+          "tp": 0,
+          "fp": 3,
+          "fn": 1,
+          "brand_correct": 0,
+          "confidences": [
+            0.17,
+            0.27,
+            0.64
+          ],
+          "tp_flags": [
+            false,
+            false,
+            false
+          ]
+        }
+      ],
+      "latency_s_total": 13.994,
+      "latency_ms_per_image": 138.6,
+      "boxes_per_image": 2.8
+    }
+  }
+}

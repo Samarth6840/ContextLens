@@ -4,6 +4,7 @@ Downloads real pretrained model weights — no stubs or placeholders.
 
 Models:
 - YOLOv8x: downloaded on first use by ultralytics (auto-download)
+- YOLO-World (yolov8s-worldv2.pt): logo-detection backend; downloaded via ultralytics
 - DINOv2: from HuggingFace transformers
 - PaddleOCR: downloaded on first use by PaddleOCR (auto-download)
 - Whisper medium: primary ASR model (mlx-whisper / faster-whisper / openai-whisper fallback chain)
@@ -29,6 +30,20 @@ def download_yolo():
     from ultralytics import YOLO
     model = YOLO("yolov8x.pt")
     logger.info(f"YOLOv8x downloaded successfully. Model path: {model.ckpt_path}")
+    return True
+
+
+def download_yoloworld():
+    """Trigger the YOLO-World zero-shot logo-detection model download.
+
+    YOLO-World is the shipped logo-detection backend (config
+    layer1.logo_detection.backend == "yolo_world"). Ultralytics auto-downloads
+    the weights on first use; we trigger it here so cold start is explicit.
+    """
+    logger.info("Downloading YOLO-World model (yolov8s-worldv2.pt)...")
+    from ultralytics import YOLO
+    model = YOLO("yolov8s-worldv2.pt")
+    logger.info(f"YOLO-World downloaded successfully. Model path: {model.ckpt_path}")
     return True
 
 
@@ -93,6 +108,12 @@ def main():
         download_yolo()
     except Exception as e:
         logger.error(f"YOLO download failed: {e}")
+        success = False
+
+    try:
+        download_yoloworld()
+    except Exception as e:
+        logger.error(f"YOLO-World download failed: {e}")
         success = False
 
     try:

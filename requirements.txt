@@ -16,7 +16,7 @@ paddlepaddle>=2.6.0
 paddleocr>=3.7.0
 
 # Speech-to-Text
-mlx-whisper>=0.4.0  # Apple Silicon GPU acceleration via Metal (primary on MPS)
+mlx-whisper>=0.4.0; platform_system=="Darwin" && platform_machine=="arm64"  # Apple Silicon GPU acceleration via Metal (primary on MPS)
 faster-whisper>=1.0.0  # INT8-quantized Whisper for CPU efficiency (fallback)
 openai-whisper>=20231117  # kept as final fallback
 

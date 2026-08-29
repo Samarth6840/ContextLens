@@ -21,10 +21,6 @@ import numpy as np
 import yaml
 
 from src.brand_catalog import find_brand_mentions, match_brand
-from src.layer1.rfdetr_logo_detector import create_rfdetr_logo_detector
-from src.layer1.qwen3vl import create_qwen3vl_32b
-from src.layer1.voxtral_realtime import create_voxtral_realtime
-from src.layer1.qwen3asr import create_qwen3asr
 from src.layer2.brand_resolver import (
     BrandResolver,
     brand_evidence_from_timeline,
@@ -633,14 +629,19 @@ class Phase1Pipeline:
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {}
 
-            # RF-DETR logo detection (new backend)
+            # Logo detection (YOLO-World zero-shot backend)
             futures[self._locked_submit(
                 executor, "logo_detector", self.logo_detector.detect_batch,
                 logo_frames, None, batch_size,
             )] = "logo_detection"
 
-            # Qwen3-VL central analysis (handles video, OCR, reasoning in one pass)
-            if self.central_vision_model:
+            # Qwen3-VL central analysis (handles video, OCR, reasoning in one pass).
+            # Gate on config layer1.central_vision_model.enabled — the Qwen3-VL
+            # 32B integration is not yet wired (its loader is a stub that fails
+            # closed) and its output is not consumed downstream, so it stays OFF
+            # by default to avoid launching a model that contributes nothing.
+            _vl_cfg = self.cfg["layer1"].get("central_vision_model", {})
+            if _vl_cfg.get("enabled") and self.central_vision_model:
                 futures[self._locked_submit(
                     executor, "central_vision",
                     self.central_vision_model.analyze_batch,
@@ -685,28 +686,13 @@ class Phase1Pipeline:
                     for idx, dets in zip(logo_indices, result):
                         all_logo_detections[idx] = dets
                 elif modality == "central_vision":
-                    # Brand resolution (Layer 2c) ──────────────────────────────────
-                    # Convert generic logo detections ('text logo', 'brand logo') into
-                    # actual brand names: prefer a brand-named class, else crop-OCR the
-                    # logo region and match against the catalog. Unresolved detections are
-                    # excluded from brand products / recommendations.
-                    # Use Qwen3-VL results for enhanced brand resolution if available.
-                    _t_resolve = time.monotonic()
-                    resolver = BrandResolver(ocr_extractor=self.ocr)
-
-                    # Merge logo detections with Qwen3-VL brand detections
-                    if hasattr(self, "_central_vision_results") and self._central_vision_results:
-                        vl_brand_detections = self._central_vision_results.get("brand_detections", [[] for _ in frames])
-                        # Merge: give preference to RF-DETR resolved brands, fall back to VL detections
-                        resolved_logos = resolver.resolve(all_logo_detections, frames)
-                        # Overlay VL detections where RF-DETR didn't resolve
-                        for i, (rf_detect, vl_detect) in enumerate(zip(all_logo_detections, vl_brand_detections)):
-                            if not rf_detect.get("brand") and vl_detect:
-                                resolved_logos[i] = vl_detect[0]  # Use first VL detection
-                            else:
-                                resolved_logos = resolver.resolve(all_logo_detections, frames)
-                    all_logo_detections = resolved_logos
-                    timings["brand_resolution"] = time.monotonic() - _t_resolve
+                    # Central-vision (Qwen3-VL) output is not consumed here.
+                    # Brand resolution happens once, after the executor loop
+                    # (below), using the brand catalog + crop-OCR. The previous
+                    # merge block referenced a never-assigned
+                    # `self._central_vision_results` and was dead code that
+                    # could raise UnboundLocalError.
+                    pass
                 elif modality == "embeddings":
                     embed_raw = result
                 elif modality == "stt":

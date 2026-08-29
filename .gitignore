@@ -1,8 +1,29 @@
 __pycache__/
 *.pyc
+.pytest_cache/
 *.pt
 *.pth
 *.pkl
+# Build/archive artifacts (e.g. ContextLens.zip) — never commit
+*.zip
 models/
 outputs/
 data/
+
+# Secrets — never commit API keys
+.env
+.env.*
+!.env.example
+LOGO_DEV_SECRET_KEY
+LOGO_DEV_PUBLISHABLE_TOKEN
+
+# Benchmark datasets (large, downloaded at runtime)
+# Keep only the small results JSONs tracked for auditability; ignore the
+# reference-logo bank and any dataset parquet files.
+benchmark/*
+!benchmark/results/
+benchmark/results/*
+!benchmark/results/*.json
+
+# Open-set candidate crops (runtime evidence images, regenerated per run)
+static/openset_crops/
