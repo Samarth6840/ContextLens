@@ -830,10 +830,40 @@ class Phase1Pipeline:
         # logo region and match against the catalog. Unresolved detections are
         # excluded from brand products / recommendations.
         _t_resolve = time.monotonic()
-        resolver = BrandResolver(ocr_extractor=self.ocr)
+        _br_cfg = self.cfg["layer1"].get("logo_detection", {})
+        resolver = BrandResolver(
+            ocr_extractor=self.ocr,
+            class_confidence=_br_cfg.get("class_confidence", 0.40),
+            crop_scale=_br_cfg.get("crop_scale", 2.0),
+        )
         resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
         timings["brand_resolution"] = time.monotonic() - _t_resolve
+
+        # ── Spatial / temporal label stabilization (secondary remediation) ────
+        # (1) Smooth flapping COCO labels across adjacent frames of the same
+        #     device (backpack -> remote -> mouse -> mouse+laptop) via spatial
+        #     tracking + majority vote.
+        # (2) Tag object detections that overlap a resolved brand's on-screen
+        #     location with `brand_context`, so the device's (possibly noisy)
+        #     object label is anchored to the real brand.
+        from src.layer2.spatial_label import (
+            TemporalObjectSmoother,
+            apply_spatial_brand_context,
+        )
+        all_detections = apply_spatial_brand_context(
+            all_detections, all_logo_detections,
+            window=int(self.cfg["layer1"].get("spatial_label", {}).get("window", 3)),
+            min_iou=float(self.cfg["layer1"].get("spatial_label", {}).get("min_iou", 0.05)),
+        )
+        all_detections = TemporalObjectSmoother(
+            track_distance_factor=float(
+                self.cfg["layer1"].get("spatial_label", {}).get("track_distance_factor", 0.6)
+            ),
+            min_track_len=int(
+                self.cfg["layer1"].get("spatial_label", {}).get("min_track_len", 2)
+            ),
+        ).smooth(all_detections)
 
         # Reassemble embeddings to full frame count (non-sampled frames get zero vectors)
         embed_dim = embed_raw.shape[1]

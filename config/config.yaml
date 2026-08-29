@@ -32,6 +32,25 @@ layer1:
       - "product logo"
       - "label"
       - "wordmark"
+    # Brand-resolution gate (Layer 2c): a per-brand class label ('Samsung logo')
+    # from YOLO-World is only trusted as brand evidence above this confidence.
+    # Below it the label is treated as a possible false positive (YOLOv8s-World
+    # emits spurious low-confidence brand hits, e.g. 'SUPREME logo' on Samsung/
+    # Sony/Apple logos) and resolution falls through to crop-OCR for proof.
+    class_confidence: 0.40
+    # Crop upscale factor applied before OCR so small/low-res logo text reads.
+    crop_scale: 2.0
+
+  # Spatial / temporal label stabilization for scene objects (secondary
+  # remediation). The COCO object detector flips the label of one physical
+  # device across adjacent frames; this smooths those flips and tags object
+  # detections that overlap a resolved brand's on-screen location with the
+  # brand context (see src/layer2/spatial_label.py).
+  spatial_label:
+    window: 3              # max frame-distance for brand->object spatial tag
+    min_iou: 0.05          # overlap for an object box to be tagged by a brand
+    track_distance_factor: 0.6  # spatial-track match threshold (x box size)
+    min_track_len: 2       # min frames in a track for its label to be smoothed
 
   # Central multimodal understanding: Qwen3-VL 32B handles video, OCR, and reasoning in one pass
   central_vision_model:
@@ -71,11 +90,15 @@ layer1:
 
   # Product-catalog visual search (Phase 2.5): DINOv2 frame embeddings are run
   # through cosine nearest-neighbor search against a reference index of brand
-  # product/logo images. FAILS CLOSED: with no reference images under
-  # reference_dir (one subdir per canonical catalog brand) the index stays empty
-  # and visual_product_match evidence is 0 — no fabricated matches.
+  # product/logo images. FAILS CLOSED: with no reference images in reference_dir
+  # the index stays empty and visual_product_match evidence is 0 — no fabricated
+  # matches. The reference set is benchmark/reference_logos, laid out either as
+  # one subdir per canonical catalog brand OR flat '<BRAND>_<n>.png' files.
+  # NOTE: previously pointed at 'benchmark/product_logos' (a dir that does not
+  # exist), so the index silently failed closed and visual_product_match was
+  # always 0 even though real brand reference images were on disk.
   product_index:
-    reference_dir: "benchmark/product_logos"
+    reference_dir: "benchmark/reference_logos"
     top_k: 1
     similarity_threshold: 0.80
 

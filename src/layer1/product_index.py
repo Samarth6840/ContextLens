@@ -53,11 +53,18 @@ class ProductEmbeddingIndex:
         self._built = False
 
     def _discover_images(self) -> List[Tuple[str, Path]]:
-        """Return [(brand, image_path)] by scanning subdirs for reference images.
+        """Return [(brand, image_path)] by scanning for reference images.
 
-        A subdirectory name must match a canonical catalog brand name to be
-        treated as that brand's product/logo reference set. Subdirs that don't
-        match any catalog brand are ignored (prevents mislabeled evidence).
+        Two layouts are supported, so the configured reference dir works whether
+        the images are organized as one subdir per canonical brand name, or as
+        flat files named '<BRAND>_<n>.png' (e.g. 'SAMSUNG_0.png'):
+          1. subdir whose name matches a canonical catalog brand -> all image
+             files inside are that brand's reference set;
+          2. flat image whose UPPERCASE basename starts with '<BRAND>_' (or
+             equals '<BRAND>') -> that brand's reference image.
+
+        Only catalog-brand names are accepted — anything else (e.g. unrelated
+        crop dumps) is ignored, preventing mislabeled evidence.
         """
         if not self.reference_dir.is_dir():
             logger.warning(
@@ -67,21 +74,39 @@ class ProductEmbeddingIndex:
             )
             return []
         found: List[Tuple[str, Path]] = []
+
+        def _brand_for_dir(name: str) -> Optional[str]:
+            return name.upper() if name.upper() in BRAND_CATALOG else None
+
         for sub in sorted(self.reference_dir.iterdir()):
-            if not sub.is_dir():
+            if sub.is_dir():
+                brand = _brand_for_dir(sub.name)
+                if not brand:
+                    logger.debug(
+                        "Ignoring reference subdir %s (not a catalog brand)", sub
+                    )
+                    continue
+                imgs = [
+                    p for p in sub.iterdir()
+                    if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
+                ]
+                for img in imgs:
+                    found.append((brand, img))
                 continue
-            brand = sub.name.upper()
-            if brand not in BRAND_CATALOG:
+
+            # Flat file: '<BRAND>[_<n>].<ext>'
+            if sub.suffix.lower() not in _IMAGE_EXTS:
+                continue
+            stem = sub.stem.upper()
+            base = stem.split("_")[0]
+            brand = base if base in BRAND_CATALOG else None
+            if not brand:
                 logger.debug(
-                    "Ignoring reference subdir %s (not a catalog brand)", sub
+                    "Ignoring flat reference file %s (no catalog-brand prefix)",
+                    sub,
                 )
                 continue
-            imgs = [
-                p for p in sub.iterdir()
-                if p.is_file() and p.suffix.lower() in _IMAGE_EXTS
-            ]
-            for img in imgs:
-                found.append((brand, img))
+            found.append((brand, sub))
         return found
 
     def build(self, embed_extractor, batch_size: int = 8) -> int:
