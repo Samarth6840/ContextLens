@@ -51,6 +51,12 @@ layer1:
     min_iou: 0.05          # overlap for an object box to be tagged by a brand
     track_distance_factor: 0.6  # spatial-track match threshold (x box size)
     min_track_len: 2       # min frames in a track for its label to be smoothed
+    # Phase 3 — brand-anchored contradiction correction (SceneConsistencyResolver).
+    # A detection anchored to a resolved brand whose COCO label is implausible for
+    # that brand (e.g. mouse/remote/backpack on a Samsung phone) is reclassified to
+    # the brand's primary product, keeping raw_class for audit.
+    min_brand_confidence: 0.30    # resolution confidence required to auto-correct
+    min_detection_confidence: 0.10
 
   # Central multimodal understanding: Qwen3-VL 32B handles video, OCR, and reasoning in one pass
   central_vision_model:

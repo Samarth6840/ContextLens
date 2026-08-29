@@ -185,3 +185,144 @@ def apply_spatial_brand_context(
                     out[f_idx][i]["brand_context"] = brand
                     break
     return out
+
+
+# Small curated brand -> plausible product (COCO) category table (Phase 2c).
+# A detection anchored to a brand (via `brand_context`) whose COCO label is NOT
+# in the brand's plausible product set is flagged / reclassified, so a foldable
+# phone being flapped to `mouse`/`remote`/`backpack` by the generic detector is
+# corrected to the brand's primary product instead of standing alone as noise.
+# Only brands we can reason about are listed; unknown brands are left untouched.
+BRAND_PRODUCT_CATEGORIES: Dict[str, Dict[str, object]] = {
+    "SAMSUNG": {
+        "plausible": {"cell phone", "laptop", "tv"},
+        "primary_label": "cell phone",
+    },
+    "APPLE": {
+        "plausible": {"cell phone", "laptop", "tv"},
+        "primary_label": "cell phone",
+    },
+    "MICROSOFT": {
+        "plausible": {"laptop", "keyboard", "tv"},
+        "primary_label": "laptop",
+    },
+    "SONY": {
+        "plausible": {"cell phone", "tv", "laptop"},
+        "primary_label": "cell phone",
+    },
+    # Brands without a curated category table are left untouched (no guessing).
+}
+
+
+def normalize_brand_name(brand: str) -> str:
+    """Canonicalize a resolved brand name for table lookup.
+
+    Resolved brands arrive in various forms ('Samsung', 'SAMSUNG', 'samsung').
+    Map them to the canonical uppercase key used in BRAND_PRODUCT_CATEGORIES.
+    """
+    key = (brand or "").strip().upper()
+    if key in BRAND_PRODUCT_CATEGORIES:
+        return key
+    # Fall back to a case-insensitive prefix match against the table keys.
+    for table_key in BRAND_PRODUCT_CATEGORIES:
+        if table_key.startswith(key) or key.startswith(table_key):
+            return table_key
+    return key
+
+
+class SceneConsistencyResolver:
+    """Layer 2c — brand-anchored contradiction correction (Phase 3).
+
+    Fixes the same-device label flapping that TemporalObjectSmoother can't: a
+    Microsoft logo resolved on a laptop being ALSO reported as `cell phone`, or
+    a Samsung foldable phone being flapped to `mouse`/`remote`/`backpack`.
+
+    Uses a small curated brand -> plausible-product table. A detection that:
+      * carries a `brand_context` (spatially overlapped a resolved brand), AND
+      * has a COCO `class_name` NOT in that brand's plausible product set, AND
+      * clears `min_brand_confidence` (the underlying resolution is solid),
+    is reclassified to the brand's `primary_label`. Both `raw_class` (original
+    COCO label) and `corrected_class` are kept on the record for audit — the
+    disagreement is never silently discarded.
+
+    Reclassifying happens in-place on copied detection dicts (read-only input).
+    """
+
+    def __init__(
+        self,
+        min_brand_confidence: float = 0.30,
+        min_detection_confidence: float = 0.10,
+        categories: Optional[Dict[str, Dict[str, object]]] = None,
+    ):
+        self.min_brand_confidence = min_brand_confidence
+        self.min_detection_confidence = min_detection_confidence
+        self.categories = categories if categories is not None else BRAND_PRODUCT_CATEGORIES
+
+    def resolve(
+        self,
+        detections: Sequence[Sequence[dict]],
+        resolved_logos: Sequence[Sequence[dict]],
+    ) -> Sequence[Sequence[dict]]:
+        """Correct implausible brand-anchored object labels (Phase 2c).
+
+        Args:
+            detections: per-frame detection lists (post brand-context tagging).
+            resolved_logos: per-frame brand-resolved logo detections.
+
+        Returns new per-frame detection lists. Detections that are reclassified
+        gain `raw_class`, `corrected_class`, and `reclassified_by`; the original
+        COCO class is preserved as `raw_class`.
+        """
+        # Index resolved logos by (frame -> list of (brand, confidence)).
+        brand_scores: Dict[int, List[Tuple[str, float]]] = {}
+        for f_idx, frame_logos in enumerate(resolved_logos):
+            for det in frame_logos:
+                brand = normalize_brand_name(det.get("brand"))
+                if brand in self.categories:
+                    brand_scores.setdefault(f_idx, []).append(
+                        (brand, float(det.get("confidence", 0.0)))
+                    )
+        if not brand_scores:
+            return detections
+
+        out: List[List[dict]] = [list(fd) for fd in detections]
+        for f_idx, frame_dets in enumerate(detections):
+            # Closest-in-time resolved brand window for this frame, so a brand
+            # on an adjacent frame still anchors detections near it.
+            best_brand, best_conf, best_delta = None, 0.0, None
+            for b_f, entries in brand_scores.items():
+                delta = abs(f_idx - b_f)
+                # strongest-resolved brand closest in time anchors the frame
+                if best_delta is None or delta < best_delta:
+                    best_delta = delta
+                    brand, conf = max(entries, key=lambda e: e[1])
+                    best_brand, best_conf = brand, conf
+            if best_delta is None or best_brand is None or best_delta > self._window:
+                continue
+            if best_conf < self.min_brand_confidence:
+                continue
+
+            spec = self.categories[best_brand]
+            plausible = spec["plausible"]
+            primary = spec.get("primary_label")
+
+            for i, det in enumerate(frame_dets):
+                cls = det.get("class_name", "")
+                if det.get("brand_context") != best_brand:
+                    continue
+                if cls in plausible:
+                    continue  # a plausible product (laptop/tv) is left alone
+                if float(det.get("confidence", 0.0)) < self.min_detection_confidence:
+                    continue
+                if not primary or primary == cls:
+                    continue
+                out[f_idx][i] = dict(out[f_idx][i])
+                out[f_idx][i]["raw_class"] = cls
+                out[f_idx][i]["class_name"] = primary
+                out[f_idx][i]["corrected_class"] = primary
+                out[f_idx][i]["reclassified_by"] = "SceneConsistencyResolver"
+                out[f_idx][i]["brand_context_consistency"] = "corrected"
+        return out
+
+    # Adjacent-frame brand window used for anchoring detections to a brand.
+    _window = 3

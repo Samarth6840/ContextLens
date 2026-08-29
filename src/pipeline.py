@@ -911,6 +911,7 @@ class Phase1Pipeline:
         #     location with `brand_context`, so the device's (possibly noisy)
         #     object label is anchored to the real brand.
         from src.layer2.spatial_label import (
+            SceneConsistencyResolver,
             TemporalObjectSmoother,
             apply_spatial_brand_context,
         )
@@ -927,6 +928,15 @@ class Phase1Pipeline:
                 self.cfg["layer1"].get("spatial_label", {}).get("min_track_len", 2)
             ),
         ).smooth(all_detections)
+        # (3) Brand-anchored contradiction correction (Phase 3): a detection
+        #     anchored to a resolved brand whose COCO label is implausible for
+        #     that brand (mouse/remote/backpack on a Samsung phone) is
+        #     reclassified to the brand's primary product, keeping raw_class.
+        sl = self.cfg["layer1"].get("spatial_label", {})
+        all_detections = SceneConsistencyResolver(
+            min_brand_confidence=float(sl.get("min_brand_confidence", 0.30)),
+            min_detection_confidence=float(sl.get("min_detection_confidence", 0.10)),
+        ).resolve(all_detections, all_logo_detections)
 
         # Reassemble embeddings to full frame count (non-sampled frames get zero vectors)
         embed_dim = embed_raw.shape[1]
