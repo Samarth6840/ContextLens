@@ -116,15 +116,23 @@ def run_retrieval(ref_dir: Path, parquet: Path, classes_json, device: str, limit
 
     per_brand = defaultdict(lambda: {"total": 0, "top1": 0, "top3": 0})
     confs = []
+    errors = []
     for q in queries:
-        res = index.query(q["crop"], top_k=1)
-        hits = {b for b, _ in res} if res else set()
+        res = index.query(q["crop"], top_k=3)
+        top1 = res[0][0] if res else None
+        correct = top1 == q["brand"]
         per_brand[q["brand"]]["total"] += 1
-        if q["brand"] in hits and any(b == q["brand"] for b, s in res):
+        if correct:
             per_brand[q["brand"]]["top1"] += 1
             confs.append(res[0][1])
         if any(b == q["brand"] for b, s in res[:3]):
             per_brand[q["brand"]]["top3"] += 1
+        if not correct:
+            errors.append({
+                "query": q["path"], "gt_brand": q["brand"],
+                "predicted": top1,
+                "top3": [(b, s) for b, s in res[:3]],
+            })
 
     total = sum(v["total"] for v in per_brand.values())
     top1 = sum(v["top1"] for v in per_brand.values())
@@ -144,7 +152,7 @@ def run_retrieval(ref_dir: Path, parquet: Path, classes_json, device: str, limit
             for b, v in sorted(per_brand.items())
         },
     }
-    return agg, bank, queries
+    return agg, errors
 
 
 def main():
@@ -156,16 +164,24 @@ def main():
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--mode", default="retrieval", choices=["retrieval", "resolver"])
     p.add_argument("--output", default="benchmark/results")
+    p.add_argument("--diag", action="store_true", help="print per-query misclassifications")
     args = p.parse_args()
 
-    agg, _, _ = run_retrieval(
+    agg, errors = run_retrieval(
         Path(args.ref_dir), Path(args.test_parquet), args.classes, args.device, args.limit
     )
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / f"retrieval_bench_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    (out_dir / out_file.name).write_text(json.dumps(agg, indent=2))
+    out_data = dict(agg)
+    out_data["errors"] = errors
+    (out_dir / out_file.name).write_text(json.dumps(out_data, indent=2))
     print(json.dumps(agg, indent=2))
+    if args.diag:
+        print("\nMisclassified queries:")
+        for e in errors:
+            print(f"  {e['gt_brand']:12s} -> {str(e['predicted']):12s} "
+                  f"top3={[(b, s) for b, s in e['top3']]}  {e['query']}")
     print(f"\nWrote {(out_dir / out_file.name)}")
 
 

@@ -219,6 +219,23 @@ The two original failure modes now resolve correctly end-to-end:
   by YOLO + OCR. The separate input→calculation latency track is documented in the PERF_*
   reports.
 
+### D5 — Diagnostic of the residual retrieval errors
+`scripts/retrieval_benchmark.py --diag` lists every misclassified held-out query with its
+top-3. The 9 errors fall into two groups:
+- **Hard negatives (correct brand ABSENT from top-3)** — UNDER ARMOUR→ASICS (UA not in
+  top-3), COCA-COLA→LEVI'S, PEPSI→APPLE, APPLE→LULULEMON, ZARA→ROLEX. For these a top-k /
+  margin rule cannot help because the right brand never surfaces in retrieval; they are the
+  5.7% bound of the image-only CLIP stage.
+- **Near-tie wordmark confusion** — ADIDAS 0.918 vs NEW BALANCE 0.924, ADIDAS 0.8965 vs
+  ROLEX 0.9014, UNDER ARMOUR vs NEW BALANCE: the correct brand IS in top-3 but split by
+  <0.01 similarity on confusable text-heavy wordmarks. Any margin heuristic that "wins" the
+  tie would be guessing and could as likely increase errors.
+
+**Decision:** no retrieval-side margin/consensus rule was added. The disciplined fix for
+these is a stronger stage (multimodal text+image, more/better reference crops, or a
+fine-tuned region model) — out of scope here and called OPEN rather than papered over. The
+resolver already logs `retrieval_top3` per resolution so these ambiguities stay auditable.
+
 ---
 
 ## SELF-AUDIT (all three parts)
