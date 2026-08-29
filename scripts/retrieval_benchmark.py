@@ -10,11 +10,9 @@ Honest evaluation design (no closed-set inflation):
   * A test crop's logo is NEVER in the reference bank (different split), so a
     top-1 hit is a genuine generalization result, not a self-match.
 
-Modes:
-  retrieval  — CLIP only: top-1 brand for each held-out crop (the headline).
-  resolver   — full BrandResolver fusion (OCR > CLIP retrieval > class-label)
-               on the held-out crops with a EMPTY class label, so resolution
-               must come from OCR or retrieval (the at-risk icon-only path).
+This script scores CLIP retrieval alone (top-1 brand per held-out crop). The
+full production fusion (OCR > CLIP retrieval > class-label) that consumes this
+index is exercised end-to-end by scripts/resolution_benchmark.py instead.
 """
 from __future__ import annotations
 
@@ -162,7 +160,6 @@ def main():
     p.add_argument("--classes", default="/tmp/adscene_bench/logodet3k_classes.json")
     p.add_argument("--device", default=None)
     p.add_argument("--limit", type=int, default=0)
-    p.add_argument("--mode", default="retrieval", choices=["retrieval", "resolver"])
     p.add_argument("--output", default="benchmark/results")
     p.add_argument("--diag", action="store_true", help="print per-query misclassifications")
     args = p.parse_args()
