@@ -3,9 +3,20 @@ Layer 3 — Brand Recommender.
 
 Ranks brand collaboration opportunities from the Layer 2 output:
 
-  DIRECT     — brands detected in this video (logo / speech / OCR evidence)
+  DIRECT     — brands detected in this video (logo / speech / OCR evidence /
+               product-catalog match)
   SUGGESTED  — brands that never appeared on screen but share a category with
                a detected brand (the prompt's Puma-for-a-Nike-creator case)
+
+What "knowledge-graph ranked" actually means here (honest description):
+  The upstream Layer 3 component (src/layer3/knowledge_graph.py) is a REAL,
+  lightweight category-adjacency graph derived from the curated brand catalog:
+  brand → categories → adjacent brands. It is the graph that supplies SUGGESTED
+  brands and drives their score via category affinity. It is NOT a learned
+  product-relation / competitor graph (no embedding-trained edges, no LLM-mined
+  relations yet). DIRECT recommendations are ranked by evidence strength; only
+  SUGGESTED recommendations are graph-ranked. If "knowledge-graph ranked" were
+  claimed for the full output, that would overstate it.
 
 Explainability is built in: every recommendation carries `reasons` that state
 which evidence (Layer 2b/timeline) or which graph relationship (Layer 3)
@@ -142,7 +153,7 @@ class BrandRecommender:
                 "score": round(score, 3),
                 "confidence": round(score, 3),
                 "appearances": 0,
-                "reasons": reasons or ["KNOWLEDGE-GRAPH CATEGORY FIT"],
+                "reasons": reasons or ["CATEGORY-AFFINITY KNOWLEDGE-GRAPH FIT"],
             })
 
         recs.sort(key=lambda r: r["score"], reverse=True)

@@ -95,13 +95,38 @@ class VideoProcessor:
                 video_fps,
             )
             video_fps = 30.0
-        frame_interval = max(1, int(video_fps / frame_rate))
+
+        # True source frame count (codec-reported, may be unreliable/zero).
+        total_frames = total_frames_hint if total_frames_hint > 0 else None
+
+        # Sampling strategy:
+        #   * Desired sample rate = `frame_rate` fps (float, e.g. 1.0).
+        #   * When we know the total frame count and the video is longer than
+        #     max_frames/frame_rate seconds, we STRIDE uniformly across the FULL
+        #     video instead of truncating to the first N frames. This is the
+        #     correctness fix for "pipeline only sees the opening seconds" —
+        #     without it a 10-minute video at frame_rate=1 capped at 300 frames
+        #     silently analyzed only the first 5 minutes.
+        #   * Step is measured in source frames so every sampled frame is spaced
+        #     evenly across the entire duration.
+        if total_frames is not None and total_frames > 0:
+            nominal_sample_count = int(total_frames * frame_rate / video_fps) + 1
+            target = min(max_frames, max(1, nominal_sample_count))
+            if total_frames > target:
+                step = max(1, total_frames // target)
+            else:
+                step = 1
+        else:
+            # Unknown total: fall back to stride-by-frame-rate (may truncate if
+            # the codec hides the true length, but we cannot do better without
+            # a full decode pass).
+            step = max(1, int(video_fps / frame_rate))
 
         frames = []
         frame_count = 0
 
         while len(frames) < max_frames:
-            if frame_count % frame_interval == 0:
+            if frame_count % step == 0:
                 ret = cap.grab()
                 if not ret:
                     break
@@ -119,15 +144,28 @@ class VideoProcessor:
 
         cap.release()
 
+        # Effective coverage of the source duration by the sampled frames.
+        # sampled_duration_s is the true span between first and last sample.
+        sampled_duration_s = (len(frames) - 1) * step / video_fps if len(frames) > 1 else 0.0
+        total_duration_s = (total_frames / video_fps) if total_frames and total_frames > 0 else (frame_count / video_fps)
         effective_rate = len(frames) / (frame_count / video_fps) if frame_count > 0 else 0
         logger.info(
             f"Loaded {len(frames)} frames from {video_path} "
             f"({video_fps:.1f} fps, extracted at {effective_rate:.1f} fps, "
-            f"{'capped' if len(frames) >= max_frames and frame_count > 0 else 'complete'})"
+            f"sample step {step} frames)"
+        )
+        logger.info(
+            "Frame coverage: %.1fs of %.1fs source covered (%.0f%%) — "
+            "sampled frames span the full video, not just its opening",
+            sampled_duration_s,
+            total_duration_s,
+            (sampled_duration_s / total_duration_s * 100)
+            if total_duration_s > 0 else 0.0,
         )
         # The true source frame count is what the codec reports when available;
         # otherwise fall back to what we actually iterated.
-        total_frames = total_frames_hint if total_frames_hint > 0 else frame_count
+        if total_frames is None:
+            total_frames = frame_count
         return frames, video_fps, total_frames
 
     @staticmethod
@@ -247,8 +285,6 @@ class Phase1Pipeline:
         self._video_quality_estimator = None
         self._confidence_scorer = None
         self._central_vision_model = None  # Qwen3-VL 32B
-        self._voxtral_realtime = None  # Voxtral Realtime
-        self._qwen3asr = None  # Qwen3-ASR batch
 
         # Per-model threading locks for GPU inference safety.
         # Each GPU-backed model gets its own lock so different models can
@@ -260,6 +296,11 @@ class Phase1Pipeline:
         # Prevents double-loading when two threads access the same property
         # simultaneously (check-then-set race condition).
         self._init_locks: Dict[str, threading.Lock] = {}
+
+        # Per-model wall-time profile (in seconds), collected by _locked_call.
+        # Lets us verify real parallelism: if a single GPU-bound lock serializes
+        # all models, the sum of these ~= total executor time (fake parallel).
+        self._model_wall_times: Dict[str, float] = {}
 
         logger.info("Phase1Pipeline initialized (models will load on first use)")
 
@@ -467,6 +508,20 @@ class Phase1Pipeline:
         return self._get_or_create("_confidence_scorer", _create)
 
     @property
+    def product_index(self):
+        """Lazy DINOv2 product-catalog embedding index (fails closed when empty)."""
+        def _create():
+            from src.layer1.product_index import ProductEmbeddingIndex
+            index = ProductEmbeddingIndex(
+                reference_dir=self.cfg["layer1"].get(
+                    "product_index", {}
+                ).get("reference_dir", "benchmark/product_logos")
+            )
+            index.build(self.embedding_extractor)
+            return index
+        return self._get_or_create("_product_index", _create)
+
+    @property
     def central_vision_model(self):
         def _create():
             from src.layer1.qwen3vl import create_qwen3vl_32b
@@ -478,35 +533,6 @@ class Phase1Pipeline:
                 load_8bit=vl_cfg.get("load_8bit", True),
             )
         return self._get_or_create("_central_vision_model", _create)
-
-    @property
-    def voxtral_realtime(self):
-        def _create():
-            from src.layer1.voxtral_realtime import create_voxtral_realtime
-            vr_cfg = self.cfg["layer1"].get("voxtral_realtime", {})
-            logger.info("Loading Voxtral Realtime for live audio ingestion...")
-            return create_voxtral_realtime(
-                model_name=vr_cfg.get("model", "Voxtral-Realtime"),
-                device=self.device,
-                sample_rate=vr_cfg.get("sample_rate", 16000),
-                chunk_duration_ms=vr_cfg.get("chunk_duration_ms", 30),
-            )
-        return self._get_or_create("_voxtral_realtime", _create)
-
-    @property
-    def qwen3asr(self):
-        def _create():
-            from src.layer1.qwen3asr import create_qwen3asr
-            asr_cfg = self.cfg["layer1"].get("qwen3asr", {})
-            logger.info("Loading Qwen3-ASR for batch speech recognition...")
-            return create_qwen3asr(
-                model_name=asr_cfg.get("model", "Qwen3-ASR-32B"),
-                device=self.device,
-                use_8bit=asr_cfg.get("use_8bit", True),
-                language=asr_cfg.get("language", "en"),
-                fuzzy_mentions=asr_cfg.get("fuzzy_mentions", False),
-            )
-        return self._get_or_create("_qwen3asr", _create)
 
     @staticmethod
     def _select_keyframes(frames: List[np.ndarray], max_frames: int = 30) -> List[int]:
@@ -558,6 +584,7 @@ class Phase1Pipeline:
 
         timings: Dict[str, float] = {}
         _t_total = time.monotonic()
+        self._model_wall_times = {}
         logger.info(f"Processing video: {video_path}")
 
         # Load video frames
@@ -619,6 +646,10 @@ class Phase1Pipeline:
         audio_events_list = []
         ocr_future = None
         detection_done = threading.Event()
+        self._qwen_enabled = False
+        self._qwen_future = None
+        self._qwen_frames = []
+        self._qwen_results = None
 
         # Submit everything — logo, embeddings, STT, audio_events, AND detection —
         # into the same concurrent pool. OCR submits in a second wave once
@@ -635,18 +666,15 @@ class Phase1Pipeline:
                 logo_frames, None, batch_size,
             )] = "logo_detection"
 
-            # Qwen3-VL central analysis (handles video, OCR, reasoning in one pass).
-            # Gate on config layer1.central_vision_model.enabled — the Qwen3-VL
-            # 32B integration is not yet wired (its loader is a stub that fails
-            # closed) and its output is not consumed downstream, so it stays OFF
-            # by default to avoid launching a model that contributes nothing.
+            # Qwen3-VL central analysis is NOT submitted up-front. It is gated by
+            # config layer1.central_vision_model.enable_qwen AND a frame-flagging
+            # filter (Phase 3): it runs only on frames where logo detection or
+            # object detection already fired (i.e. something visually interesting
+            # is present), so empty/background frames are skipped. The filtered
+            # submission happens as a second wave once detection results arrive,
+            # alongside OCR.
             _vl_cfg = self.cfg["layer1"].get("central_vision_model", {})
-            if _vl_cfg.get("enabled") and self.central_vision_model:
-                futures[self._locked_submit(
-                    executor, "central_vision",
-                    self.central_vision_model.analyze_batch,
-                    frames[:30], "",  # Sample first 30 frames
-                )] = "central_vision"
+            self._qwen_enabled = bool(_vl_cfg.get("enable_qwen", True))
 
             futures[self._locked_submit(
                 executor, "embedding_extractor",
@@ -685,14 +713,6 @@ class Phase1Pipeline:
                     all_logo_detections = [[] for _ in frames]
                     for idx, dets in zip(logo_indices, result):
                         all_logo_detections[idx] = dets
-                elif modality == "central_vision":
-                    # Central-vision (Qwen3-VL) output is not consumed here.
-                    # Brand resolution happens once, after the executor loop
-                    # (below), using the brand catalog + crop-OCR. The previous
-                    # merge block referenced a never-assigned
-                    # `self._central_vision_results` and was dead code that
-                    # could raise UnboundLocalError.
-                    pass
                 elif modality == "embeddings":
                     embed_raw = result
                 elif modality == "stt":
@@ -728,6 +748,46 @@ class Phase1Pipeline:
                             executor, "ocr",
                             self._ocr_filtered, frames_with_dets, det_idx_map, len(frames),
                         )
+
+                    # ── Qwen3-VL selective activation (Phase 3) ──────────────
+                    # Frame-flagging filter: run Qwen only on frames where logo
+                    # detection OR object detection already fired. Skip empty /
+                    # background frames to bound the cost of the (large) VL model.
+                    # Submitted as a second wave here (after logo+object results
+                    # are known); collected via self._qwen_results and null-guarded
+                    # before any downstream read.
+                    if self._qwen_enabled:
+                        logo_fired = (
+                            all_logo_detections is not None
+                            and any(len(d) > 0 for d in all_logo_detections)
+                        )
+                        if logo_fired:
+                            flag_idx = sorted({
+                                i for i, lst in enumerate(all_logo_detections) if lst
+                            } | set(det_idx_map))
+                        else:
+                            flag_idx = list(det_idx_map)
+                        max_qwen = self.cfg['layer1']['central_vision_model'].get(
+                            'max_frames', 20
+                        )
+                        if len(flag_idx) > max_qwen:
+                            keep = np.linspace(0, len(flag_idx) - 1, max_qwen).astype(int)
+                            flag_idx = [flag_idx[i] for i in keep]
+                        if flag_idx:
+                            self._qwen_results = None  # will be set when the future resolves
+                            _qwen_frames = [frames[i] for i in flag_idx]
+                            self._qwen_frames = _qwen_frames
+                            self._qwen_future = self._locked_submit(executor, "central_vision",
+                                self.central_vision_model.analyze_batch,
+                                _qwen_frames, "")
+                            # NOTE: the future is not tracked in `futures`, so
+                            # as_completed() won't yield it; results are resolved
+                            # via self._qwen_future.result() after the executor
+                            # block's shutdown(wait=True).
+                            logger.info(
+                                "Qwen3-VL selective activation: %d flagged frame(s)",
+                                len(flag_idx),
+                            )
                     logger.info(
                         "Object detection: %d frames with detections (%d total objects)",
                         len(det_idx_map), sum(len(d) for d in all_detections),
@@ -739,6 +799,18 @@ class Phase1Pipeline:
                 all_ocr_results = ocr_future.result()
             except Exception as e:
                 logger.error(f"OCR failed: {e}")
+
+        # Wait for Qwen3-VL (selective-activation second wave, resolved after close)
+        if self._qwen_future is not None:
+            try:
+                self._qwen_results = self._qwen_future.result()
+            except Exception as e:
+                logger.error(f"Qwen3-VL analysis failed: {e}")
+                self._qwen_results = None
+
+        # Null-guard Qwen results for downstream reads.
+        if self._qwen_results is None:
+            self._qwen_results = []
 
         # Guard against catastrophic failures
         if all_logo_detections is None:
@@ -768,6 +840,31 @@ class Phase1Pipeline:
         embeddings = np.zeros((len(frames), embed_dim), dtype=np.float32)
         for i, embed in zip(embed_indices, embed_raw):
             embeddings[i] = embed
+
+        # ── Visual product-catalog match (Phase 2.5) ─────────────────────────
+        # Run the DINOv2 frame embeddings through nearest-neighbor search against
+        # the reference brand-product index. This can surface a brand that never
+        # shows a logo or is spoken — a product match alone is enough. Fails
+        # closed (no matches) when the reference index is empty.
+        _t_prod = time.monotonic()
+        product_matches = self.product_index.query(
+            embed_raw, embed_indices,
+            video_fps=video_fps,
+            top_k=int(
+                self.cfg["layer1"].get("product_index", {}).get("top_k", 1)
+            ),
+            similarity_threshold=float(
+                self.cfg["layer1"].get("product_index", {}).get(
+                    "similarity_threshold", 0.80
+                )
+            ),
+        )
+        timings["product_catalog_match"] = time.monotonic() - _t_prod
+        if product_matches:
+            logger.info(
+                "Product-catalog match: %d match(es) via DINOv2 similarity",
+                len(product_matches),
+            )
         logger.info(
             "Layer 1 completed in %.2fs: %d scene objects, %d logo detections, "
             "%d embeddings, %d OCR results",
@@ -899,7 +996,8 @@ class Phase1Pipeline:
 
         # Aggregate evidence from all modalities
         evidence = self._aggregate_evidence(
-            all_logo_detections, brand_mentions, all_ocr_results, audio_events_list
+            all_logo_detections, brand_mentions, all_ocr_results, audio_events_list,
+            visual_product_matches=product_matches,
         )
         audio_events = audio_events_list
 
@@ -932,6 +1030,25 @@ class Phase1Pipeline:
         for stage, duration in timings.items():
             logger.info("  %-20s %.3fs", stage + ":", duration)
 
+        # Log per-model wall-time profile (parallelism diagnostic).
+        if self._model_wall_times:
+            total_wall = sum(self._model_wall_times.values())
+            logger.info(
+                "Layer 1 per-model wall time (sum=%.2fs): %s",
+                total_wall,
+                {k: round(v, 2) for k, v in sorted(
+                    self._model_wall_times.items(), key=lambda kv: -kv[1]
+                )},
+            )
+            exec_wall = timings.get("layer1_visual", 0.0)
+            logger.info(
+                "Parallelism check: sum(model wall) %.2fs vs layer1 wall %.2fs "
+                "(ratio %.2f — ratio near 1.0 means the pool is effectively "
+                "serialized; ratio well below 1.0 means real concurrency)",
+                total_wall, exec_wall,
+                (total_wall / exec_wall) if exec_wall > 0 else 0.0,
+            )
+
         # Derive source-availability lists from scorer's public properties
         active_sources = list(self.confidence_scorer.effective_weights.keys())
         pending_sources = self.confidence_scorer.scaffolded_sources
@@ -954,6 +1071,9 @@ class Phase1Pipeline:
                 "transcript": transcript,
                 "brand_mentions": brand_mentions,
                 "audio_events": audio_events,
+                "qwen_enabled": self._qwen_enabled,
+                "qwen_frames_analyzed": len(self._qwen_frames or []),
+                "qwen_results": self._qwen_results or [],
             },
             "layer2a": {
                 "audio_quality": audio_quality,
@@ -975,6 +1095,7 @@ class Phase1Pipeline:
             "layer2c": {
                 "brand_timeline": timeline,
                 "brand_evidence": brand_evidence,
+                "product_catalog_matches": product_matches,
             },
             "layer3": {
                 "recommendations": recommendations,
@@ -1009,14 +1130,26 @@ class Phase1Pipeline:
             The concurrent.futures.Future from executor.submit().
         """
         lock = self._model_locks.setdefault(lock_name, threading.Lock())
-        wrapped = partial(self._locked_call, lock, fn, *args, **kwargs)
+        wrapped = partial(self._locked_call, lock, lock_name, fn, *args, **kwargs)
         return executor.submit(wrapped)
 
-    @staticmethod
-    def _locked_call(lock: threading.Lock, fn: Callable, *args, **kwargs):
-        """Execute fn with the given lock held."""
-        with lock:
-            return fn(*args, **kwargs)
+    def _locked_call(self, lock: threading.Lock, lock_name: str, fn: Callable, *args, **kwargs):
+        """Execute fn with the given lock held, recording wall time by model.
+
+        The per-model wall time lets the operator confirm real parallelism: if a
+        single GPU-bound lock serializes every model, `sum(_model_wall_times)`
+        approaches the total executor wall time and the pool is effectively
+        single-threaded (fake parallel) — a cue to drop pool size or move to
+        batched single-process inference.
+        """
+        t0 = time.monotonic()
+        try:
+            with lock:
+                return fn(*args, **kwargs)
+        finally:
+            self._model_wall_times[lock_name] = (
+                self._model_wall_times.get(lock_name, 0.0) + (time.monotonic() - t0)
+            )
 
     @staticmethod
     def _sample_indices(total: int, max_frames: int = 30) -> List[int]:
@@ -1090,12 +1223,41 @@ class Phase1Pipeline:
 
         return features.astype(np.float32)
 
+    def _audio_branding_strength(self, audio_events: List[dict]) -> float:
+        """Map BEATs audio-event classes to brand-relevant evidence strength.
+
+        A jingle/product-sound cue is a weak, non-specific brand signal — it
+        tells you ad-like content exists but not which brand. So the strength is
+        deliberately capped low (0.0-0.4) and requires sustained events (>=2).
+
+        Event-class mapping is intentionally conservative: only classes that map
+        to product/advertising contexts count. Unknown classes (e.g. generic
+        'audio_activity') contribute zero unless they persist.
+        """
+        if not audio_events:
+            return 0.0
+        # Brand-relevant audio-event classes (BEATs AudioSet labels typically).
+        BRAND_CUES = {
+            "jingle", "advertisement", "ad", "music", "applause", "crowd",
+            "whoosh", "ding", "product", "jingles",
+        }
+        cues = [
+            e for e in audio_events
+            if str(e.get("event", "")).strip().lower() in BRAND_CUES
+        ]
+        if len(cues) < 2:
+            return 0.0
+        mean_conf = float(np.mean([e.get("confidence", 0.0) for e in cues]))
+        # Cap: audio cues alone should never dominate direct visual/speech proof.
+        return round(min(0.4, mean_conf * 0.5), 3)
+
     def _aggregate_evidence(
         self,
         logo_detections: List[List[dict]],
         brand_mentions: List[dict],
         ocr_results: List[List[dict]],
         audio_events: List[dict],
+        visual_product_matches: Optional[List[dict]] = None,
     ) -> Dict[str, float]:
         """
         Aggregate evidence from all modalities into evidence strengths.
@@ -1110,9 +1272,12 @@ class Phase1Pipeline:
             brand_mentions: Brand names mentioned in ASR transcript
             ocr_results: OCR text extracted from video frames
             audio_events: Audio event detections from BEATs
+            visual_product_matches: Product-catalog similarity matches from the
+                                    DINOv2 product index (brand + similarity).
 
         Returns dict with keys: logo_detected, speech_mention, ocr_hit,
-                                scene_context, product_retrieval
+                                scene_context, product_retrieval,
+                                visual_product_match, audio_event
         """
         # Logo detection evidence — only detections resolved to a real brand
         logo_strength = 0.0
@@ -1127,13 +1292,25 @@ class Phase1Pipeline:
         # Speech mention evidence
         speech_strength = min(1.0, len(brand_mentions) * 0.3)
 
-        # OCR evidence — only text that matches a known brand name
+        # OCR evidence — only text that matches a known brand name.
+        # Two sources are folded together so frames with logos-but-no-COCO-objects
+        # (which the object-gated second-wave OCR misses) still contribute:
+        #   (1) full-frame/object-region OCR results, and
+        #   (2) the per-logo crop-OCR text already computed by BrandResolver
+        #       (attached to each resolved detection as its `ocr_text`).
         ocr_strength = 0.0
         ocr_confidences = []
         for frame_ocr in ocr_results:
             for result in frame_ocr:
                 if match_brand(result.get("text", "")):
                     ocr_confidences.append(result["confidence"])
+        for frame_logos in logo_detections:
+            for det in frame_logos:
+                ocr_text = det.get("ocr_text")
+                if ocr_text and match_brand(ocr_text):
+                    # Crop-OCR confidence isn't stored per-detection; use the
+                    # detection's own confidence as a reasonable proxy.
+                    ocr_confidences.append(det.get("confidence", 0.5))
         if ocr_confidences:
             ocr_strength = float(np.mean(ocr_confidences))
 
@@ -1146,11 +1323,24 @@ class Phase1Pipeline:
             mean_conf = float(np.mean([e["confidence"] for e in audio_events]))
             count_factor = min(1.0, len(audio_events) / 3.0)
             scene_strength = mean_conf * count_factor
+            # Audio-event branding evidence (Phase 2.6): map BEATs audio-event
+            # classes to brand-relevant product cues. Weaker signal than direct
+            # logo/speech/OCR — a jingle is a hint, not proof of a brand.
+            audio_event = self._audio_branding_strength(audio_events)
         else:
             scene_strength = 0.0
+            audio_event = 0.0
 
-        # Product retrieval (placeholder — Phase 2 adds real product retrieval)
+        # Visual product-catalog match evidence (Phase 2.5): brand matched by
+        # DINOv2 cosine-similarity against the reference product index. Counts
+        # even when no logo or spoken name was present. Fails closed (0.0) when
+        # the index is empty or nothing clears the similarity threshold.
         product_strength = 0.0
+        if visual_product_matches:
+            product_strength = float(np.mean(
+                [m.get("similarity", 0.0) for m in visual_product_matches]
+            ))
+            product_strength = min(1.0, product_strength)
 
         return {
             "logo_detected": logo_strength,
@@ -1158,4 +1348,6 @@ class Phase1Pipeline:
             "ocr_hit": ocr_strength,
             "scene_context": scene_strength,
             "product_retrieval": product_strength,
+            "visual_product_match": product_strength,
+            "audio_event": audio_event,
         }

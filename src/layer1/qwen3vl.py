@@ -85,6 +85,22 @@ class Qwen3VL32B(Qwen3VLAbstract):
 
         self._init_attempts += 1
 
+        # FAIL-FAST WEIGHT GUARD (project policy: never silently download huge
+        # weights). We only attempt to load the model if the weights are already
+        # available locally: either a local path that exists, or a HuggingFace
+        # repo id that is already in the local HF cache. Anything else fails
+        # closed immediately with a clear message — no implicit ~60GB download.
+        if not self._weights_available_locally(self.model_name):
+            logger.error(
+                "Qwen3-VL weights for '%s' are NOT available locally (no local "
+                "path and not in the HuggingFace cache). Failing closed — "
+                "download the weights first (e.g. via huggingface-cli) and set "
+                "config layer1.central_vision_model.model to the local path.",
+                self.model_name,
+            )
+            self._initialized = True
+            return
+
         # Try mlx-first approach for Apple Silicon
         try:
             import mlx_lm
@@ -130,6 +146,39 @@ class Qwen3VL32B(Qwen3VLAbstract):
 
         # Mark as initialized even on failure to avoid retry loop
         self._initialized = True
+
+    @classmethod
+    def _weights_available_locally(cls, model_name: str) -> bool:
+        """True if the model weights are already on disk (local path or HF cache).
+
+        Checks, in order:
+          1. model_name is a local path that exists.
+          2. model_name is an HF repo id present in the local HuggingFace cache
+             (fully downloaded — an empty/incomplete snapshot does NOT count,
+             preventing a silent re-download attempt).
+        """
+        from pathlib import Path
+        import os
+
+        m = Path(str(model_name))
+        if m.exists():
+            return True
+        # Treat it as an HF repo id only if it looks like 'org/repo'.
+        if "/" not in str(model_name):
+            return False
+        cache_root = Path(os.path.expanduser("~/.cache/huggingface/hub"))
+        repo_dir = cache_root / f"models--{str(model_name).replace('/', '--')}"
+        if not repo_dir.is_dir():
+            return False
+        snapshot_dir = repo_dir / "snapshots"
+        if not snapshot_dir.is_dir():
+            return False
+        # Require at least one non-empty snapshot (weights really present).
+        return any(
+            any(f.is_file() and f.stat().st_size > 0 for f in snap.iterdir())
+            for snap in snapshot_dir.iterdir()
+            if snap.is_dir()
+        )
 
     def analyze_frame(
         self,

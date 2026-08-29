@@ -1,5 +1,7 @@
 # Phase 1 Configuration — Multimodal Brand Collaboration Recommendation System
-# Integrated AI Stack: RF-DETR + Qwen3-VL 32B + Voxtral Realtime + Qwen3-ASR
+# Integrated AI Stack: YOLO-World (logo) + YOLOv8x (objects) + DINOv2 (visual
+# embeddings) + PaddleOCR + Whisper ASR + BEATs audio events + Qwen3-VL 32B
+# (central vision, gated) + category-affinity knowledge graph.
 
 layer1:
   object_detection:
@@ -34,29 +36,15 @@ layer1:
   # Central multimodal understanding: Qwen3-VL 32B handles video, OCR, and reasoning in one pass
   central_vision_model:
     backend: "qwen3vl"  # "qwen3vl" | "dinov2"
-    # OFF by default: the Qwen3-VL 32B integration is not yet wired (its loader
-    # in src/layer1/qwen3vl.py is a stub that fails closed) and its output is
-    # not consumed downstream. Set enabled: true only after it is integrated.
-    enabled: False
+    # enable_qwen: when True, Qwen3-VL is allowed to run. It is gated at runtime
+    # by a frame-selection filter (see pipeline) so it only analyzes frames where
+    # logo/object detection or OCR already fired — empty/background frames are
+    # skipped. NOTE: the loader in src/layer1/qwen3vl.py still FAILS CLOSED
+    # (returns fallback dicts, no real inference) until the 32B weights are wired.
+    enable_qwen: True
     model: "Qwen3-VL-32B"
     load_8bit: True  # Use 8-bit quantization for memory efficiency on Apple Silicon
     device: None  # auto-detect (mps/cuda/cpu)
-
-  # Voxtral Realtime for live audio ingestion
-  voxtral_realtime:
-    enabled: True  # Use Voxtral Realtime for live streaming audio
-    model: "Voxtral-Realtime"
-    sample_rate: 16000
-    chunk_duration_ms: 30  # Processing chunk duration in milliseconds
-    device: None  # auto-detect
-
-  # Qwen3-ASR for batch speech recognition
-  qwen3asr:
-    enabled: True  # Use Qwen3-ASR for batch transcription
-    model: "Qwen3-ASR-32B"
-    use_8bit: True  # Use 8-bit quantization
-    language: "en"  # Default language
-    fuzzy_mentions: False  # Fuzzy/phonetic matching opt-in; defaults OFF
 
   # Legacy speech-to-text (maintained for backward compatibility)
   speech_to_text:
@@ -80,6 +68,16 @@ layer1:
   visual_embeddings:
     model: "facebook/dinov2-base"
     output_dim: 768
+
+  # Product-catalog visual search (Phase 2.5): DINOv2 frame embeddings are run
+  # through cosine nearest-neighbor search against a reference index of brand
+  # product/logo images. FAILS CLOSED: with no reference images under
+  # reference_dir (one subdir per canonical catalog brand) the index stays empty
+  # and visual_product_match evidence is 0 — no fabricated matches.
+  product_index:
+    reference_dir: "benchmark/product_logos"
+    top_k: 1
+    similarity_threshold: 0.80
 
   ocr:
     lang: "en"
@@ -110,27 +108,40 @@ layer2b:
   # implemented-source weights are renormalized to sum to 1.0 so
   # that strong evidence from the available sources can reach a fair
   # confidence score.
+  #
+  # Weights are calibrated for 5 implemented visual/audio signals (not the
+  # original 3): logo carries the most weight, visual product-catalog match
+  # (Phase 2.5) sits below direct logo since similarity is weaker than an
+  # identified on-screen logo, and audio_event (Phase 2.6, jingles/cues) is
+  # the weakest since it hints at ad-like content without naming a brand.
   evidence_sources:
-    # RF-DETR logo detection evidence
+    # Logo detection evidence — brand-resolved on-screen logo boxes
     logo_detected:
-      weight: 0.30  # Renormalized from 0.45 (3 implemented sources → 0.45/0.70 ≈ 0.643, but with new stack 3/5=0.6)
-      status: implemented  # RF-DETR logo detector + brand resolution
-    # Qwen3-ASR speech mention evidence
+      weight: 0.30
+      status: implemented  # YOLO-World logo detector + brand resolution
+    # Speech mention evidence
     speech_mention:
-      weight: 0.25  # Qwen3-ASR brand mention strength
-      status: implemented  # ASR transcript → brand-catalog mention detection
-    # Qwen3-VL OCR/text hit evidence
+      weight: 0.20
+      status: implemented  # ASR transcript -> brand-catalog mention detection
+    # OCR evidence — full-frame/object-region + logo-crop OCR folded together
     ocr_hit:
-      weight: 0.20  # Qwen3-VL text extraction strength
-      status: implemented  # Qwen3-VL OCR within video frames
-    # Voxtral Realtime scene context
-    scene_context:
-      weight: 0.15  # Voxtral audio event confidence
-      status: scaffolded  # BEATs audio event detector (pending product/scene relevance mapping)
-    # Product retrieval (Phase 2)
-    product_retrieval:
+      weight: 0.18
+      status: implemented  # PaddleOCR within video frames
+    # Visual product-catalog match (Phase 2.5) — DINOv2 NN against product index
+    visual_product_match:
+      weight: 0.18
+      status: implemented  # product-index cosine similarity (fails closed to 0)
+    # Audio-event branding cue (Phase 2.6) — BEATs jingle/ad-cue mapping
+    audio_event:
       weight: 0.10
-      status: scaffolded   # requires product-embedding retrieval
+      status: implemented  # BEATs audio-event -> brand-cue mapping
+    # Provisionally scaffolded legacy/next sources (excluded from scoring)
+    scene_context:
+      weight: 0.04
+      status: scaffolded  # voxtral realtime scene context (not wired)
+    product_retrieval:
+      weight: 0.0
+      status: scaffolded  # reserved for product-retrieval evidence
 
   aggregation: "weighted_sum"  # weighted_sum | learned_calibration | noisy_or
   min_evidence_threshold: 0.55
