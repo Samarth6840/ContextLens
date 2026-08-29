@@ -1,0 +1,136 @@
+{
+  "script": "resolution_benchmark.py",
+  "refdir": "benchmark/reference_logos",
+  "timestamp": "2026-08-29T22:49:23",
+  "aggregate": {
+    "images": 11,
+    "detected_rate": 0.273,
+    "resolve_rate": 0.273,
+    "resolution_accuracy": 0.0,
+    "brand_accuracy": 0.0,
+    "mean_correct_conf": 0.0,
+    "latency_total_s": 2.616,
+    "latency_ms_per_image": 237.8,
+    "per_brand": {
+      "APPLE": {
+        "images": 3,
+        "detected": 2,
+        "resolved": 1,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_correct_conf": 0.0
+      },
+      "MICROSOFT": {
+        "images": 3,
+        "detected": 0,
+        "resolved": 0,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_correct_conf": 0.0
+      },
+      "SAMSUNG": {
+        "images": 2,
+        "detected": 1,
+        "resolved": 1,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_correct_conf": 0.0
+      },
+      "SONY": {
+        "images": 3,
+        "detected": 0,
+        "resolved": 0,
+        "correct": 0,
+        "accuracy": 0.0,
+        "mean_correct_conf": 0.0
+      }
+    }
+  },
+  "per_image": [
+    {
+      "file": "APPLE_0.png",
+      "gt": "APPLE",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "APPLE_1.png",
+      "gt": "APPLE",
+      "n_regions": 2,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "APPLE_2.png",
+      "gt": "APPLE",
+      "n_regions": 1,
+      "resolved": {
+        "brand": "SUPREME",
+        "confidence": 0.452,
+        "ocr_text": null
+      },
+      "correct": false
+    },
+    {
+      "file": "MICROSOFT_0.png",
+      "gt": "MICROSOFT",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "MICROSOFT_1.png",
+      "gt": "MICROSOFT",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "MICROSOFT_2.png",
+      "gt": "MICROSOFT",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "SAMSUNG_0.png",
+      "gt": "SAMSUNG",
+      "n_regions": 1,
+      "resolved": {
+        "brand": "SUPREME",
+        "confidence": 0.596,
+        "ocr_text": null
+      },
+      "correct": false
+    },
+    {
+      "file": "SAMSUNG_2.png",
+      "gt": "SAMSUNG",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "SONY_0.png",
+      "gt": "SONY",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "SONY_1.png",
+      "gt": "SONY",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    },
+    {
+      "file": "SONY_2.png",
+      "gt": "SONY",
+      "n_regions": 0,
+      "resolved": null,
+      "correct": false
+    }
+  ]
+}

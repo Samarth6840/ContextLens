@@ -27,3 +27,7 @@ benchmark/results/*
 
 # Open-set candidate crops (runtime evidence images, regenerated per run)
 static/openset_crops/
+
+# Python coverage artifacts
+.coverage
+htmlcov/

@@ -145,11 +145,37 @@ class BrandResolver:
         class_name = str(det.get("class_name") or "")
         confidence = float(det.get("confidence", 0.0))
 
-        # 1. The prompt/class may already name a brand ('Samsung logo'). Only
-        #    trusted above the class-confidence gate — below it the label is a
-        #    possible false positive, so we fall through to crop-OCR for proof.
+        # 1. The prompt/class may already name a brand ('Samsung logo'). Trusted
+        #    above the class-confidence gate, but ALWAYS cross-checked against
+        #    crop-OCR below: YOLO-World sometimes confidently (>= gate) mislabels
+        #    a logo region as a spurious brand (e.g. 'SUPREME logo' on a Samsung
+        #    foldable at 0.45-0.60). OCR reads the real on-screen wordmark, so if
+        #    it names a DIFFERENT catalog brand we prefer the OCR ground truth.
         brand = match_brand(class_name)
         if brand and confidence >= self.class_confidence:
+            # Cross-check with crop-OCR before committing to the class label.
+            crop = self._crop(frame, det.get("bbox"))
+            ocr_brand = None
+            if crop is not None:
+                texts = self._ocr_crop_texts(crop)
+                joined = " ".join(texts)
+                ocr_brand = match_brand(joined) if texts else None
+            if ocr_brand and ocr_brand != brand:
+                logger.info(
+                    "Brand cross-check override: class='%s' (conf=%.2f, gate=%.2f) "
+                    "ocr_text=%r -> %s (was %s)",
+                    class_name, confidence, self.class_confidence, joined[:40],
+                    ocr_brand, brand,
+                )
+                out["brand"] = ocr_brand
+                out["class_name"] = ocr_brand
+                out["ocr_text"] = joined[:40]
+                out["class_confirmed"] = False
+                out["resolved_vs_class"] = {
+                    "class_brand": brand,
+                    "class_confidence": round(confidence, 3),
+                }
+                return out
             out["brand"] = brand
             out["class_name"] = brand
             out["class_confirmed"] = True

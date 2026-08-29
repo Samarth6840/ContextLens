@@ -201,6 +201,31 @@ class TestBrandResolver:
         assert out[0][0]["brand"] == "ADIDAS"
         assert out[1][0]["brand"] is None
 
+    def test_ocr_crosscheck_overrides_spurious_high_conf_class(self):
+        # YOLO-World sometimes CONFIDENTLY (>= gate) mislabels a logo region as a
+        # spurious brand ('SUPREME logo' on an Apple wordmark at 0.6). The
+        # crop-OCR cross-check must prefer the real on-screen wordmark.
+        class FakeOCR:
+            def extract_text(self, crop):
+                return [{"text": "Apple Intelligence"}]
+        resolver = BrandResolver(ocr_extractor=FakeOCR(), class_confidence=0.40)
+        dets = [[{"class_name": "SUPREME logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "APPLE"
+        assert out[0][0]["class_confirmed"] is False
+        assert out[0][0]["resolved_vs_class"]["class_brand"] == "SUPREME"
+
+    def test_class_brand_kept_when_ocr_reads_nothing(self):
+        # When OCR finds no wordmark, the (above-gate) class label stands.
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40)
+        dets = [[{"class_name": "Supreme logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SUPREME"
+        assert out[0][0]["class_confirmed"] is True
+
 
 # ============================================================
 # Layer 2c — brand timeline
