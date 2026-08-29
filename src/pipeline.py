@@ -284,6 +284,7 @@ class Phase1Pipeline:
         self._audio_quality_estimator = None
         self._video_quality_estimator = None
         self._confidence_scorer = None
+        self._product_index = None  # DINOv2 product-catalog index (Phase 2.5)
         self._central_vision_model = None  # Qwen3-VL 32B
 
         # Per-model threading locks for GPU inference safety.
@@ -327,99 +328,164 @@ class Phase1Pipeline:
                     setattr(self, attr, factory())
         return getattr(self, attr)
 
+    def warmup(self) -> Dict[str, float]:
+        """Preload heavy models into memory in parallel (thread-safe).
+
+        Model handles are lazy singletons, so the FIRST job pays every model's
+        init cost sequentially inside `process_video`. Calling `warmup()` up
+        front (e.g. at server startup) moves that cost out of the measured
+        input->calculation path: subsequent jobs skip model load entirely.
+
+        Every model is initialized through the same `_get_or_create`
+        double-checked lock the pipeline uses, so warmup can run concurrently
+        with a job without duplicating loads.
+
+        Returns a dict of {model -> init seconds}; only preloads models that
+        are not already initialized.
+        """
+        import time as _t
+
+        attrs = [
+            ("_detector", self._detector_factory),
+            ("_logo_detector", self._logo_detector_factory),
+            ("_embedding_extractor", self._embedding_extractor_factory),
+            ("_ocr", self._ocr_factory),
+            ("_stt", self._stt_factory),
+            ("_audio_events", self._audio_events_factory),
+            ("_product_index", self._product_index_factory),
+        ]
+        to_load = [(a, f) for a, f in attrs if getattr(self, a) is None]
+        wall: Dict[str, float] = {}
+        if not to_load:
+            logger.info("Model warmup: all models already loaded")
+            return wall
+
+        with ThreadPoolExecutor(max_workers=min(6, len(to_load))) as pool:
+            futs = {pool.submit(self._warm_attr, a, f): a for a, f in to_load}
+            for fut in futs:
+                attr = futs[fut]
+                t0 = _t.monotonic()
+                fut.result()
+                wall[attr] = _t.monotonic() - t0
+                logger.info("Warmup loaded %s in %.2fs", attr, wall[attr])
+        logger.info(
+            "Model warmup complete: %s",
+            ", ".join(f"{k}={v:.1f}s" for k, v in wall.items()) or "nothing new",
+        )
+        return wall
+
+    def _warm_attr(self, attr: str, factory) -> None:
+        self._get_or_create(attr, factory)
+
+    def _detector_factory(self):
+        from src.layer1.detector import SceneObjectDetector
+        od_cfg = self.cfg["layer1"]["object_detection"]
+        return SceneObjectDetector(
+            model_name=od_cfg["model"],
+            confidence_threshold=od_cfg["confidence_threshold"],
+            iou_threshold=od_cfg.get("iou_threshold", 0.45),
+            device=self.device,
+        )
+
+    def _logo_detector_factory(self):
+        from src.layer1.logo_detector import create_logo_detector
+        from src.brand_catalog import build_text_queries
+        logo_cfg = self.cfg["layer1"].get("logo_detection", {})
+        queries = list(logo_cfg.get("text_queries") or [])
+        for q in build_text_queries():
+            if q not in queries:
+                queries.append(q)
+        return create_logo_detector(
+            backend=logo_cfg.get("backend", "yolo_world"),
+            model_name=logo_cfg.get("model", "yolov8s-worldv2.pt"),
+            confidence_threshold=logo_cfg.get("confidence_threshold", 0.30),
+            device=self.device,
+            text_queries=queries,
+        )
+
+    def _embedding_extractor_factory(self):
+        from src.layer1.visual_embeddings import VisualEmbeddingExtractor
+        return VisualEmbeddingExtractor(
+            model_name=self.cfg["layer1"]["visual_embeddings"]["model"],
+            output_dim=self.cfg["layer1"]["visual_embeddings"]["output_dim"],
+            device=self.device,
+        )
+
+    def _ocr_factory(self):
+        from src.layer1.ocr import OCRExtractor
+        ocr_cfg = self.cfg["layer1"]["ocr"]
+        return OCRExtractor(
+            lang=ocr_cfg["lang"],
+            use_angle_cls=ocr_cfg["use_angle_cls"],
+            det_db_thresh=ocr_cfg["det_db_thresh"],
+            rec_batch_num=ocr_cfg.get("rec_batch_num", 6),
+        )
+
+    def _stt_factory(self):
+        from src.layer1.audio import SpeechToText
+        stt_cfg = self.cfg["layer1"]["speech_to_text"]
+        return SpeechToText(
+            model_name=stt_cfg["model"],
+            device=self.device,
+            compute_dtype=stt_cfg.get("compute_dtype"),
+        )
+
+    def _audio_events_factory(self):
+        from src.layer1.audio import AudioEventDetector
+        ae_cfg = self.cfg["layer1"]["audio_events"]
+        beats_ckpt = ae_cfg["checkpoint"]
+        if not Path(beats_ckpt).exists():
+            logger.warning(
+                "BEATs checkpoint not found at %s. Audio event detection disabled.",
+                beats_ckpt,
+            )
+            return False
+        return AudioEventDetector(
+            checkpoint_path=beats_ckpt,
+            device=self.device,
+            sample_rate=ae_cfg["sample_rate"],
+        )
+
+    def _product_index_factory(self):
+        from src.layer1.product_index import ProductEmbeddingIndex
+        index = ProductEmbeddingIndex(
+            reference_dir=self.cfg["layer1"].get("product_index", {}).get(
+                "reference_dir", "benchmark/product_logos"
+            )
+        )
+        index.build(self.embedding_extractor)
+        return index
+
     @property
     def detector(self):
-        def _create():
-            from src.layer1.detector import SceneObjectDetector
-            logger.info("Loading YOLO detector...")
-            return SceneObjectDetector(
-                model_name=self.cfg["layer1"]["object_detection"]["model"],
-                confidence_threshold=self.cfg["layer1"]["object_detection"]["confidence_threshold"],
-                iou_threshold=self.cfg["layer1"]["object_detection"]["iou_threshold"],
-                device=self.device,
-            )
-        return self._get_or_create("_detector", _create)
+        logger.info("Loading YOLO detector...")
+        return self._get_or_create("_detector", self._detector_factory)
 
     @property
     def logo_detector(self):
-        def _create():
-            from src.layer1.logo_detector import create_logo_detector
-            from src.brand_catalog import build_text_queries
-            logo_cfg = self.cfg["layer1"].get("logo_detection", {})
-            backend = logo_cfg.get("backend", "yolo_world")
-            logger.info("Loading logo detector (backend=%s)...", backend)
-            # Merge generic fallback queries with per-brand catalog queries
-            # ('Nike logo', 'Samsung logo', ...) so zero-shot detection can
-            # match known brands directly instead of only generic 'brand logo'.
-            queries = list(logo_cfg.get("text_queries") or [])
-            for q in build_text_queries():
-                if q not in queries:
-                    queries.append(q)
-            return create_logo_detector(
-                backend=backend,
-                model_name=logo_cfg.get("model", "yolov8s-worldv2.pt"),
-                confidence_threshold=logo_cfg.get("confidence_threshold", 0.30),
-                device=self.device,
-                text_queries=queries,
-            )
-        return self._get_or_create("_logo_detector", _create)
+        logger.info("Loading logo detector (backend=%s)...",
+                    self.cfg["layer1"].get("logo_detection", {}).get("backend", "yolo_world"))
+        return self._get_or_create("_logo_detector", self._logo_detector_factory)
 
     @property
     def embedding_extractor(self):
-        def _create():
-            from src.layer1.visual_embeddings import VisualEmbeddingExtractor
-            logger.info("Loading DINOv2 embeddings model...")
-            return VisualEmbeddingExtractor(
-                model_name=self.cfg["layer1"]["visual_embeddings"]["model"],
-                output_dim=self.cfg["layer1"]["visual_embeddings"]["output_dim"],
-                device=self.device,
-            )
-        return self._get_or_create("_embedding_extractor", _create)
+        logger.info("Loading DINOv2 embeddings model...")
+        return self._get_or_create("_embedding_extractor", self._embedding_extractor_factory)
 
     @property
     def ocr(self):
-        def _create():
-            from src.layer1.ocr import OCRExtractor
-            logger.info("Loading PaddleOCR...")
-            return OCRExtractor(
-                lang=self.cfg["layer1"]["ocr"]["lang"],
-                use_angle_cls=self.cfg["layer1"]["ocr"]["use_angle_cls"],
-                det_db_thresh=self.cfg["layer1"]["ocr"]["det_db_thresh"],
-                rec_batch_num=self.cfg["layer1"]["ocr"]["rec_batch_num"],
-            )
-        return self._get_or_create("_ocr", _create)
+        logger.info("Loading PaddleOCR...")
+        return self._get_or_create("_ocr", self._ocr_factory)
 
     @property
     def stt(self):
-        def _create():
-            from src.layer1.audio import SpeechToText
-            logger.info("Loading Whisper ASR model...")
-            return SpeechToText(
-                model_name=self.cfg["layer1"]["speech_to_text"]["model"],
-                device=self.device,
-                compute_dtype=self.cfg["layer1"]["speech_to_text"]["compute_dtype"],
-            )
-        return self._get_or_create("_stt", _create)
+        logger.info("Loading Whisper ASR model...")
+        return self._get_or_create("_stt", self._stt_factory)
 
     @property
     def audio_events(self):
-        def _create():
-            beats_ckpt = self.cfg["layer1"]["audio_events"]["checkpoint"]
-            if Path(beats_ckpt).exists():
-                from src.layer1.audio import AudioEventDetector
-                logger.info("Loading BEATs audio event detector...")
-                return AudioEventDetector(
-                    checkpoint_path=beats_ckpt,
-                    device=self.device,
-                    sample_rate=self.cfg["layer1"]["audio_events"]["sample_rate"],
-                )
-            else:
-                logger.warning(
-                    f"BEATs checkpoint not found at {beats_ckpt}. "
-                    "Audio event detection disabled."
-                )
-                return False  # sentinel so we don't retry on every access
-        return self._get_or_create("_audio_events", _create)
+        logger.info("Loading BEATs audio event detector...")
+        return self._get_or_create("_audio_events", self._audio_events_factory)
 
     @property
     def fusion(self):
@@ -510,16 +576,7 @@ class Phase1Pipeline:
     @property
     def product_index(self):
         """Lazy DINOv2 product-catalog embedding index (fails closed when empty)."""
-        def _create():
-            from src.layer1.product_index import ProductEmbeddingIndex
-            index = ProductEmbeddingIndex(
-                reference_dir=self.cfg["layer1"].get(
-                    "product_index", {}
-                ).get("reference_dir", "benchmark/product_logos")
-            )
-            index.build(self.embedding_extractor)
-            return index
-        return self._get_or_create("_product_index", _create)
+        return self._get_or_create("_product_index", self._product_index_factory)
 
     @property
     def central_vision_model(self):
@@ -587,28 +644,34 @@ class Phase1Pipeline:
         self._model_wall_times = {}
         logger.info(f"Processing video: {video_path}")
 
-        # Load video frames
+        # Load video frames AND extract audio concurrently. Both are independent
+        # decode tasks on the same file (ffmpeg/OpenCV + ffmpeg/librosa), so
+        # running them together hides audio extraction behind frame decode —
+        # a direct wall-time saving on the input->calculation path. The heavier
+        # frame decode drives the right hand side; audio finishes underneath it.
         _t = time.monotonic()
         if frame_rate is None:
             frame_rate = self.cfg["evaluation"]["video_frame_rate"]
         max_frames = self.cfg['evaluation'].get('max_frames', 300)
-        frames, video_fps, video_total_frames = VideoProcessor.load_video(
-            video_path, frame_rate, max_frames
-        )
+        max_audio_seconds = self.cfg['evaluation'].get('max_audio_seconds')
+        sample_rate = self.cfg["evaluation"]["audio_sample_rate"]
+
+        frames, video_fps, video_total_frames, audio = None, 0.0, 0, None
+        with ThreadPoolExecutor(max_workers=2) as _extract_pool:
+            _video_f = _extract_pool.submit(
+                VideoProcessor.load_video, video_path, frame_rate, max_frames
+            )
+            _audio_f = _extract_pool.submit(
+                VideoProcessor.extract_audio, video_path, sample_rate,
+                max_duration=max_audio_seconds,
+            )
+            frames, video_fps, video_total_frames = _video_f.result()
+            audio = _audio_f.result()
         timings["load_video"] = time.monotonic() - _t
+        timings["extract_audio_if_any"] = time.monotonic() - _t
 
         if not frames:
             return {"error": "No frames extracted from video"}
-
-        # Extract audio (capped to max_audio_seconds to prevent OOM)
-        _t = time.monotonic()
-        max_audio_seconds = self.cfg['evaluation'].get('max_audio_seconds')
-        audio = VideoProcessor.extract_audio(
-            video_path,
-            self.cfg["evaluation"]["audio_sample_rate"],
-            max_duration=max_audio_seconds,
-        )
-        timings["extract_audio"] = time.monotonic() - _t
 
         # === Layer 1: Multimodal Understanding ===
         _t = time.monotonic()

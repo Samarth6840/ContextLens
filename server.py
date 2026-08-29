@@ -368,17 +368,36 @@ def _build_dashboard(result: dict, job: dict) -> dict:
 
 _pipeline = None
 _pipeline_lock = threading.Lock()
+_warmup_started = False
+_warmup_lock = threading.Lock()
 
 
 def get_pipeline():
-    global _pipeline
+    global _pipeline, _warmup_started
     if _pipeline is None:
         with _pipeline_lock:
             if _pipeline is None:
                 from src.pipeline import Phase1Pipeline
 
                 _pipeline = Phase1Pipeline(device_override="auto")
+    # Fire-and-forget model warmup on the first job so the expensive lazy model
+    # loads (YOLO/DINOv2/PaddleOCR/Whisper/BEATs/logo) happen once, in parallel,
+    # and are taken out of the first job's input->calculation critical path.
+    if not _warmup_started:
+        with _warmup_lock:
+            if not _warmup_started:
+                _warmup_started = True
+                threading.Thread(
+                    target=_warmup_models, args=(_pipeline,), daemon=True
+                ).start()
     return _pipeline
+
+
+def _warmup_models(pipeline) -> None:
+    try:
+        pipeline.warmup()
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("Model warmup failed (continuing): %s", exc)
 
 
 def _run_job(job_id: str) -> None:

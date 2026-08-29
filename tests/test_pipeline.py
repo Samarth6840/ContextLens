@@ -588,3 +588,36 @@ def test_fixture_path_separate_from_data():
     assert "fixtures" not in str(data_path), (
         "Production data path must not contain 'fixtures'"
     )
+
+
+# ============================================================
+# Test lazy model-handle contract (used by warmup() and _get_or_create)
+# ============================================================
+
+
+class TestPipelineLazyHandles:
+    """Phase1Pipeline must pre-declare every lazy model handle as None so
+    _get_or_create()/warmup() can check-and-load without AttributeError."""
+
+    def test_all_lazy_handles_initialized_to_none(self):
+        from src.pipeline import Phase1Pipeline
+
+        p = Phase1Pipeline(device_override="cpu")
+        for attr in (
+            "_detector", "_logo_detector", "_embedding_extractor",
+            "_ocr", "_stt", "_audio_events", "_product_index",
+        ):
+            assert getattr(p, attr) is None, attr
+
+    def test_warmup_returns_empty_when_nothing_to_load(self):
+        from src.pipeline import Phase1Pipeline
+
+        p = Phase1Pipeline(device_override="cpu")
+        # Simulate that warmup already ran for a no-op model set by marking
+        # every handle as initialized (False sentinel is acceptable for audio).
+        for attr in (
+            "_detector", "_logo_detector", "_embedding_extractor",
+            "_ocr", "_stt", "_audio_events", "_product_index",
+        ):
+            setattr(p, attr, object())
+        assert p.warmup() == {}
