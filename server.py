@@ -97,6 +97,32 @@ _BRAND_VALIDATION_CACHE: dict = {}
 # ── Helpers ─────────────────────────────────────────────────
 
 
+def _silence_ffmpeg():
+    """Suppress C-level FFmpeg/libav stderr noise (e.g. H.264 'mmco: unref
+    short failure') emitted by OpenCV's VideoCapture during imprecise seeking.
+
+    libav writes these recovery messages directly to file descriptor 2, bypassing
+    Python's sys.stderr, so neither logging nor contextlib.redirect_stderr can
+    catch them. We redirect the raw fd 2 to os.devnull for the duration of one
+    decode call. Returns a no-op context manager.
+    """
+    import contextlib
+
+    @contextlib.contextmanager
+    def _cm():
+        _devnull = os.open(os.devnull, os.O_WRONLY)
+        _saved = os.dup(2)
+        try:
+            os.dup2(_devnull, 2)
+            yield
+        finally:
+            os.dup2(_saved, 2)
+            os.close(_saved)
+            os.close(_devnull)
+
+    return _cm()
+
+
 def _new_job_id() -> str:
     part_a = "".join(random.choices(string.ascii_uppercase + string.digits, k=8))
     part_b = "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
@@ -125,17 +151,20 @@ def _read_video_frame(video_path: str, frame_index: int):
     """Seek to an extracted-frame index and return the RGB frame (cv2)."""
     import cv2
 
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return None
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    target = int(round(frame_index * fps))
-    if total > 0:
-        target = min(target, total - 1)
-    cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, target))
-    ret, frame = cap.read()
-    cap.release()
+    with _silence_ffmpeg():
+        cap = cv2.VideoCapture(video_path)
+        try:
+            if not cap.isOpened():
+                return None
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            target = int(round(frame_index * fps))
+            if total > 0:
+                target = min(target, total - 1)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, target))
+            ret, frame = cap.read()
+        finally:
+            cap.release()
     if not ret or frame is None:
         return None
     return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -285,10 +314,24 @@ def _build_dashboard(result: dict, job: dict) -> dict:
                 {"class_name": o["class_name"], "confidence": o["confidence"]}
                 for o in objects
             ],
-            # Detector brand class labels are NOT trusted attribution — scene
-            # cards emit "LOGO REGION" + real model confidence only.
+            # Brand label: resolved brands print their name; a logo that could
+            # not be resolved is grouped as "UNKNOWN BRAND" (limitation #5) so it
+            # is explicit rather than a nameless box. Never a fabricated name.
+            # Confidence: for RESOLVED brands we show the resolution quality
+            # (OCR=0.90 / retrieval & temporal=0.70 / class=0.50) — how much we
+            # trust the brand attribution itself — NOT the raw detector box
+            # confidence, which was ~13% even for a correct OCR read. UNKNOWN
+            # chips keep the raw detector confidence (the only honest number for
+            # boxes we failed to resolve).
             "logos": [
-                {"class_name": "LOGO REGION", "confidence": o["confidence"]}
+                {
+                    "class_name": o.get("brand") or "UNKNOWN BRAND",
+                    "confidence": (
+                        o["resolution_quality"]
+                        if o.get("brand") and o.get("resolution_quality") is not None
+                        else o["confidence"]
+                    ),
+                }
                 for o in logos
             ],
         })
@@ -304,6 +347,51 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "asserted as an on-screen appearance. See MAJOR_REMEDIATION_REPORT.md Part B."
     )
     product_list = []
+
+    # ── Spec callouts + creator attribution (Phase 3) ────────
+    # Creator on-screen overlays fall into three buckets; brand wordmarks go to
+    # BrandResolver, while spec callouts (screen size, thickness, battery,
+    # material, processor) and the creator-attribution card (handle/followers)
+    # are structured, high-value, brand-catalog-INDEPENDENT data. They are
+    # extracted here from the union of (a) full-frame OCR results and (b) the
+    # per-logo crop-OCR text attached by BrandResolver (so overlay text inside a
+    # logo region contributes even when full-frame OCR skipped that frame).
+    # Fail-closed: any missing/sparse OCR yields empty output, never a guess.
+    from src.layer1.spec_extractor import extract_specs, extract_creator
+
+    spec_fields: Dict[str, dict] = {}
+    creator_seen = {}
+    for frame_idx in range(num_frames):
+        ocr_texts = list((l1.get("ocr_results") or [])[frame_idx]) \
+            if frame_idx < len(l1.get("ocr_results") or []) else []
+        joined = " ".join(
+            [t.get("text", "") for t in ocr_texts if t.get("text")]
+        )
+        logo_crop_texts = [
+            det.get("ocr_text", "") for det in l1["logo_detections"][frame_idx]
+            if det.get("ocr_text")
+        ]
+        if logo_crop_texts:
+            joined = (joined + " " + " ".join(logo_crop_texts)).strip()
+        if not joined:
+            continue
+        ts = frame_idx / video_fps if video_fps else 0.0
+        for s in extract_specs(joined):
+            if s["field"] not in spec_fields:
+                spec_fields[s["field"]] = {
+                    **{k: s[k] for k in ("field", "value", "unit", "raw")},
+                    "first_frame": frame_idx,
+                    "timestamp": round(ts, 2),
+                }
+        for k, v in extract_creator(joined).items():
+            if k in ("handle", "followers", "followers_label") and k not in creator_seen:
+                creator_seen[k] = v
+    specs = sorted(spec_fields.values(), key=lambda s: s["timestamp"])
+    creator_card = {
+        "handle": creator_seen.get("handle"),
+        "followers": creator_seen.get("followers"),
+        "followers_label": creator_seen.get("followers_label"),
+    }
 
     # ── Ads: real ASR evidence only ─────────────────────────
     ads = []
@@ -353,6 +441,8 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "products": product_list,
         "products_status": products_status,
         "products_status_reason": products_status_reason,
+        "specs": specs,
+        "creator_card": creator_card,
         "ads": ads,
         "open_set": open_set,
         "recommendations": recommendations,
@@ -360,6 +450,7 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "outreach_reason": OUTREACH_REASON,
         "transcript": l1.get("transcript", ""),
         "audio_events": l1.get("audio_events", [])[:20],
+        "unknown_brand_regions": (result.get("layer2c") or {}).get("unknown_brand_regions", []),
     }
     return _validate_dashboard_bounds(dash, num_frames)
 
@@ -590,10 +681,17 @@ def scene_image(job_id: str, frame_index: int):
         if not bbox:
             continue
         x1, y1, x2, y2 = (int(v) for v in bbox)
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), (220, 40, 40), 2)
+        brand = o.get("brand")
+        if brand:
+            color, label = (0, 200, 0), brand[:24]
+        else:
+            # UNKNOWN-BRAND grouping (limitation #5): an unresolved logo shown as
+            # a nameless box was visually noisy; label it explicitly instead.
+            color, label = (200, 110, 0), "UNKNOWN BRAND"
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
         cv2.putText(
-            annotated, "LOGO REGION", (x1, max(10, y1 - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (220, 40, 40), 1,
+            annotated, label, (x1, max(10, y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
         )
     ok, buf = cv2.imencode(".jpg", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
     if not ok:

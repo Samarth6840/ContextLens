@@ -245,10 +245,22 @@ class EvidenceConfidenceScorer:
                 "status": STATUS_IMPLEMENTED,
             }
 
-        # Aggregate using only implemented sources
+        # Aggregate using only implemented sources.
+        # A source with strength exactly 0 is genuinely absent (not-applicable)
+        # for this item — e.g. `visual_product_match` when the reference product
+        # index found nothing, or `audio_event` when BEATs had no brand-relevant
+        # cue. Counting its full modulus weight in the denominator (with a zero
+        # numerator contribution) would dilute every present signal, producing a
+        # wrongly-low confidence even when one strong modality is conclusive. So
+        # N/A sources are EXCLUDED from the weighted average entirely; the
+        # remaining (present) source weights are renormalized implicitly by the
+        # / total_weight divisor. A source can only be "absent" if it produced no
+        # evidence (strength == 0), so this never discounts genuine weak-but-real
+        # evidence that would have a positive strength.
         impl_entries = {
             k: v for k, v in modulated_evidence.items()
             if v.get("status") == STATUS_IMPLEMENTED
+            and (v.get("strength", 0.0) or 0.0) > 0
         }
 
         if self.aggregation == "weighted_sum":

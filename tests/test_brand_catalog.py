@@ -28,8 +28,10 @@ from src.brand_catalog import (
 )
 from src.layer2.brand_resolver import (
     BrandResolver,
+    UNKNOWN_BRAND,
     brand_evidence_from_timeline,
     build_brand_timeline,
+    group_unknown_logo_regions,
 )
 from src.layer1.logo_retrieval import _canonical, LogoRetrievalIndex
 from src.layer3.knowledge_graph import KnowledgeGraph
@@ -70,6 +72,24 @@ class TestBrandCatalog:
     def test_match_brand_short_alias_not_match(self):
         # Aliases shorter than 3 chars are ignored (avoid false positives)
         assert match_brand("lg") is None
+
+    def test_match_brand_z_fold_family(self):
+        # The foldable phone video names the device "Z Fold 8 Ultra" (spoken in
+        # English within a Hindi narration, transcribed verbatim by ASR). "Z Fold"
+        # / "Galaxy Z Fold" are Samsung's foldable family -> SAMSUNG.
+        assert match_brand("Z Fold 8 Ultra") == "SAMSUNG"
+        assert match_brand("Galaxy Z Fold8 Ultra Folas G") == "SAMSUNG"
+        # A generic "foldable" (no Z Fold / Galaxy brand) must NOT match.
+        assert match_brand("this is a generic foldable smartphone") is None
+
+    def test_find_mentions_z_fold(self):
+        from src.brand_catalog import find_brand_mentions
+        # Real ASR snippet from the foldable video: no explicit "samsung", the
+        # device is named only as "Z Fold 8 Ultra" -> must resolve to SAMSUNG.
+        mentions = find_brand_mentions(
+            "ये सबसे पतला फोल्डिंग स्मार्टफोन, Z Fold 8 Ultra."
+        )
+        assert "SAMSUNG" in [m["brand"] for m in mentions]
 
     def test_find_brand_mentions(self):
         mentions = find_brand_mentions(
@@ -160,12 +180,18 @@ class TestBrandResolver:
     def _frame(self, h=100, w=160):
         return np.zeros((h, w, 3), dtype=np.uint8)
 
-    def test_resolve_from_class_name(self):
+    def test_resolve_from_class_name_unconfirmed_without_corroboration(self):
+        # A brand asserted from YOLO-World's zero-shot class label ALONE is the
+        # fabrication path (small spurious 'GUCCI logo'/'REEBOK logo'/'SUPREME
+        # logo' boxes, no readable text, no retrieval match -> a fabricated
+        # DIRECT recommendation). With corroboration required and neither OCR
+        # nor CLIP naming a brand, the class label is NOT asserted; the detection
+        # is tagged class_unconfirmed and left unresolved (fail-closed).
         resolver = BrandResolver()
         dets = [[{"class_name": "Nike logo", "bbox": [0, 0, 10, 10], "confidence": 0.9}]]
         out = resolver.resolve(dets, [self._frame()])
-        assert out[0][0]["brand"] == "NIKE"
-        assert out[0][0]["class_name"] == "NIKE"
+        assert out[0][0]["brand"] is None
+        assert out[0][0]["class_unconfirmed"] is True
 
     def test_generic_logo_stays_unresolved_without_ocr(self):
         resolver = BrandResolver()
@@ -191,6 +217,49 @@ class TestBrandResolver:
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] is None
 
+    def test_full_frame_editorial_box_suppressed_even_when_ocr_reads_brand(self):
+        # A detection box covering most of the frame (title card / full-screen
+        # editorial / screen recording) is NOT a compact brand wordmark. OCR over
+        # such a box reads the surrounding scene text, and resolving it to a brand
+        # produces a false DIRECT recommendation (observed: a ~0.58-area box whose
+        # headline text resolved to GOOGLE). It must be suppressed fail-closed no
+        # matter which merged text OCR returns.
+        class FakeOCR:
+            def extract_text(self, crop):
+                return [{"text": "The $176 Billion Google Accounting Trick"}]
+        resolver = BrandResolver(ocr_extractor=FakeOCR())
+        dets = [[{"class_name": "brand logo", "bbox": [0, 0, 160, 100],
+                  "confidence": 0.9}]]  # covers 100% of the 160x100 frame
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+        assert out[0][0]["editorial_box"] is True
+
+    def test_compact_logo_unaffected_by_editorial_box_gate(self):
+        # A genuinely compact wordmark (small fraction of frame area) is far below
+        # the full-frame bar and must still resolve normally via OCR.
+        class FakeOCR:
+            def extract_text(self, crop):
+                return [{"text": "adidas"}]
+        resolver = BrandResolver(ocr_extractor=FakeOCR())
+        dets = [[{"class_name": "text logo", "bbox": [10, 10, 40, 30],
+                  "confidence": 0.9}]]  # ~4% of frame
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "ADIDAS"
+        assert out[0][0].get("editorial_box", False) is False
+
+    def test_editorial_box_gate_can_be_disabled(self):
+        # Operators who accept the risk can restore the legacy behavior (resolve
+        # even full-frame boxes) by raising the threshold above 1.0.
+        class FakeOCR:
+            def extract_text(self, crop):
+                return [{"text": "adidas"}]
+        resolver = BrandResolver(ocr_extractor=FakeOCR(), max_logo_area_fraction=1.5)
+        dets = [[{"class_name": "brand logo", "bbox": [0, 0, 160, 100],
+                  "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "ADIDAS"
+        assert out[0][0].get("editorial_box", False) is False
+
     def test_resolver_counts_logged(self):
         resolver = BrandResolver()
         dets = [
@@ -199,7 +268,7 @@ class TestBrandResolver:
         ]
         frames = [self._frame(), self._frame()]
         out = resolver.resolve(dets, frames)
-        assert out[0][0]["brand"] == "ADIDAS"
+        assert out[0][0]["brand"] is None
         assert out[1][0]["brand"] is None
 
     def test_ocr_crosscheck_overrides_spurious_high_conf_class(self):
@@ -216,12 +285,45 @@ class TestBrandResolver:
         assert out[0][0]["class_confirmed"] is False
         assert out[0][0]["resolved_vs_class"]["class_brand"] == "SUPREME"
 
-    def test_class_brand_kept_when_ocr_reads_nothing(self):
-        # When OCR finds no wordmark, the (above-gate) class label stands.
+    def test_class_brand_unconfirmed_when_ocr_reads_nothing(self):
+        # When OCR finds no wordmark AND no retrieval corroborates the class
+        # label, the above-gate class label is NOT trusted alone (fail-closed):
+        # brand stays None, tagged class_unconfirmed so it can never become a
+        # DIRECT recommendation. This is the fabrication leak the corroboration
+        # gate closes.
         class EmptyOCR:
             def extract_text(self, crop):
                 return []
         resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40)
+        dets = [[{"class_name": "Supreme logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+        assert out[0][0]["class_unconfirmed"] is True
+
+    def test_class_brand_corroborated_by_retrieval_asserted_via_retrieval(self):
+        # When CLIP retrieval independently names the same brand as the class
+        # label, the brand IS asserted — but via the retrieval path (the trusted
+        # signal), resolving the icon-only case CLIP is meant to fix.
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.78), ("SONY", 0.30)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22,
+                                 retrieval_min_margin=0.10)
+        dets = [[{"class_name": "Samsung logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "clip_retrieval"
+
+    def test_class_corroboration_can_be_disabled(self):
+        # Operators who accept the fabrication risk can restore the legacy
+        # class-only assertion explicitly.
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 class_require_corroboration=False)
         dets = [[{"class_name": "Supreme logo", "bbox": [10, 10, 50, 50], "confidence": 0.6}]]
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] == "SUPREME"
@@ -301,6 +403,104 @@ class TestBrandResolver:
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] is None
 
+    # ── Margin guard on CLIP retrieval (Phase 1 precision fix) ────────────
+    # Data from a real 65s foldable-video run: every one of 124 noise hits had a
+    # top1-top2 margin <= 0.052 (86/124 <= 0.02) — a stack of near-tied random
+    # brands (ADIDAS 0.9 / NEW BALANCE 0.89 / ASICS 0.88) that passes ANY
+    # absolute similarity floor. A genuine match is unambiguous (wide margin to
+    # every other brand). So resolution requires a margin, not just a floor.
+
+    def test_retrieval_tight_margin_rejected_as_noise(self):
+        # Two brands near-tied (e.g. 0.90 vs 0.89) = noise dressed as confidence.
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("ADIDAS", 0.90), ("NEW BALANCE", 0.89)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22,
+                                 retrieval_min_margin=0.10)
+        dets = [[{"class_name": "brand logo", "bbox": [10, 10, 50, 50], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+
+    def test_retrieval_wide_margin_accepted(self):
+        # Top-1 far above every other brand (e.g. SAMSUNG 0.9 / others 0.3).
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.90), ("SONY", 0.30), ("ADIDAS", 0.28)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22,
+                                 retrieval_min_margin=0.10)
+        dets = [[{"class_name": "brand logo", "bbox": [10, 10, 50, 50], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "clip_retrieval"
+
+    def test_retrieval_single_candidate_accepted(self):
+        # Only one brand clears the absolute floor -> every other brand in the
+        # bank fell weak, which is a strong genuine-match signal (real noise
+        # stacks always drag 2+ brands over the floor).
+        class EmptyOCR:
+            def extract_text(self, crop):
+                return []
+        ri = self.FakeRetrieval([("SAMSUNG", 0.81)])
+        resolver = BrandResolver(ocr_extractor=EmptyOCR(), class_confidence=0.40,
+                                 retrieval_index=ri, retrieval_min_similarity=0.22,
+                                 retrieval_min_margin=0.10)
+        dets = [[{"class_name": "brand logo", "bbox": [10, 10, 50, 50], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "clip_retrieval"
+
+    # ── OCR-context screen-content gate (Phase 1) ──────────────────────────
+    # A phone video shows the DEVICE with its own on-screen UI (app drawer,
+    # Messages/2FA screen, camera watermark). YOLO flags those screen regions as
+    # logos and OCR reads the app names off them, producing a "brand" (META/
+    # GOOGLE/SUPREME) that is on-screen content, not a brand appearance. Same
+    # trust-class as a spurious CLIP result: suppress fail-closed rather than
+    # report it as a detected brand.
+
+    class WordOCR:
+        def __init__(self, text):
+            self.text = text
+
+        def extract_text(self, crop):
+            return [{"text": self.text}]
+
+    def test_screen_ui_ocr_brand_suppressed(self):
+        # App-drawer read ("Store / Play Store / Gaming Hub / Instagram") names a
+        # brand but is phone-screen content -> suppressed, never a brand.
+        resolver = BrandResolver(ocr_extractor=self.WordOCR(
+            "Store Play Store Gaming Hub Instagram Voice"),
+            class_confidence=0.40)
+        dets = [[{"class_name": "META", "bbox": [10, 10, 50, 50], "confidence": 0.3}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+        assert out[0][0]["screen_content"] is True
+        assert out[0][0]["screen_content_reason"] == "ocr_text_reads_phone_ui"
+
+    def test_legit_wordmark_not_suppressed(self):
+        # A clean title-card wordmark has no UI tokens -> kept as a brand.
+        resolver = BrandResolver(ocr_extractor=self.WordOCR(
+            "The all-new Galaxy Z Fold8 Ultra"),
+            class_confidence=0.40)
+        dets = [[{"class_name": "text logo", "bbox": [10, 10, 50, 50], "confidence": 0.3}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "SAMSUNG"
+        assert out[0][0]["resolution_source"] == "ocr"
+        assert out[0][0].get("screen_content") is not True
+
+    def test_screen_content_filter_can_be_disabled(self):
+        # Gate off -> UI-text OCR read is allowed through as a brand (for tuning/
+        # fallback), not suppressed.
+        resolver = BrandResolver(ocr_extractor=self.WordOCR(
+            "Store Play Store Gaming Hub Instagram Voice"),
+            class_confidence=0.40, screen_content_filter=False)
+        dets = [[{"class_name": "META", "bbox": [10, 10, 50, 50], "confidence": 0.4}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "META"
+
 
 # ============================================================
 # Layer 2c — brand timeline
@@ -340,6 +540,72 @@ class TestBrandTimeline:
         ev = brand_evidence_from_timeline(tl)
         assert ev["ADIDAS"] == 0.8
         assert ev["NIKE"] == 0.6  # speech-only floor
+
+    def test_unknown_brand_sentinel_never_becomes_evidence(self):
+        # The reserved UNKNOWN_BRAND grouping must never leak into evidence
+        # (which drives DIRECT/SUGGESTED recommendations).
+        tl = {
+            "NIKE": {
+                "appearances": [{"modality": "logo", "confidence": 0.9}],
+                "modalities": ["logo"],
+            },
+            UNKNOWN_BRAND: {
+                "appearances": [{"modality": "logo", "confidence": 0.9}],
+                "modalities": ["logo"],
+            },
+        }
+        ev = brand_evidence_from_timeline(tl)
+        assert ev.get("NIKE") == 0.9
+        assert UNKNOWN_BRAND not in ev
+
+    def test_unknown_grouping_merges_persistent_unresolved_region(self):
+        # The same physical unresolved mark held across frames collapses into ONE
+        # unknown region (spatial overlap + small frame gap), not N boxes.
+        logos = [
+            [{"brand": None, "bbox": [10, 10, 40, 40], "confidence": 0.9}],
+            [{"brand": None, "bbox": [12, 10, 42, 40], "confidence": 0.9}],
+        ]
+        regions = group_unknown_logo_regions(logos)
+        assert len(regions) == 1
+        r = regions[0]
+        assert r["brand"] == UNKNOWN_BRAND
+        assert r["appearance_count"] == 2
+        assert r["frames"] == [0, 1]
+
+    def test_unknown_grouping_separates_distinct_regions(self):
+        # Two separate unresolved marks resolve to two distinct unknown regions.
+        logos = [
+            [
+                {"brand": None, "bbox": [10, 10, 40, 40], "confidence": 0.9},
+                {"brand": None, "bbox": [60, 60, 90, 90], "confidence": 0.9},
+            ]
+        ]
+        regions = group_unknown_logo_regions(logos)
+        assert len(regions) == 2
+        assert all(r["brand"] == UNKNOWN_BRAND for r in regions)
+
+    def test_unknown_grouping_fills_a_skipped_frame_within_gap(self):
+        # A one-frame suppression gap is bridged, so the mark stays one region.
+        logos = [
+            [{"brand": None, "bbox": [10, 10, 40, 40], "confidence": 0.9}],
+            [],
+            [{"brand": None, "bbox": [12, 10, 42, 40], "confidence": 0.9}],
+        ]
+        regions = group_unknown_logo_regions(logos)
+        assert len(regions) == 1
+        assert regions[0]["appearance_count"] == 2
+
+    def test_unknown_grouping_ignores_resolved_brands(self):
+        # A detection that resolved to a real brand is not an unknown region.
+        logos = [
+            [
+                {"brand": "SAMSUNG", "bbox": [10, 10, 40, 40], "confidence": 0.9},
+                {"brand": None, "bbox": [60, 60, 90, 90], "confidence": 0.9},
+            ]
+        ]
+        regions = group_unknown_logo_regions(logos)
+        assert len(regions) == 1
+        assert all(r["brand"] == UNKNOWN_BRAND for r in regions)
 
 
 # ============================================================
@@ -438,3 +704,34 @@ class TestLogoRetrievalValidation:
 
     def test_empty_brand_rejected(self):
         assert LogoRetrievalIndex().add_brand("", [self._blank()]) == 0
+
+    def test_query_aggregates_per_brand_for_margin(self, monkeypatch):
+        # Many brands have several reference crops; raw rows would emit duplicate
+        # brand candidates and corrupt the top1-vs-top2 margin. query() must
+        # return each brand at most once, at its BEST crop similarity.
+        idx = LogoRetrievalIndex()
+        # Reference rows: 3 crops (SAMSUNG x2, SONY x1). The query embedding is
+        # chosen so SAMSUNG-best > SONY-best, and second SAMSUNG crop stays below.
+        ref = np.array([
+            [1.0, 0.0],   # SAMSUNG crop 0
+            [0.9, 0.0],   # SAMSUNG crop 1 (dup of same brand)
+            [0.0, 1.0],   # SONY crop 0
+        ], dtype=np.float32)
+
+        def fake_embed(crops):
+            # At query time the only call is the single query crop.
+            if len(crops) == 1:
+                return np.array([[1.0, 0.4]], dtype=np.float32)
+            return ref
+
+        monkeypatch.setattr(idx, "_embed_image_batch", fake_embed)
+        idx._embeddings = ref
+        idx._brand_of_row = ["SAMSUNG", "SAMSUNG", "SONY"]
+        idx._brand_rows = {"SAMSUNG": [0, 1], "SONY": [2]}
+
+        res = idx.query(self._blank())
+        brands = [b for b, _ in res]
+        # SAMSUNG appears ONCE (best crop), ranked above SONY; no dup brand.
+        assert brands == ["SAMSUNG", "SONY"]
+        # Best-of aggregation keeps the top SAMSUNG sim (1.0), not the weaker dup.
+        assert abs(res[0][1] - 1.0) < 1e-3

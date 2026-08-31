@@ -38,8 +38,59 @@ layer1:
     # emits spurious low-confidence brand hits, e.g. 'SUPREME logo' on Samsung/
     # Sony/Apple logos) and resolution falls through to crop-OCR for proof.
     class_confidence: 0.40
+    # Class-label corroboration gate (Phase 1 precision fix, third trust-class
+    # alongside the CLIP margin guard and the OCR screen-content gate). A brand
+    # asserted from YOLO-World's zero-shot class label ALONE (small spurious
+    # 'GUCCI logo' / 'REEBOK logo' / 'SUPREME logo' boxes at confidence just
+    # above class_confidence, with no readable OCR text and no retrieval match)
+    # is a fabricated DIRECT recommendation — observed across two different
+    # videos. When enabled, an uncorroborated class label is NOT asserted as a
+    # brand; it is tagged class_unconfirmed and left unresolved (fail-closed,
+    # no fabrication). Requires an independent signal (clean CLIP-retrieval
+    # match naming the same brand; OCR would already have caught a wordmark).
+    class_require_corroboration: True
     # Crop upscale factor applied before OCR so small/low-res logo text reads.
     crop_scale: 2.0
+    # Full-frame editorial-box gate (Phase 1 precision fix, same trust-class as
+    # the CLIP margin guard). A genuine brand wordmark occupies a compact region
+    # of the frame; a detection box covering more than max_logo_area_fraction of
+    # frame area is a title card / full-screen editorial / screen recording, NOT
+    # a brand appearance. OCR over such a box reads the surrounding scene text
+    # (e.g. a news headline whose body mentions "Google") and resolving it to a
+    # brand yields a false DIRECT recommendation (observed: a ~0.58-frame-area
+    # box whose title text resolved to GOOGLE). Oversized boxes are suppressed
+    # fail-closed and tagged editorial_box so they never become evidence.
+    max_logo_area_fraction: 0.50   # >50% of frame area => treat as full-frame editorial
+    # OCR-context screen-content gate (Phase 1 precision fix, same trust-class
+    # as the CLIP margin guard). A phone video shows the DEVICE with its own on
+    # screen UI — app drawer, Messages/2FA screen, camera watermark — and YOLO
+    # flags those screen regions as logos while OCR reads app names off them,
+    # yielding a "brand" (META/GOOGLE/SUPREME) that is content, not appearance.
+    # When enabled, an OCR-resolved crop that also reads phone-screen/app-drawer
+    # text (play store / instagram / messages / creative studio ...) is suppressed
+    # fail-closed: brand stays None so it never becomes evidence/DIRECT rec.
+    screen_content_filter:
+      enabled: True
+    # Temporal brand-resolution smoothing (Phase 1 stability fix). A static
+    # on-screen overlay (wordmark / chip card held for many frames) gets
+    # region-proposal confidence that flaps around the cut-off, so the same
+    # pixels resolve a brand one frame and 'text logo'/nothing the next. When
+    # enabled, a brand that resolves solidly and persistently on a stable
+    # spatial region (>= min_votes overlapping frames within `window`) back-fills
+    # the unresolved logo boxes in that region, so the resolution stays stable
+    # instead of flickering. Never weakens an already-resolved brand.
+    temporal_smoothing:
+      enabled: True
+      window: 2        # max frame-distance for a brand to back-fill a neighbour
+      min_iou: 0.3     # spatial overlap required to treat two boxes as the same region
+      min_votes: 2     # min supporting resolved frames to apply a back-fill brand
+      # UNKNOWN-BRAND grouping (limitation #5): the same spatial thresholds drive
+      # the clustering of logos that still fail to resolve. A persistent-but-
+      # unnameable mark collapses into ONE 'UNKNOWN BRAND' region (full extent +
+      # frame span) instead of N nameless boxes, kept strictly out of evidence/
+      # recommendations.
+      merge_iou: 0.3   # IoU a detection needs for a region to absorb it
+      max_frame_gap: 2 # max skipped frames a detection may still join a region
 
   # CLIP logo-retrieval index (Phase 1/2 — the brand-resolution precision fix).
   # YOLO-World is weak on icon-only / stylized marks where there is no text for
@@ -57,7 +108,15 @@ layer1:
     # <BRAND>_N.png filename). Fail-closed: no bank => no retrieval.
     # Built from the LogoDet-3K train split by scripts/build_train_bank.py.
     reference_dir: "benchmark/reference_logos_bank/reference"
-    min_similarity: 0.22   # minimum CLIP cosine to accept a retrieval candidate
+    min_similarity: 0.22   # min CLIP cosine to accept a retrieval candidate (absolute floor)
+    # min_margin: top-1 vs top-2 (distinct-brand) similarity gap required to trust
+    # the top retrieval as a genuine match. Tuned on a real 65s foldable-video run:
+    # ALL 124 noise hits had margin <= 0.052 (86/124 <= 0.02) — random brand
+    # matches cluster at 0.7-0.9 with no gap to a genuine wordmark signal, so a
+    # floor raise alone cannot separate them. A real match has a wide margin
+    # (e.g. SAMSUNG 0.9 / others 0.3). 0.10 cleanly clears the observed noise
+    # (max 0.052) while keeping high-margin genuine matches.
+    min_margin: 0.10
     # checkpoint_path: ""  # optional open_clip ViT-B/32 weights; uses built-in CLIP otherwise
 
   # Spatial / temporal label stabilization for scene objects (secondary

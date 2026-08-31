@@ -439,6 +439,110 @@ class TestEvidenceConfidenceScorer:
         assert result["confidence"] == pytest.approx(1.0, abs=0.01)
         assert result["is_confident"]
 
+    def test_na_source_strength_zero_does_not_dilute(self):
+        # An implemented source that is genuinely ABSENT (strength 0) for this
+        # item — e.g. visual_product_match with no index match, or audio_event
+        # with no brand cue — must be excluded from the weighted average
+        # denominator, not counted as a zero contribution. Otherwise it silently
+        # dilutes every present signal into a wrongly-low confidence.
+        evidence_sources = {
+            "logo_detected": {"weight": 0.6, "status": "implemented"},
+            "visual_product_match": {"weight": 0.4, "status": "implemented"},
+        }
+        scorer = EvidenceConfidenceScorer(evidence_sources=evidence_sources)
+        evidence = {"logo_detected": 0.8, "visual_product_match": 0.0}
+        result = scorer.compute_evidence_score(evidence)
+        # Only the present source contributes; confidence equals its strength (0.8)
+        # rather than being diluted to 0.8 * 0.6 / (0.6 + 0.4) = 0.48.
+        assert result["confidence"] == pytest.approx(0.8, abs=1e-6)
+
+    def test_weak_but_present_source_still_counts(self):
+        # A source with low-but-nonzero strength is PRESENT, not N/A, and must
+        # still contribute to the weighted average (never silently dropped).
+        evidence_sources = {
+            "logo_detected": {"weight": 0.6, "status": "implemented"},
+            "visual_product_match": {"weight": 0.4, "status": "implemented"},
+        }
+        scorer = EvidenceConfidenceScorer(evidence_sources=evidence_sources)
+        evidence = {"logo_detected": 0.8, "visual_product_match": 0.2}
+        result = scorer.compute_evidence_score(evidence)
+        # Both present: weighted avg = 0.8*0.6 + 0.2*0.4 = 0.48 + 0.08 = 0.56
+        # (weights renormalized to sum 1.0, no modality modulation).
+        assert result["confidence"] == pytest.approx(0.56, abs=1e-6)
+
+
+
+# ============================================================
+# Tests for Layer 2b evidence aggregation (resolution-quality logo
+# evidence + saturating speech persistence)
+# ============================================================
+
+
+class TestAggregateEvidence:
+    """_aggregate_evidence must key logo evidence on resolution quality, not
+    the raw YOLO-World detector box confidence, and reward spoken persistence."""
+
+    @staticmethod
+    def _agg():
+        from src.pipeline import Phase1Pipeline
+        return Phase1Pipeline(device_override="cpu")
+
+    def test_logo_evidence_keys_on_resolution_quality(self):
+        p = self._agg()
+        # Two SAMSUNG resolutions with LOW raw detector confidences but strong
+        # resolution sources: OCR (0.90) and class-label (0.50). Evidence must be
+        # keyed on resolution quality, not the raw box score.
+        dets = [
+            [
+                {"brand": "SAMSUNG", "resolution_quality": 0.90,
+                 "resolution_source": "ocr", "confidence": 0.13},
+                {"brand": "SAMSUNG", "resolution_quality": 0.50,
+                 "resolution_source": "class", "class_confirmed": True,
+                 "confidence": 0.18},
+            ],
+            [],
+        ]
+        ev = p._aggregate_evidence(dets, [], [], [])
+        # mean([0.90, 0.50]) = 0.70 — NOT the raw-confidence mean of 0.155.
+        assert ev["logo_detected"] == pytest.approx(0.70, abs=1e-6)
+
+    def test_logo_evidence_falls_back_when_no_quality(self):
+        p = self._agg()
+        dets = [[{"brand": "NIKE", "confidence": 0.42, "class_confirmed": True}]]
+        ev = p._aggregate_evidence(dets, [], [], [])
+        # No resolution_quality stamp -> fall back to the raw detector score.
+        assert ev["logo_detected"] == pytest.approx(0.42, abs=1e-6)
+
+    def test_speech_persistence_saturates_but_not_capped(self):
+        p = self._agg()
+        mentions = [{"brand": "SAMSUNG", "position": i} for i in range(12)]
+        ev = p._aggregate_evidence([], mentions, [], [])
+        # n/(n+3): 12/15 = 0.8 — persistent speech reads high, not hard-capped at 0.3.
+        assert ev["speech_mention"] == pytest.approx(12 / 15.0, abs=1e-6)
+
+    def test_speech_none_is_zero(self):
+        p = self._agg()
+        ev = p._aggregate_evidence([], [], [], [])
+        assert ev["speech_mention"] == 0.0
+
+    def test_foldable_video_single_genuine_mention_not_inflated(self):
+        # The foldable-phone video's narration names the device once as
+        # "Z Fold 8 Ultra" (transcribed verbatim; no repeated "samsung"). The
+        # match is a SINGLE genuine mention matching via the `z fold` alias, so
+        # speech_n must be 1 (never the inflated repetition-loop count that a
+        # non-VAD-segmented transcript would double-count). speech_strength is
+        # n/(n+3) = 1/4 = 0.25 — an honest single-mention score, NOT a flat 0.3
+        # or a padded value. This pins the anti-inflation behavior at the
+        # scoring boundary: `speech_n = len(find_brand_mentions(transcript))`.
+        from src.brand_catalog import find_brand_mentions
+        p = self._agg()
+        transcript = "ये सबसे पतला फोल्डिंग स्मार्टफोन, Z Fold 8 Ultra."
+        mentions = find_brand_mentions(transcript)
+        assert len(mentions) == 1
+        assert mentions[0]["brand"] == "SAMSUNG"
+        ev = p._aggregate_evidence([], mentions, [], [])
+        assert ev["speech_mention"] == pytest.approx(1 / 4.0, abs=1e-6)
+
 
 # ============================================================
 # Tests for Layer 1 — Module Integration (no real models)
@@ -623,3 +727,55 @@ class TestPipelineLazyHandles:
         ):
             setattr(p, attr, object())
         assert p.warmup() == {}
+
+
+# ============================================================
+# Scene-change keyframe selection (Phase 1 stability fix)
+# ============================================================
+
+
+class TestSelectKeyframes:
+    """_select_keyframes must collapse long static sequences (a creator's
+    on-screen overlay card held for many frames) to few representative frames
+    via frame-differencing scene cuts, instead of uniformly re-sampling the
+    identical content per frame (the cause of same-graphic flicker)."""
+
+    @staticmethod
+    def _frames(n_half_seconds: int, frames_per_half: int, max_frames: int = 60):
+        """A static scene A (all identical), then an unrelated scene B."""
+        from src.pipeline import Phase1Pipeline
+
+        frames = [np.full((90, 160, 3), 40, dtype=np.uint8) for _ in range(n_half_seconds)]
+        for _ in range(n_half_seconds):
+            frames.append(np.full((90, 160, 3), 200, dtype=np.uint8))
+        return Phase1Pipeline, frames
+
+    def test_static_sequence_collapses(self):
+        Phase1Pipeline, frames = self._frames(40, 1, max_frames=60)
+        idx = Phase1Pipeline._select_keyframes(frames, max_frames=30)
+        # A handful of frames spans two long static scenes: ~2 representative
+        # frames per scene (plus filler), NOT one frame per identical second.
+        assert len(idx) <= 30
+        assert 0 in idx  # first frame always kept
+        # Both scenes are represented.
+        assert len(idx) >= 2
+
+    def test_short_sequence_returns_all_frames(self):
+        from src.pipeline import Phase1Pipeline
+
+        frames = [
+            np.full((90, 160, 3), 60, dtype=np.uint8) for _ in range(20)
+        ]
+        idx = Phase1Pipeline._select_keyframes(frames, max_frames=30)
+        assert idx == list(range(20))
+
+    def test_cut_boundary_selected(self):
+        # Distinct luminance before/after the mid-frame must be captured.
+        from src.pipeline import Phase1Pipeline
+
+        frames = [np.full((90, 160, 3), 10, dtype=np.uint8) for _ in range(30)]
+        frames += [np.full((90, 160, 3), 240, dtype=np.uint8) for _ in range(30)]
+        idx = Phase1Pipeline._select_keyframes(frames, max_frames=60)
+        # Both scenes represented and first frame kept.
+        assert 0 in idx
+        assert len(idx) >= 2

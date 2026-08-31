@@ -38,6 +38,25 @@ function chip(text, extra) {
   return `<span class="chip${extra ? ' ' + extra : ''}">${escapeHtml(text)}</span>`;
 }
 
+function fieldLabel(field) {
+  return {
+    screen_size: 'SCREEN',
+    thickness: 'THICKNESS',
+    battery: 'BATTERY',
+    weight: 'WEIGHT',
+    storage: 'STORAGE',
+    refresh_rate: 'REFRESH',
+    camera: 'CAMERA',
+    material: 'MATERIAL',
+    processor: 'CHIP',
+  }[field] || (field || '').toUpperCase();
+}
+
+function fmtSpec(s) {
+  const val = (s.value == null ? '' : String(s.value));
+  return (s.unit ? `${val} ${s.unit}` : val) || (s.raw || '');
+}
+
 async function api(path, opts) {
   const res = await fetch(path, opts);
   let data = null;
@@ -259,6 +278,7 @@ function renderDashboard(root, d, activeTab) {
     <h2 class="page-title page-title-huge">${escapeHtml(d.title)}</h2>
     <div class="meta-row">
       <span class="tag"><span class="tag-label">CREATOR</span> ${escapeHtml(d.creator || '—')}</span>
+      ${d.creator_card && d.creator_card.handle ? `<span class="tag">@${escapeHtml(d.creator_card.handle)} ${d.creator_card.followers_label ? escapeHtml(d.creator_card.followers_label).toUpperCase() : ''}</span>` : ''}
       <span class="tag tag-accent"><span class="tag-label">DURATION</span> ${escapeHtml(fmtDuration(d.duration_sec))}</span>
       <span class="tag"><span class="tag-label">JOB ID</span> ${escapeHtml(d.job_id)}</span>
       <span class="tag"><span class="tag-label">CONFIDENCE</span> ${d.confidence != null ? (d.confidence * 100).toFixed(0) + '%' : '—'}</span>
@@ -291,7 +311,16 @@ function scenesPanel(d) {
   if (!d.scenes || !d.scenes.length) {
     return `<div class="empty">NO SCENES DETECTED</div>`;
   }
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.scenes.length} SCENES · ${d.num_frames} FRAMES · ${(d.video_fps || 0).toFixed(1)} FPS — CLICK A FRAME TO OPEN THE SOURCE IMAGE</span></div>`;
+  const unknown = d.unknown_brand_regions || [];
+  // Header count = UNIQUE unresolved spatial regions, deduplicated across
+  // frames (the same on-screen logo box appears in many frames but is one
+  // region). The per-scene UNKNOWN chips below, by contrast, count raw
+  // per-frame detection instances, so they can legitimately sum higher than
+  // this header. Labels are kept distinct so the two numbers aren't confused.
+  const unknownNote = unknown.length
+    ? `<span class="tag" style="margin-left:8px"><span class="tag-label">UNKNOWN BRAND</span> ${unknown.length} UNIQUE UNRESOLVED REGION${unknown.length === 1 ? '' : 'S'}<span class="tag-label" style="margin-left:8px">ACROSS ALL FRAMES</span></span>`
+    : '';
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.scenes.length} SCENES · ${d.num_frames} FRAMES · ${(d.video_fps || 0).toFixed(1)} FPS — CLICK A FRAME TO OPEN THE SOURCE IMAGE</span>${unknownNote}</div>`;
   const rows = d.scenes.map((s) => `
     <div class="card">
       <div class="card-head">
@@ -310,6 +339,11 @@ function scenesPanel(d) {
 }
 
 function productsPanel(d) {
+  const specCards = (d.specs && d.specs.length) ? `
+    <div class="section-head">SPEC CALLOUTS (STRUCTURED)</div>
+    <div class="chips">
+      ${d.specs.map((s) => chip(`${escapeHtml(fieldLabel(s.field))}: ${escapeHtml(fmtSpec(s))}`, 'chip-accent')).join('')}
+    </div>` : '';
   if (!d.products || !d.products.length) {
     const reason = d.products_status_reason
       || 'BRAND ATTRIBUTION IS NOT YET PRODUCTION-VALIDATED (see MAJOR_REMEDIATION_REPORT.md Part B).';
@@ -318,6 +352,7 @@ function productsPanel(d) {
       <div class="empty" style="text-align:left">
         <div class="error-title">${status} — NO BRAND CAN BE ASSERTED AS AN ON-SCREEN APPEARANCE</div>
         ${escapeHtml(reason)}
+        ${specCards}
       </div>`;
   }
   const integrityBanner = `
@@ -357,6 +392,7 @@ function productsPanel(d) {
     </tr>`).join('');
   const html = `
     ${integrityBanner}
+    ${specCards}
     <div class="table-wrap">
       <table class="table">
         <thead><tr><th>BRAND</th><th>PRODUCT</th><th>APPEARANCES</th><th>CONTACT</th><th>ACTION</th></tr></thead>

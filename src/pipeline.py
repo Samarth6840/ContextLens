@@ -23,8 +23,10 @@ import yaml
 from src.brand_catalog import find_brand_mentions, match_brand
 from src.layer2.brand_resolver import (
     BrandResolver,
+    TemporalBrandSmoother,
     brand_evidence_from_timeline,
     build_brand_timeline,
+    group_unknown_logo_regions,
 )
 
 logger = logging.getLogger(__name__)
@@ -940,10 +942,43 @@ class Phase1Pipeline:
             crop_scale=_br_cfg.get("crop_scale", 2.0),
             retrieval_index=self.logo_retrieval if _lr_cfg.get("enabled", True) else None,
             retrieval_min_similarity=_lr_cfg.get("min_similarity", 0.22),
+            retrieval_min_margin=_lr_cfg.get("min_margin", 0.10),
+            screen_content_filter=_br_cfg.get("screen_content_filter", {}).get("enabled", True),
+            class_require_corroboration=_br_cfg.get("class_require_corroboration", True),
+            max_logo_area_fraction=_br_cfg.get("max_logo_area_fraction", 0.50),
         )
         resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
         timings["brand_resolution"] = time.monotonic() - _t_resolve
+
+        # ── Temporal brand-resolution smoothing (Phase 1 stability fix) ─────────
+        # A static on-screen overlay (wordmark / chip card held for many frames)
+        # gets region-proposal confidence that flaps around the cut-off, so the
+        # same pixels resolve a brand one frame and 'text logo'/nothing the next.
+        # A brand that resolves solidly and persistently on a stable spatial
+        # region (>= min_votes overlapping frames within `window`) back-fills the
+        # unresolved logo boxes in that region, so resolution stays stable instead
+        # of flickering. Never weakens an already-resolved brand.
+        _ts_cfg = _br_cfg.get("temporal_smoothing", {})
+        if _ts_cfg.get("enabled", True):
+            all_logo_detections = TemporalBrandSmoother(
+                window=int(_ts_cfg.get("window", 2)),
+                min_iou=float(_ts_cfg.get("min_iou", 0.3)),
+                min_votes=int(_ts_cfg.get("min_votes", 2)),
+            ).smooth(all_logo_detections)
+
+        # ── UNKNOWN-BRAND grouping (limitation #5) ─────────────────────────
+        # A logo that still fails to resolve is dropped from the brand timeline,
+        # so it showed as a nameless red box in every scene thumbnail. Cluster
+        # the unresolved detections by spatial region so a persistent-but-
+        # unnameable mark reads as ONE 'UNKNOWN BRAND' region (with its full
+        # extent + frame span) rather than N flickering boxes. Kept strictly
+        # separate from brand_timeline so it never becomes evidence or a rec.
+        unknown_brand_regions = group_unknown_logo_regions(
+            all_logo_detections,
+            merge_iou=float(_ts_cfg.get("merge_iou", 0.3)),
+            max_frame_gap=int(_ts_cfg.get("max_frame_gap", 2)),
+        )
 
         # ── Spatial / temporal label stabilization (secondary remediation) ────
         # (1) Smooth flapping COCO labels across adjacent frames of the same
@@ -1240,6 +1275,7 @@ class Phase1Pipeline:
             "layer2c": {
                 "brand_timeline": timeline,
                 "brand_evidence": brand_evidence,
+                "unknown_brand_regions": unknown_brand_regions,
                 "product_catalog_matches": product_matches,
             },
             "layer3": {
@@ -1424,18 +1460,32 @@ class Phase1Pipeline:
                                 scene_context, product_retrieval,
                                 visual_product_match, audio_event
         """
-        # Logo detection evidence — only detections resolved to a real brand
+        # Logo detection evidence — only detections resolved to a real brand.
+        # Confidence is keyed on RESOLUTION quality, not the raw YOLO-World box
+        # score: a brand the pipeline got right via a direct OCR wordmark read is
+        # far more trustworthy than the zero-shot detector's raw confidence, so
+        # `logo_detected` must reflect that (favors precision over a wrongly-low
+        # score on a correct answer). The resolver stamps `resolution_quality`:
+        # ocr=0.90, clip_retrieval=0.70, temporal_smoothing=0.70, class=0.50.
         logo_strength = 0.0
-        logo_confidences = []
+        logo_qualities = []
         for frame_logos in logo_detections:
             for det in frame_logos:
                 if det.get("brand"):
-                    logo_confidences.append(det["confidence"])
-        if logo_confidences:
-            logo_strength = float(np.mean(logo_confidences))
+                    q = det.get("resolution_quality")
+                    if q is None:
+                        q = float(det.get("confidence", 0.0))  # fallback
+                    logo_qualities.append(float(q))
+        if logo_qualities:
+            logo_strength = float(np.mean(logo_qualities))
 
-        # Speech mention evidence
-        speech_strength = min(1.0, len(brand_mentions) * 0.3)
+        # Speech mention evidence — saturating-but-not-capped persistence score.
+        # Each mention of a known brand adds weight, approaching 1.0 asymptotically
+        # (n/(n+3): 1->0.25, 3->0.5, 6->0.67, 12->0.8, 30->0.91) so a brand spoken
+        # dozens of times reads as more confident than one named once, without a
+        # hard jump to 1.0 the way a linear min(1.0, n*c) cap does.
+        speech_n = len(brand_mentions)
+        speech_strength = speech_n / (speech_n + 3.0) if speech_n else 0.0
 
         # OCR evidence — only text that matches a known brand name.
         # Two sources are folded together so frames with logos-but-no-COCO-objects

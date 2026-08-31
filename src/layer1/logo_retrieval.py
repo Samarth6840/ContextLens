@@ -156,6 +156,12 @@ class LogoRetrievalIndex:
     ) -> List[Tuple[str, float]]:
         """Return top-k (canonical_brand, similarity) candidates, desc by score.
 
+        Aggregated per brand: each brand appears at most once, at its BEST crop
+        similarity (many brands have several reference crops, so raw rows would
+        produce duplicate brands and corrupt the ranking). This makes a
+        top-1-vs-top-2 similarity "margin" meaningful (they are always distinct
+        brands).
+
         Fail-closed: empty/None crop or empty index -> []. Candidates below
         `min_similarity` are dropped (unknown / not-in-bank brands give []).
         """
@@ -164,14 +170,18 @@ class LogoRetrievalIndex:
         k = top_k or self.top_k
         q = self._embed_image_batch([crop])[0]          # (D,)
         sims = self._embeddings @ q                      # (N,)
-        order = np.argsort(-sims)[: max(k, 0)]
-        out: List[Tuple[str, float]] = []
-        for idx in order:
-            s = float(sims[idx])
+        # Best similarity per brand.
+        brand_sim: Dict[str, float] = {}
+        for s, brand in zip(sims.tolist(), self._brand_of_row):
+            s = float(s)
             if s < self.min_similarity:
-                break
-            out.append((self._brand_of_row[idx], round(s, 4)))
-        return out
+                continue
+            if s > brand_sim.get(brand, -1.0):
+                brand_sim[brand] = s
+        ranked = sorted(brand_sim.items(), key=lambda kv: kv[1], reverse=True)
+        return [
+            (brand, round(s, 4)) for brand, s in ranked[: max(k, 0)]
+        ]
 
     @staticmethod
     def build_from_dir(
