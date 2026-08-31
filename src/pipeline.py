@@ -52,6 +52,23 @@ def probe_hardware() -> dict:
     return info
 
 
+def _profile_categories(timeline: Dict[str, dict]) -> Dict[str, int]:
+    """Derive a {category: count} map from a brand timeline for creator profiling.
+
+    Each detected brand contributes its catalog categories (weighted by how many
+    appearance records it has) so the creator's recurring content liche reflects
+    what they actually feature.
+    """
+    from src.brand_catalog import categories_for
+
+    cats: Dict[str, int] = {}
+    for brand, entry in timeline.items():
+        n = max(1, entry.get("appearance_count", 1))
+        for cat in categories_for(brand):
+            cats[cat] = cats.get(cat, 0) + n
+    return cats
+
+
 class VideoProcessor:
     """
     Handles video loading and frame extraction.
@@ -306,6 +323,11 @@ class Phase1Pipeline:
         # Lets us verify real parallelism: if a single GPU-bound lock serializes
         # all models, the sum of these ~= total executor time (fake parallel).
         self._model_wall_times: Dict[str, float] = {}
+
+        # Layer 3 / Layer 2d Phase 2 additions.
+        self._affinity_model = None   # optional LightGCN creator-brand affinity
+        self._creator_profile_state: Dict[str, object] = {}  # id -> CreatorProfile
+        self._creator_id: Optional[str] = None
 
         logger.info("Phase1Pipeline initialized (models will load on first use)")
 
@@ -636,6 +658,27 @@ class Phase1Pipeline:
         return self._get_or_create("_confidence_scorer", _create)
 
     @property
+    def affinity_model(self):
+        """Optional fitted creator-brand affinity model (LightGCN), or None."""
+        return self._affinity_model
+
+    @property
+    def _affinity_loaded(self) -> bool:
+        try:
+            return bool(self._affinity_model is not None
+                        and self._affinity_model.is_fitted)
+        except Exception:  # noqa: BLE001
+            return False
+
+    def set_affinity_model(self, model) -> None:
+        """Attach a fitted CreatorBrandAffinityModel for Layer 3 ranking."""
+        self._affinity_model = model
+
+    def set_creator_context(self, creator_id: Optional[str]) -> None:
+        """Set the default creator id used for affinity + profiling."""
+        self._creator_id = creator_id
+
+    @property
     def product_index(self):
         """Lazy DINOv2 product-catalog embedding index (fails closed when empty)."""
         return self._get_or_create("_product_index", self._product_index_factory)
@@ -685,7 +728,8 @@ class Phase1Pipeline:
         indices = np.linspace(0, n - 1, max_frames, dtype=int).tolist()
         return sorted(set(indices))
 
-    def process_video(self, video_path: str, frame_rate: Optional[float] = None) -> Dict:
+    def process_video(self, video_path: str, frame_rate: Optional[float] = None,
+                      creator_id: Optional[str] = None) -> Dict:
         """
         Run full Phase 1 pipeline on a video.
 
@@ -1225,12 +1269,46 @@ class Phase1Pipeline:
         _t = time.monotonic()
         from src.layer3.recommender import BrandRecommender
 
-        recommender = BrandRecommender(category_affinity=self.cfg["layer3"].get("category_affinity", 0.7))
+        recommender = BrandRecommender(
+            category_affinity=self.cfg["layer3"].get("category_affinity", 0.7),
+            affinity_model=self.affinity_model if self._affinity_loaded else None,
+            affinity_blend=self.cfg["layer3"].get("affinity_blend", 0.5),
+        )
         recommendations = recommender.recommend(
             timeline,
             brand_evidence=brand_evidence,
             top_k=self.cfg["layer3"].get("top_k", 12),
+            creator_id=creator_id or self._creator_id,
         )
+
+        # === Layer 2d: Creator Profiling + niche suppression (Phase 2) ===
+        # Fold this video's brand evidence into a running creator profile and
+        # downweight SUGGESTED collaborations that are a poor niche fit (the
+        # 'wore Nike once but content is cooking' suppression case). DIRECT
+        # (on-screen) recommendations are never suppressed. If the caller
+        # passes prior profile state via `_creator_profile_state`, it is merged.
+        creator_profile = None
+        if creator_id or self._creator_id:
+            from src.layer2.creator_profiling import (
+                CreatorProfile,
+                apply_niche_suppression,
+            )
+            cid = creator_id or self._creator_id
+            prior = self._creator_profile_state.get(cid)
+            profile = prior or CreatorProfile(cid)
+            profile.add_video(
+                categories=_profile_categories(timeline),
+                brands={b: 1 for b in timeline},
+            )
+            self._creator_profile_state[cid] = profile
+            creator_profile = profile
+            apply_niche_suppression(
+                recommendations, profile,
+                threshold=self.cfg.get("layer2d", {}).get(
+                    "niche_threshold", 0.15),
+                suppress_factor=self.cfg.get("layer2d", {}).get(
+                    "suppress_factor", 0.5),
+            )
         timings["layer3_recommend"] = time.monotonic() - _t
 
         timings["total"] = time.monotonic() - _t_total
@@ -1310,6 +1388,11 @@ class Phase1Pipeline:
             },
             "layer3": {
                 "recommendations": recommendations,
+            },
+            "layer2d": {
+                "creator_profile": (
+                    creator_profile.to_dict() if creator_profile is not None else None
+                ),
             },
         }
 

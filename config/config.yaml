@@ -281,9 +281,22 @@ layer3:
   # Recommendation engine — knowledge graph + ranked, explainable output.
   top_k: 12
   category_affinity: 0.7  # strength multiplier for adjacent (never-appeared) brands
+  # Learned creator-brand affinity (Phase 2, LightGCN). The pipeline accepts a
+  # fitted affinity_model via set_affinity_model(); when present and the creator
+  # is known, its score is blended into ranking by affinity_blend, else the
+  # category/evidence heuristic is used (honest cold start).
+  affinity_blend: 0.5
 
   # Qwen3-VL embeddings for knowledge graph
   vl_embedding_dim: 1024  # Qwen3-VL fused embedding dimension
+
+layer2d:
+  # Creator profiling + niche-suppression gate (Phase 2).
+  # A SUGGESTED collaboration whose brand's category is a poor fit for the
+  # creator's recurring content (e.g. 'wore Nike once, content is cooking') is
+  # downweighted by suppress_factor when its niche-fit share is below threshold.
+  niche_threshold: 0.15
+  suppress_factor: 0.5
 
 logo_dev:
   # B2a reference bank: official logo.dev logos for catalog brands, used as the
