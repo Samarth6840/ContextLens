@@ -1,0 +1,24 @@
+# Model weights & datasets are large and gitignored — do NOT copy into the
+# image; mount them at runtime via the ADSCENE_MODEL_DIR volume.
+*.pt
+*.pth
+*.pkl
+BEATs_iter3_plus_AS2M.pt
+weights/
+models/
+
+# Runtime data
+var/
+*.db
+static/openset_crops/
+
+# Secrets
+.env
+.env.*
+
+# VCS & caches
+.git/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+benchmark/results/

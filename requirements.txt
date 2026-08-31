@@ -43,3 +43,6 @@ streamlit>=1.28.0
 
 # ADSCENE web UI (Flask API server + static frontend)
 flask>=3.0.0
+
+# Production serving (gunicorn reads gunicorn.conf.py)
+gunicorn>=21.0.0
