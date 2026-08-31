@@ -289,6 +289,7 @@ class Phase1Pipeline:
         self._product_index = None  # DINOv2 product-catalog index (Phase 2.5)
         self._logo_retrieval = None  # CLIP logo-retrieval index (Phase 1/2)
         self._central_vision_model = None  # Qwen3-VL 32B
+        self._freeai_client = None  # Free.ai API client (OCR, STT, Vision)
 
         # Per-model threading locks for GPU inference safety.
         # Each GPU-backed model gets its own lock so different models can
@@ -416,23 +417,43 @@ class Phase1Pipeline:
         )
 
     def _ocr_factory(self):
-        from src.layer1.ocr import OCRExtractor
         ocr_cfg = self.cfg["layer1"]["ocr"]
-        return OCRExtractor(
-            lang=ocr_cfg["lang"],
-            use_angle_cls=ocr_cfg["use_angle_cls"],
-            det_db_thresh=ocr_cfg["det_db_thresh"],
-            rec_batch_num=ocr_cfg.get("rec_batch_num", 6),
-        )
+        freeai_cfg = self.cfg["layer1"].get("freeai", {})
+        try:
+            from src.layer1.ocr import OCRExtractor
+            return OCRExtractor(
+                lang=ocr_cfg["lang"],
+                use_angle_cls=ocr_cfg["use_angle_cls"],
+                det_db_thresh=ocr_cfg["det_db_thresh"],
+                rec_batch_num=ocr_cfg.get("rec_batch_num", 6),
+            )
+        except Exception as e:
+            if freeai_cfg.get("fallback", True) and freeai_cfg.get("enabled", True):
+                logger.warning(
+                    "PaddleOCR failed to load (%s) — falling back to Free.ai cloud OCR", e
+                )
+                from src.layer1.freeai_client import FreeAIOCRExtractor
+                return FreeAIOCRExtractor(lang=ocr_cfg["lang"])
+            raise
 
     def _stt_factory(self):
-        from src.layer1.audio import SpeechToText
         stt_cfg = self.cfg["layer1"]["speech_to_text"]
-        return SpeechToText(
-            model_name=stt_cfg["model"],
-            device=self.device,
-            compute_dtype=stt_cfg.get("compute_dtype"),
-        )
+        freeai_cfg = self.cfg["layer1"].get("freeai", {})
+        try:
+            from src.layer1.audio import SpeechToText
+            return SpeechToText(
+                model_name=stt_cfg["model"],
+                device=self.device,
+                compute_dtype=stt_cfg.get("compute_dtype"),
+            )
+        except Exception as e:
+            if freeai_cfg.get("fallback", True) and freeai_cfg.get("enabled", True):
+                logger.warning(
+                    "Local Whisper failed to load (%s) — falling back to Free.ai cloud STT", e
+                )
+                from src.layer1.freeai_client import FreeAISpeechToText
+                return FreeAISpeechToText(model_name="large-v3", device=self.device)
+            raise
 
     def _audio_events_factory(self):
         from src.layer1.audio import AudioEventDetector
@@ -631,6 +652,14 @@ class Phase1Pipeline:
                 load_8bit=vl_cfg.get("load_8bit", True),
             )
         return self._get_or_create("_central_vision_model", _create)
+
+    @property
+    def freeai_client(self):
+        """Free.ai API client for OCR, STT, Vision (optional, requires API key)."""
+        def _create():
+            from src.layer1.freeai_client import create_freeai_client
+            return create_freeai_client()
+        return self._get_or_create("_freeai_client", _create)
 
     @staticmethod
     def _select_keyframes(frames: List[np.ndarray], max_frames: int = 30) -> List[int]:

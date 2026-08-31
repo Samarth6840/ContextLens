@@ -193,6 +193,15 @@ layer1:
     rec_batch_num: 6
     max_frames: 30  # max frames to run OCR on (sampled uniformly from detections)
 
+  # Free.ai API (OCR, STT, Vision) — optional cloud fallback.
+  # Requires FREE_AI_API_KEY in .env (30K free tokens/day, no credit card).
+  # When the heavy local models (PaddleOCR/Whisper) fail to load, or when
+  # freeai.fallback is True, the pipeline uses Free.ai's cloud API instead.
+  freeai:
+    enabled: True
+    fallback: True  # use Free.ai as fallback when local models are unavailable
+    base_url: "https://api.free.ai/v1"
+
 layer2a:
   fusion:
     hidden_dim: 512
