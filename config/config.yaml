@@ -423,6 +423,24 @@ ui:
   outreach_enabled: true
   outreach_reason: "OUTREACH ENABLED — DRAFT EMAIL LIVE (requires LOGO_DEV_SECRET_KEY for brand verification)"
 
+auth:
+  # Phase 3 SaaS dashboard login. DEFAULT OFF so the standalone/desktop server
+  # and existing tests behave exactly as before. When enabled, the /api/jobs,
+  # /api/pipeline/<id>, and /api/outreach/* routes require a session token
+  # obtained from POST /api/login. The admin password is PBKDF2-hashed in memory
+  # and should be supplied via the ADSCENE_ADMIN_PASSWORD env var (or
+  # admin_password here — prefer env for secrets, never commit a real one).
+  enabled: false
+  admin_user: "admin"
+  admin_password: ""            # prefer ADSCENE_ADMIN_PASSWORD env var
+  session_ttl_seconds: 28800    # 8 hours
+
+store:
+  # Phase 3 SQLite persistence for completed jobs (survives server restart).
+  # Override at runtime with ADSCENE_DB_PATH.
+  db_path: "var/contextlens.db"
+
+
 evaluation:
   audio_sample_rate: 16000
   video_frame_rate: 1  # frames per second to sample

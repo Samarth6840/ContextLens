@@ -37,6 +37,7 @@ import tempfile
 import threading
 import time
 import uuid
+import functools
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -95,6 +96,34 @@ OPEN_SET_CROP_DIR = ROOT / str(_OPEN_SET_CFG.get("crop_cache_dir", "static/opens
 _BRAND_VALIDATION_CACHE: dict = {}
 
 
+# ── Phase 3 SaaS: auth (feature-flagged) + SQLite job store ────────────
+from src.auth import SessionManager, hash_password, verify_password
+from src.store import JobStore, prune_for_store
+
+_AUTH_CFG = CFG.get("auth", {}) if isinstance(CFG.get("auth"), dict) else {}
+AUTH_ENABLED = bool(_AUTH_CFG.get("enabled", False))
+SESSION_MANAGER = SessionManager(
+    ttl_seconds=int(_AUTH_CFG.get("session_ttl_seconds", 8 * 3600))
+)
+_DB_PATH = os.environ.get("ADSCENE_DB_PATH")
+if not _DB_PATH:
+    _store_db = (CFG.get("store") or {}).get("db_path")
+    _DB_PATH = str(ROOT / _store_db) if _store_db else str(ROOT / "var" / "contextlens.db")
+JOB_STORE = JobStore(_DB_PATH)
+
+_ADMIN_USER = str(
+    _AUTH_CFG.get("admin_user") or os.environ.get("ADSCENE_ADMIN_USER", "admin")
+)
+_ADMIN_PASSWORD = str(
+    os.environ.get("ADSCENE_ADMIN_PASSWORD") or _AUTH_CFG.get("admin_password") or ""
+)
+# PBKDF2-hashed admin credential; None means login is impossible (fail closed).
+ADMIN_CREDENTIALS = (
+    {"user": _ADMIN_USER, "password_hash": hash_password(_ADMIN_PASSWORD)}
+    if _ADMIN_PASSWORD else None
+)
+
+
 # ── Helpers ─────────────────────────────────────────────────
 
 
@@ -136,6 +165,32 @@ def _now_iso() -> str:
 
 def _normalize_brand(name: str) -> str:
     return name.strip().upper()
+
+
+def _request_token() -> str:
+    """Extract the bearer token from the Authorization header."""
+    auth = request.headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[len("Bearer "):].strip()
+    return request.headers.get("X-Auth-Token", "").strip()
+
+
+def login_required(fn):
+    """Gate a route behind a valid session token when auth is enabled.
+
+    When AUTH_ENABLED is False this is a pass-through, preserving the current
+    standalone/desktop behavior and existing tests.
+    """
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not AUTH_ENABLED:
+            return fn(*args, **kwargs)
+        token = _request_token()
+        if SESSION_MANAGER.validate(token) is None:
+            return jsonify({"error": "AUTH REQUIRED", "status": 401}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
 
 
 def _job(job_id: str) -> dict:
@@ -492,6 +547,32 @@ def _warmup_models(pipeline) -> None:
         app.logger.warning("Model warmup failed (continuing): %s", exc)
 
 
+def _persist_job(job: dict) -> None:
+    """Persist a JSON-serializable snapshot of a job to the SQLite store.
+
+    Keeps the dashboard + a pruned result (recommendations, creator profile,
+    brand-memory summary) needed to render the UI and drive personalized
+    outreach, dropping heavy embed payloads. Never raises — persistence is
+    best-effort so a storage failure doesn't fail a completed analysis.
+    """
+    try:
+        snapshot = {
+            "job_id": job.get("job_id"),
+            "status": job.get("status"),
+            "stage": job.get("stage"),
+            "filename": job.get("filename"),
+            "title": job.get("title"),
+            "creator": job.get("creator"),
+            "created_at": job.get("created_at"),
+            "finished_at": job.get("finished_at"),
+            "dashboard": job.get("dashboard"),
+            "result": prune_for_store(job.get("result") or {}),
+        }
+        JOB_STORE.save(job["job_id"], snapshot)
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("Failed to persist job %s: %s", job.get("job_id"), exc)
+
+
 def _run_job(job_id: str) -> None:
     job = _job(job_id)
     try:
@@ -512,6 +593,7 @@ def _run_job(job_id: str) -> None:
         app.logger.exception("Job %s failed", job_id)
     finally:
         job["finished_at"] = _now_iso()
+        _persist_job(job)
 
 
 # ── Routes: static ───────────────────────────────────────────
@@ -536,7 +618,52 @@ def health():
         })
 
 
+# ── Routes: auth (SaaS dashboard login) ──────────────────────
+
+
+@app.post("/api/login")
+def login():
+    """Exchange credentials for a bearer session token.
+
+    Claims: verify_password against the PBKDF2 hash. Fails closed — if auth is
+    disabled, or no admin password is configured, or the password is wrong, we
+    return 401/403 and never issue a token.
+    """
+    if not AUTH_ENABLED:
+        return jsonify({"error": "AUTH DISABLED"}), 403
+    if ADMIN_CREDENTIALS is None:
+        return jsonify({"error": "AUTH UNCONFIGURED — NO ADMIN PASSWORD SET"}), 403
+    data = request.get_json(silent=True) or {}
+    user = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    if user != ADMIN_CREDENTIALS["user"]:
+        return jsonify({"error": "INVALID CREDENTIALS"}), 401
+    if not verify_password(password, ADMIN_CREDENTIALS["password_hash"]):
+        return jsonify({"error": "INVALID CREDENTIALS"}), 401
+    token = SESSION_MANAGER.create(user)
+    return jsonify({"ok": True, "token": token, "user": user})
+
+
+@app.post("/api/logout")
+def logout():
+    token = _request_token()
+    SESSION_MANAGER.revoke(token)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/me")
+def me():
+    token = _request_token()
+    user = SESSION_MANAGER.validate(token) if AUTH_ENABLED else None
+    return jsonify({
+        "authenticated": bool(user),
+        "user": user,
+        "auth_enabled": AUTH_ENABLED,
+    })
+
+
 @app.get("/api/jobs")
+@login_required
 def list_jobs():
     with JOBS_LOCK:
         jobs = sorted(
@@ -552,6 +679,32 @@ def list_jobs():
                 "created_at": j.get("created_at"),
             } for j in jobs]
         })
+
+
+@app.get("/api/jobs/archive")
+@login_required
+def list_archive_jobs():
+    """List jobs persisted in the SQLite store (survives server restarts)."""
+    return jsonify({
+        "jobs": [{
+            "job_id": j.get("job_id"),
+            "title": j.get("title", "UNTITLED"),
+            "creator": j.get("creator"),
+            "status": j.get("status"),
+            "created_at": j.get("created_at"),
+            "finished_at": j.get("finished_at"),
+        } for j in JOB_STORE.list()]
+    })
+
+
+@app.get("/api/jobs/archive/<job_id>")
+@login_required
+def get_archive_job(job_id: str):
+    """Return a fully persisted job (dashboard + pruned result) from the store."""
+    job = JOB_STORE.load(job_id)
+    if job is None:
+        return jsonify({"error": "ARCHIVE JOB NOT FOUND"}), 404
+    return jsonify(job)
 
 
 # ── Routes: analyse ──────────────────────────────────────────
@@ -628,6 +781,7 @@ def analyse_status(job_id: str):
 
 
 @app.get("/api/pipeline/<job_id>")
+@login_required
 def pipeline_dashboard(job_id: str):
     job = _job(job_id)
     if job is None:
@@ -637,6 +791,32 @@ def pipeline_dashboard(job_id: str):
     if job.get("status") != "done" or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT COMPLETE", "status": job.get("status")}), 409
     return jsonify(job["dashboard"])
+
+
+@app.get("/api/insights/<job_id>")
+@login_required
+def insights(job_id: str):
+    """Phase 2 insights from the raw result: creator profile, cross-video brand
+    memory, and indirect-reference resolutions, plus ranked recommendations."""
+    job = _job(job_id)
+    if job is None:
+        return jsonify({"error": "JOB NOT FOUND"}), 404
+    result = job.get("result")
+    if result is None:
+        return jsonify({"error": "JOB RESULT NOT AVAILABLE"}), 409
+    l3 = result.get("layer3") or {}
+    l2d = result.get("layer2d") or {}
+    l2c = result.get("layer2c") or {}
+    return jsonify({
+        "job_id": job_id,
+        "recommendations": l3.get("recommendations") or [],
+        "creator_profile": l2d.get("creator_profile"),
+        "brand_memory": {
+            "size": l2c.get("memory_size"),
+            "brands": l2c.get("memory_brands") or [],
+            "indirect_resolutions": l2c.get("indirect_resolutions") or [],
+        },
+    })
 
 
 # ── Routes: scene / crop images ──────────────────────────────
@@ -723,6 +903,7 @@ def _validate_brand(brand: str) -> dict:
 
 
 @app.post("/api/outreach/generate")
+@login_required
 def outreach_generate():
     if not OUTREACH_ENABLED:
         return jsonify({"error": OUTREACH_REASON or "OUTREACH DISABLED"}), 403
@@ -840,6 +1021,7 @@ def outreach_generate():
 
 
 @app.post("/api/outreach/forward")
+@login_required
 def outreach_forward():
     if not OUTREACH_ENABLED:
         return jsonify({"error": OUTREACH_REASON or "OUTREACH DISABLED"}), 403

@@ -31,3 +31,6 @@ static/openset_crops/
 # Python coverage artifacts
 .coverage
 htmlcov/
+
+# Phase 3 SQLite job store (runtime data)
+var/
