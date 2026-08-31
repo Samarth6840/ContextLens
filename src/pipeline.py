@@ -721,13 +721,22 @@ class Phase1Pipeline:
                               video_id: str = "") -> None:
         """Record every brand in a resolved timeline into long-term memory."""
         for brand, entry in timeline.items():
+            confidences = [
+                a.get("confidence", 0.0)
+                for a in entry.get("appearances", [])
+                if a.get("confidence") is not None
+            ]
+            confidence = (
+                max(confidences)
+                if confidences
+                else entry.get("max_confidence", entry.get("confidence", 0.0))
+            )
             self._brand_memory.record(
                 brand=brand,
                 video_id=video_id,
                 frame=entry.get("last_frame", 0),
                 timestamp=entry.get("last_timestamp", 0.0),
-                confidence=entry.get("max_confidence", 0.0)
-                if "max_confidence" in entry else entry.get("confidence", 0.0),
+                confidence=confidence,
                 modality="visual",
                 product=entry.get("product"),
             )

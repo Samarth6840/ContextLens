@@ -527,6 +527,7 @@ def get_pipeline():
                 from src.pipeline import Phase1Pipeline
 
                 _pipeline = Phase1Pipeline(device_override="auto")
+                _attach_affinity_model(_pipeline)
     # Fire-and-forget model warmup on the first job so the expensive lazy model
     # loads (YOLO/DINOv2/PaddleOCR/Whisper/BEATs/logo) happen once, in parallel,
     # and are taken out of the first job's input->calculation critical path.
@@ -538,6 +539,25 @@ def get_pipeline():
                     target=_warmup_models, args=(_pipeline,), daemon=True
                 ).start()
     return _pipeline
+
+
+def _attach_affinity_model(pipeline) -> None:
+    """Train the LightGCN creator-brand affinity model on stored job history and
+    attach it to the pipeline. Best-effort: on any failure (no torch, no
+    interactions, training error) the pipeline keeps its cold-start fallback."""
+    try:
+        from src.layer3.affinity_trainer import train_affinity_from_jobs
+
+        jobs = JOB_STORE.list()
+        model, summary = train_affinity_from_jobs(jobs, seed=0)
+        if summary.get("status") == "trained":
+            pipeline.set_affinity_model(model)
+            app.logger.info(
+                "Attached trained affinity model: %s",
+                {k: summary.get(k) for k in ("creators", "brands", "interactions")},
+            )
+    except Exception as exc:  # noqa: BLE001
+        app.logger.warning("Affinity training skipped (cold start): %s", exc)
 
 
 def _warmup_models(pipeline) -> None:
@@ -566,6 +586,7 @@ def _persist_job(job: dict) -> None:
             "created_at": job.get("created_at"),
             "finished_at": job.get("finished_at"),
             "dashboard": job.get("dashboard"),
+            "forwarded": job.get("forwarded"),
             "result": prune_for_store(job.get("result") or {}),
         }
         JOB_STORE.save(job["job_id"], snapshot)
@@ -797,11 +818,18 @@ def pipeline_dashboard(job_id: str):
 @login_required
 def insights(job_id: str):
     """Phase 2 insights from the raw result: creator profile, cross-video brand
-    memory, and indirect-reference resolutions, plus ranked recommendations."""
+    memory, and indirect-reference resolutions, plus ranked recommendations.
+
+    Falls back to the SQLite store when the job is no longer in live memory
+    (e.g. after a server restart), so archived/seed data remains viewable."""
     job = _job(job_id)
-    if job is None:
-        return jsonify({"error": "JOB NOT FOUND"}), 404
-    result = job.get("result")
+    result = None
+    if job is not None:
+        result = job.get("result")
+    else:
+        archived = JOB_STORE.load(job_id)
+        if archived is not None:
+            result = archived.get("result")
     if result is None:
         return jsonify({"error": "JOB RESULT NOT AVAILABLE"}), 409
     l3 = result.get("layer3") or {}
@@ -1041,6 +1069,7 @@ def outreach_forward():
         "request_id": str(uuid.uuid4())[:8].upper(),
     }
     forwarded.append(stamped)
+    _persist_job(job)
 
     return jsonify({
         "status": "forwarded",

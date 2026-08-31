@@ -22,6 +22,26 @@ def test_add_brand_resolutions_records_timeline():
     assert pipe._brand_memory.get("NIKE")["video_id"] == "v1.mp4"
 
 
+def test_add_brand_resolutions_uses_appearance_confidence():
+    # Real build_brand_timeline entries carry confidence per-appearance (inside
+    # "appearances"), NOT a top-level "max_confidence"/"confidence" key. The
+    # record() call must derive confidence from the appearances, otherwise every
+    # brand is persisted with max_confidence=0.0 and recency scoring collapses.
+    pipe = _minimal_pipeline()
+    timeline = {
+        "APPLE": {
+            "last_frame": 40,
+            "last_timestamp": 12.5,
+            "appearances": [
+                {"modality": "logo", "confidence": 0.93},
+                {"modality": "speech", "confidence": 1.0},
+            ],
+        },
+    }
+    pipe.add_brand_resolutions(timeline, video_id="v1.mp4")
+    assert pipe._brand_memory.get("APPLE")["max_confidence"] == 1.0
+
+
 def test_resolve_indirect_mention_uses_memory():
     pipe = _minimal_pipeline()
     pipe.add_brand_resolutions(

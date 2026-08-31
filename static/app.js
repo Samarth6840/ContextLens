@@ -8,7 +8,15 @@ const el = {
   analyse: $('#view-analyse'),
   pipeline: $('#view-pipeline'),
   outreach: $('#view-outreach'),
+  insights: $('#view-insights'),
+  login: $('#view-login'),
 };
+
+/* ── Auth token (localStorage-backed) ─────────────────────── */
+
+const TOKEN_KEY = 'adscene_token';
+const getToken = () => localStorage.getItem(TOKEN_KEY) || null;
+const setToken = (t) => { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); };
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
@@ -58,9 +66,17 @@ function fmtSpec(s) {
 }
 
 async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers);
+  const token = getToken();
+  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(path, opts);
   let data = null;
   try { data = await res.json(); } catch (e) { /* empty */ }
+  if (res.status === 401 && (data && data.error === 'AUTH REQUIRED')) {
+    setToken(null);
+    if (location.hash.indexOf('#/login') !== 0) location.hash = '#/login';
+  }
   if (!res.ok) throw new Error((data && data.error) || `Request failed (${res.status})`);
   return data;
 }
@@ -87,12 +103,41 @@ function showView(name) {
 
 function router() {
   const { page, id, params } = parseRoute();
+  refreshNavAuth();
   if (page === 'landing' || page === '') showView('landing');
   else if (page === 'analyse') showView('analyse');
   else if (page === 'pipeline') { showView('pipeline'); renderPipeline(id, params); }
   else if (page === 'outreach') { showView('outreach'); renderOutreach(id, params); }
+  else if (page === 'insights') { showView('insights'); renderInsights(id, params); }
+  else if (page === 'login') { showView('login'); renderLogin(); }
   else { location.hash = '#/'; }
 }
+
+async function refreshNavAuth() {
+  const link = $('#nav-auth');
+  if (!link) return;
+  try {
+    const me = await api('/api/me');
+    const authed = me.authenticated === true;
+    link.textContent = authed ? 'LOGOUT' : 'LOGIN';
+    link.classList.toggle('is-authed', authed);
+    link.setAttribute('href', authed ? '#/' : '#/login');
+    if (authed) {
+      link.setAttribute('data-user', me.user || '');
+    }
+  } catch (e) { /* keep default label */ }
+}
+
+document.addEventListener('click', async (e) => {
+  const link = e.target.closest && e.target.closest('#nav-auth');
+  if (!link || link.textContent !== 'LOGOUT') return;
+  e.preventDefault();
+  try {
+    await api('/api/logout', { method: 'POST' });
+  } catch (err) { /* best-effort */ }
+  setToken(null);
+  location.hash = '#/login';
+});
 
 window.addEventListener('hashchange', router);
 
@@ -670,6 +715,205 @@ function renderOutreachEditor(root, d) {
       forwardBtn.textContent = 'FORWARD';
     }
   });
+}
+
+/* ── Login page ───────────────────────────────────────────── */
+
+async function renderLogin() {
+  const root = $('#login-root');
+  try {
+    const me = await api('/api/me');
+    if (me.authenticated === true) {
+      root.innerHTML = `
+        <div class="auth-card" style="max-width:480px">
+          <h2 class="page-title">SIGNED IN</h2>
+          <p class="page-copy">AUTHENTICATED AS <strong>${escapeHtml(me.user)}</strong>.</p>
+          <div class="auth-actions">
+            <a class="btn btn-primary" href="#/pipeline">OPEN PIPELINE</a>
+            <a class="btn" id="btn-logout" href="#/">LOGOUT</a>
+          </div>
+        </div>`;
+      $('#btn-logout').addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await api('/api/logout', { method: 'POST' }); } catch (err) { /* noop */ }
+        setToken(null);
+        location.hash = '#/login';
+      });
+      return;
+    }
+    if (me.auth_enabled !== true) {
+      root.innerHTML = `<div class="auth-card" style="max-width:480px">
+        <h2 class="page-title">AUTH DISABLED</h2>
+        <p class="page-copy">LOGIN IS NOT REQUIRED IN THIS DEPLOYMENT.<br><a href="#/pipeline">OPEN PIPELINE</a></p>
+      </div>`;
+      return;
+    }
+    root.innerHTML = `
+      <div class="auth-card" style="max-width:480px">
+        <h2 class="page-title">SIGN IN</h2>
+        <p class="page-copy">ADMIN ONLY — TOKEN-ISSUING SESSION.</p>
+        <form id="login-form" class="analyse-form">
+          <div class="field">
+            <label class="field-label" for="login-user">USERNAME</label>
+            <input id="login-user" class="input" type="text" autocomplete="username" spellcheck="false">
+          </div>
+          <div class="field">
+            <label class="field-label" for="login-pass">PASSWORD</label>
+            <input id="login-pass" class="input" type="password" autocomplete="current-password">
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">SIGN IN</button>
+        </form>
+        <div id="login-status" class="status-line" hidden></div>
+      </div>`;
+    $('#login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const status = $('#login-status');
+      status.hidden = false;
+      status.textContent = 'AUTHENTICATING…';
+      try {
+        const res = await api('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: $('#login-user').value.trim(),
+            password: $('#login-pass').value,
+          }),
+        });
+        setToken(res.token);
+        location.hash = '#/pipeline';
+      } catch (err) {
+        status.textContent = `SIGN IN FAILED — ${escapeHtml(err.message)}`;
+        status.className = 'status-line error';
+      }
+    });
+  } catch (err) {
+    root.innerHTML = errorHtml(err.message);
+  }
+}
+
+/* ── Insights page ────────────────────────────────────────── */
+
+async function renderInsights(id, params) {
+  const root = $('#insights-root');
+  if (!id) return renderInsightsIndex(root);
+
+  root.innerHTML = loaderHtml('LOADING INSIGHTS');
+  try {
+    const data = await api(`/api/insights/${encodeURIComponent(id)}`);
+    renderInsightsDetail(root, data);
+  } catch (err) {
+    root.innerHTML = errorHtml(err.message);
+  }
+}
+
+async function renderInsightsIndex(root) {
+  root.innerHTML = loaderHtml('LOADING JOBS');
+  try {
+    // Prefer the persisted archive (survives restarts + seed data); fall back
+    // to the live job registry when the archive is empty or unreachable.
+    let jobs = [];
+    try {
+      const archive = await api('/api/jobs/archive');
+      jobs = archive.jobs || [];
+    } catch (e) { /* fall through to live jobs */ }
+    if (!jobs.length) {
+      try {
+        const live = await api('/api/jobs');
+        jobs = live.jobs || [];
+      } catch (e) { /* empty */ }
+    }
+    if (!jobs.length) {
+      root.innerHTML =
+        `<h2 class="page-title" style="margin-bottom:24px">INSIGHTS</h2>` +
+        `<div class="empty">NO JOBS YET.<br><br><a href="#/analyse">ANALYSE A VIDEO</a> TO START.</div>`;
+      return;
+    }
+    const rows = jobs.map((j) => `
+      <a class="job-row" href="#/insights/${encodeURIComponent(j.job_id)}">
+        <span class="job-title">${escapeHtml(j.title || 'UNTITLED')}</span>
+        <span class="job-meta">${escapeHtml(j.creator || '')}${j.creator ? ' · ' : ''}${escapeHtml(j.job_id)} — ${escapeHtml((j.status || '').toUpperCase())}</span>
+      </a>`).join('');
+    root.innerHTML = `<h2 class="page-title" style="margin-bottom:24px">INSIGHTS</h2>` + rows;
+  } catch (err) {
+    root.innerHTML = errorHtml(err.message);
+  }
+}
+
+function renderInsightsDetail(root, d) {
+  const profile = d.creator_profile || {};
+  const tallies = profile.brand_tallies || {};
+  const tallyRows = Object.entries(tallies)
+    .sort((a, b) => b[1] - a[1])
+    .map(([brand, n]) => `
+      <div class="insight-row">
+        <span class="chip chip-accent">${escapeHtml(brand)}</span>
+        <span class="chip chip-ghost">${n}×</span>
+      </div>`).join('') || `<div class="empty">NO BRAND TALLIES</div>`;
+  const catRows = Object.entries(profile.categories || {})
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, n]) => `${escapeHtml(cat)} <span class="muted">×${n}</span>`).join(' · ') || '—';
+  const mem = d.brand_memory || {};
+  const memoryBrands = (mem.brands || []).map((b) => chip(escapeHtml(b), 'chip-ghost')).join('') || '<span class="muted">EMPTY</span>';
+  const resolutions = (mem.indirect_resolutions || []).map((r) => `
+    <div class="insight-row">
+      <span class="chip chip-accent">${escapeHtml(r.brand || '?')}</span>
+      <span class="chip chip-ghost">"${escapeHtml(r.reference || '')}"</span>
+      ${r.match_score != null ? `<span class="chip chip-ghost">${(r.match_score * 100).toFixed(0)}%</span>` : ''}
+      ${r.reason ? `<span class="muted">${escapeHtml(r.reason)}</span>` : ''}
+    </div>`).join('') || '<div class="empty">NO INDIRECT RESOLUTIONS</div>';
+  const recs = d.recommendations || [];
+  const recRows = recs.map((r, i) => `
+    <div class="card rec-card">
+      <div class="rec-rank">${String(i + 1).padStart(2, '0')}</div>
+      <div class="rec-main">
+        <div class="card-head">
+          <div class="card-title">${escapeHtml(r.brand)}</div>
+          <div class="chips">
+            <span class="chip ${r.type === 'DIRECT' ? 'chip-accent' : ''}">${escapeHtml(r.type)}</span>
+            <span class="chip chip-ghost">${(r.score * 100).toFixed(0)}% FIT</span>
+          </div>
+        </div>
+        <div class="rec-reasons">${(r.reasons || []).map((reason) => chip(escapeHtml(reason))).join('')}</div>
+      </div>
+    </div>`).join('') || '<div class="empty">NO RECOMMENDATIONS</div>';
+
+  root.innerHTML = `
+    <h2 class="page-title page-title-huge">${escapeHtml(d.job_id)}</h2>
+    <div class="meta-row">
+      <span class="tag"><span class="tag-label">CREATOR</span> ${escapeHtml(profile.handle || profile.creator_id || '—')}</span>
+      ${profile.followers != null ? `<span class="tag"><span class="tag-label">FOLLOWERS</span> ${escapeHtml(profile.followers.toLocaleString())}</span>` : ''}
+      ${profile.engagement_rate != null ? `<span class="tag"><span class="tag-label">ENGAGEMENT</span> ${(profile.engagement_rate * 100).toFixed(2)}%</span>` : ''}
+      ${profile.dominant_category ? `<span class="tag"><span class="tag-label">DOMINANT NICHE</span> ${escapeHtml(profile.dominant_category)}</span>` : ''}
+    </div>
+
+    <div class="insight-grid">
+      <div class="card">
+        <div class="card-head"><div class="card-title">CONTENT NICHE</div></div>
+        <div class="card-body">${catRows}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">BRAND TALLIES</div></div>
+        <div class="card-body">${tallyRows}</div>
+      </div>
+    </div>
+
+    <div class="insight-grid">
+      <div class="card">
+        <div class="card-head"><div class="card-title">CROSS-VIDEO BRAND MEMORY <span class="muted">(${mem.size != null ? escapeHtml(String(mem.size)) : '—'} BRANDS)</span></div></div>
+        <div class="card-body insight-chips">${memoryBrands}</div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="card-title">INDIRECT REFERENCE RESOLUTIONS</div></div>
+        <div class="card-body">${resolutions}</div>
+      </div>
+    </div>
+
+    <h2 class="page-title" style="margin-bottom:16px">RECOMMENDATIONS</h2>
+    <div class="insight-rec-list">${recRows}</div>
+
+    <div class="meta-row" style="margin-top:24px">
+      <a class="btn" href="#/pipeline/${encodeURIComponent(d.job_id)}">OPEN FULL PIPELINE</a>
+    </div>`;
 }
 
 /* ── Boot ─────────────────────────────────────────────────── */
