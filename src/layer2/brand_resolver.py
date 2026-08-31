@@ -114,10 +114,15 @@ class BrandResolver:
         screen_content_filter: bool = True,
         class_require_corroboration: bool = True,
         max_logo_area_fraction: float = 0.50,
+        superset_margin_ratio: float = 0.45,
     ):
         self.ocr = ocr_extractor
         self.class_confidence = float(class_confidence)
         self.crop_scale = float(crop_scale)
+        # Multiline-card OCR superset (see _crop_superset). The primary (tight)
+        # crop carries the same small margin as before; only a re-OCR attempt on
+        # a padded superset uses this wider margin.
+        self.superset_margin_ratio = float(superset_margin_ratio)
         # Optional CLIP logo-retrieval index (Phase 1/2). When provided it is
         # used as the icon-only fallback: if neither the class label nor OCR
         # names a brand, the crop is matched by CLIP retrieval against a
@@ -179,6 +184,43 @@ class BrandResolver:
         if x2 - x1 < 4 or y2 - y1 < 4:
             return None
         return frame[y1:y2, x1:x2]
+
+    def _crop_superset(self, frame: np.ndarray, bbox) -> Optional[np.ndarray]:
+        """Crop a padded superset of a proposal box, biased upward.
+
+        Target: multi-line brand/product cards (e.g. a Snapdragon 8 Elite Gen 5
+        chip card) where the detector's tight proposal wraps only one line (the
+        lower 'Gen 5' sub-label) and OCR reads that fragment alone -> no brand.
+        The missing wordmark line usually sits ABOVE the proposed box, so the
+        margin is biased to extend further upward than down/sideways.
+
+        The expansion is bounded: each side grows by at most
+        `superset_margin_ratio * bbox_dimension`, and the resulting crop is
+        clamped to the frame. This can never turn a compact box into an
+        editorial-scale crop — the frame area gate (max_logo_area_fraction) on
+        the ORIGINAL bbox still governs whether the box is a real wordmark.
+        """
+        if frame is None or frame.size == 0 or bbox is None:
+            return None
+        try:
+            x1, y1, x2, y2 = (int(v) for v in bbox)
+        except (TypeError, ValueError):
+            return None
+        h, w = frame.shape[:2]
+        bh = max(1, y2 - y1)
+        bw = max(1, x2 - x1)
+        r = self.superset_margin_ratio
+        # Bias heavily toward extending the top (where the split wordmark sits).
+        top_pad = int(bh * r * 1.5)
+        bottom_pad = int(bh * r * 0.6)
+        side_pad = int(bw * r * 0.8)
+        nx1 = max(0, x1 - side_pad)
+        ny1 = max(0, y1 - top_pad)
+        nx2 = min(w, x2 + side_pad)
+        ny2 = min(h, y2 + bottom_pad)
+        if nx2 - nx1 < 4 or ny2 - ny1 < 4:
+            return None
+        return frame[ny1:ny2, nx1:nx2]
 
     @staticmethod
     def _upscale(crop: np.ndarray, scale: float) -> np.ndarray:
@@ -290,6 +332,7 @@ class BrandResolver:
         ocr_brand, joined_ocr = None, ""
         retrieval_candidates: List[Tuple[str, float]] = []
         retrieval_brand, retrieval_sim = None, 0.0
+        superset_crop = None
         if crop is not None:
             if self.ocr is not None:
                 texts = self._ocr_crop_texts(crop)
@@ -298,6 +341,30 @@ class BrandResolver:
                     ocr_brand = match_brand(joined_ocr)
                 if texts and not ocr_brand:
                     self._log_near_misses(joined_ocr, class_name, confidence)
+                # Multiline-card remediation: a tight proposal box often wraps only
+                # ONE line of a multi-line card (e.g. the lower 'Gen 5' fragment of a
+                # 'Snapdragon / 8 Elite / Gen 5' chip card), so OCR reads a fragment
+                # that matches no catalog brand. Retry OCR on a padded SUPERSET --
+                # biased upward, where the missing wordmark line usually sits -- so
+                # a full-multiline read ('Snapdragon ...') can still resolve the
+                # brand. Only fires when the tight crop failed to name a brand.
+                if not ocr_brand:
+                    superset_crop = self._crop_superset(frame, det.get("bbox"))
+                    if superset_crop is not None:
+                        superset_texts = self._ocr_crop_texts(superset_crop)
+                        superset_joined = " ".join(superset_texts)
+                        superset_brand = (
+                            match_brand(superset_joined) if superset_texts else None
+                        )
+                        if superset_brand:
+                            logger.info(
+                                "Brand resolved via OCR superset: tight box OCR=%r "
+                                "-> superset OCR=%r -> %s",
+                                joined_ocr[:40], superset_joined[:40], superset_brand,
+                            )
+                            ocr_brand = superset_brand
+                            joined_ocr = superset_joined
+                            out["superset_ocr"] = True
             if self.retrieval_index is not None and not self.retrieval_index.is_empty:
                 retrieval_candidates = self._retrieval_query(crop)
                 if retrieval_candidates:

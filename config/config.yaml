@@ -61,6 +61,14 @@ layer1:
     # box whose title text resolved to GOOGLE). Oversized boxes are suppressed
     # fail-closed and tagged editorial_box so they never become evidence.
     max_logo_area_fraction: 0.50   # >50% of frame area => treat as full-frame editorial
+    # Multiline-brand-card OCR superset. When a tight proposal box wraps only one
+    # line of a multi-line card (e.g. the lower 'Gen 5' of a 'Snapdragon / 8 Elite
+    # / Gen 5' chip card), OCR on that tight crop reads a fragment matching no
+    # catalog brand. The resolver then retries OCR on a padded superset, biased
+    # upward (where the missing wordmark line usually sits), sized by
+    # superset_margin_ratio * box-dimension. Higher = larger superset, more likely
+    # to capture a split wordmark, but with a slightly higher bleed risk.
+    superset_margin_ratio: 0.45
     # OCR-context screen-content gate (Phase 1 precision fix, same trust-class
     # as the CLIP margin guard). A phone video shows the DEVICE with its own on
     # screen UI — app drawer, Messages/2FA screen, camera watermark — and YOLO

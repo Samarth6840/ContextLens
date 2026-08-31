@@ -217,6 +217,40 @@ class TestBrandResolver:
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] is None
 
+    def test_multiline_card_ocr_superset_resolves_brand(self):
+        # A chip/product card like "Snapdragon / 8 Elite / Gen 5": the detector's
+        # tight proposal box wraps only the lower 'Gen 5' line, so OCR on the tight
+        # crop reads a fragment that matches no catalog brand -> None. The fix
+        # retries OCR on a padded SUPERSET (biased upward where the wordmark line
+        # sits), so the full read "Snapdragon 8 Elite Gen 5" resolves QUALCOMM.
+        # Frame is 100 tall; bbox [10, 20, 40, 30] (10px) sits above the bottom.
+        # Tight crop is ~14px, upscaled by crop_scale=2 -> ~28px. The padded
+        # superset (biased upward) is ~18px, upscaled -> ~36px. A height > 32
+        # reliably distinguishes the superset from the tight crop.
+        TIGHT_H = 32
+        class MultiLineOCR:
+            def extract_text(self, crop):
+                if crop.shape[0] > TIGHT_H:
+                    return [{"text": "Snapdragon 8 Elite Gen 5"}]
+                return [{"text": "Gen 5"}]
+        resolver = BrandResolver(ocr_extractor=MultiLineOCR())
+        dets = [[{"class_name": "text logo", "bbox": [10, 20, 40, 30], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] == "QUALCOMM"
+        assert out[0][0]["resolution_source"] == "ocr"
+        assert out[0][0].get("superset_ocr") is True
+
+    def test_multiline_card_ocr_superset_no_match_stays_unresolved(self):
+        # If even the padded superset names no brand, the detection stays
+        # unresolved — the superset must never fabricate a brand.
+        class FragmentOnlyOCR:
+            def extract_text(self, crop):
+                return [{"text": "Gen 5"}]
+        resolver = BrandResolver(ocr_extractor=FragmentOnlyOCR())
+        dets = [[{"class_name": "text logo", "bbox": [10, 20, 40, 30], "confidence": 0.9}]]
+        out = resolver.resolve(dets, [self._frame()])
+        assert out[0][0]["brand"] is None
+
     def test_full_frame_editorial_box_suppressed_even_when_ocr_reads_brand(self):
         # A detection box covering most of the frame (title card / full-screen
         # editorial / screen recording) is NOT a compact brand wordmark. OCR over

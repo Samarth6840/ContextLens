@@ -975,6 +975,7 @@ class Phase1Pipeline:
             screen_content_filter=_br_cfg.get("screen_content_filter", {}).get("enabled", True),
             class_require_corroboration=_br_cfg.get("class_require_corroboration", True),
             max_logo_area_fraction=_br_cfg.get("max_logo_area_fraction", 0.50),
+            superset_margin_ratio=_br_cfg.get("superset_margin_ratio", 0.45),
         )
         resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
