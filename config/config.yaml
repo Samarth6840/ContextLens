@@ -274,6 +274,13 @@ layer2c:
   # Temporal memory / cross-scene reasoning (brand entity timeline).
   enabled: True
 
+  # Cross-video brand entity memory (Phase 2). Resolved brands are committed to
+  # an in-memory bank persisted to `memory_path`, and indirect ASR references
+  # ("this phone" / "our foldable") that contain no brand token are resolved
+  # against that bank via recency-weighted confidence + optional embedding sim.
+  memory_enabled: True
+  memory_path: "config/brand_memory.json"  # relative to repo/config parent dir
+
   # Qwen3-VL timeline reasoning enhancement
   vl_reasoning: True  # Enable Qwen3-VL-based temporal brand reasoning
 

@@ -10,6 +10,7 @@ Models are lazy-loaded on first use to keep startup fast.
 
 import logging
 import math
+import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -67,6 +68,25 @@ def _profile_categories(timeline: Dict[str, dict]) -> Dict[str, int]:
         for cat in categories_for(brand):
             cats[cat] = cats.get(cat, 0) + n
     return cats
+
+
+# Deictic / anaphoric device language that indicates a physical-product reference
+# with no explicit brand token ("this phone", "our foldable", "this pair").
+# Used by the Layer 2c memory to resolve such indirect ASR references against the
+# cross-video brand memory bank.
+INDIRECT_DEVICE_WORDS = {
+    "phone", "foldable", "laptop", "watch", "sneaker", "sneakers", "shoe",
+    "shoes", "headphones", "tv", "camera", "car", "jacket", "hoodie", "bag",
+    "tablet", "computer", "device", "pair", "kit", "console", "gadget",
+    "this", "that", "these", "those", "our", "my",
+}
+
+
+def _split_sentences(text: str):
+    """Split a transcript into sentences on sentence-terminal punctuation."""
+    import re
+    parts = re.split(r"(?<=[.!?])\s+", text.strip())
+    return [p for p in parts if p.strip()]
 
 
 class VideoProcessor:
@@ -266,6 +286,7 @@ class Phase1Pipeline:
     def __init__(self, config_path: str = "config/config.yaml", device_override: Optional[str] = None):
         with open(config_path, "r") as f:
             self.cfg = yaml.safe_load(f)
+        self.workspace = os.path.abspath(os.path.dirname(config_path))
 
         # Hardware probe drives device selection and concurrency preset
         self.hardware_profile = probe_hardware()
@@ -328,6 +349,15 @@ class Phase1Pipeline:
         self._affinity_model = None   # optional LightGCN creator-brand affinity
         self._creator_profile_state: Dict[str, object] = {}  # id -> CreatorProfile
         self._creator_id: Optional[str] = None
+
+        # Layer 2c cross-video brand entity memory (Phase 2).
+        memory_cfg = self.cfg.get("layer2c", {})
+        raw_memory_path = memory_cfg.get("memory_path") or "brand_memory.json"
+        if not os.path.isabs(raw_memory_path):
+            raw_memory_path = os.path.join(self.workspace, raw_memory_path)
+        self._brand_memory_path = os.path.abspath(raw_memory_path)
+        from src.layer2.brand_memory import load_or_new
+        self._brand_memory = load_or_new(self._brand_memory_path)
 
         logger.info("Phase1Pipeline initialized (models will load on first use)")
 
@@ -677,6 +707,61 @@ class Phase1Pipeline:
     def set_creator_context(self, creator_id: Optional[str]) -> None:
         """Set the default creator id used for affinity + profiling."""
         self._creator_id = creator_id
+
+    @property
+    def brand_memory(self):
+        """Cross-video brand entity memory (Layer 2c)."""
+        return self._brand_memory
+
+    def save_brand_memory(self) -> str:
+        """Persist the cross-video brand memory bank to disk."""
+        return self._brand_memory.save(self._brand_memory_path)
+
+    def add_brand_resolutions(self, timeline: Dict[str, dict],
+                              video_id: str = "") -> None:
+        """Record every brand in a resolved timeline into long-term memory."""
+        for brand, entry in timeline.items():
+            self._brand_memory.record(
+                brand=brand,
+                video_id=video_id,
+                frame=entry.get("last_frame", 0),
+                timestamp=entry.get("last_timestamp", 0.0),
+                confidence=entry.get("max_confidence", 0.0)
+                if "max_confidence" in entry else entry.get("confidence", 0.0),
+                modality="visual",
+                product=entry.get("product"),
+            )
+
+    def _resolve_indirect_mentions(
+        self,
+        brand_mentions: List[dict],
+        transcript: Optional[str],
+    ) -> List[dict]:
+        """Resolve anaphoric ASR references ("this phone") against brand memory.
+
+        Directly-matched brand mentions are already handled by the named-brand
+        matcher; this pass handles the residual indirect references. Any sentence
+        that (a) carries indirect device/pronoun language and (b) contains no
+        already-matched brand token is resolved against the long-term memory via
+        recency-weighted confidence (optionally embedding similarity). Sentences
+        that already named a brand are skipped to avoid double-resolution.
+        """
+        if not transcript or self._brand_memory.size() == 0:
+            return []
+        matched_brands = {
+            str(m.get("brand", "")).lower() for m in brand_mentions
+        }
+        resolutions: List[dict] = []
+        for sentence in _split_sentences(transcript):
+            tokens = set(sentence.lower().split())
+            if matched_brands & tokens:
+                continue
+            if not (tokens & INDIRECT_DEVICE_WORDS):
+                continue
+            resolved = self._brand_memory.resolve_reference(sentence)
+            if resolved:
+                resolutions.append(resolved)
+        return resolutions
 
     @property
     def product_index(self):
@@ -1245,6 +1330,16 @@ class Phase1Pipeline:
         brand_evidence = brand_evidence_from_timeline(timeline)
         timings["layer2c_timeline"] = time.monotonic() - _t
 
+        # === Layer 2c: Cross-video brand memory + indirect-reference resolution ===
+        # Commit this video's resolved brands to the persistent memory bank so
+        # future scenes/videos can resolve indirect ASR anaphora ("this phone")
+        # against what has actually been on screen.
+        self.add_brand_resolutions(timeline, video_id=video_path)
+        indirect_resolutions = self._resolve_indirect_mentions(
+            brand_mentions,
+            transcript,
+        ) if self.cfg.get("layer2c", {}).get("memory_enabled", True) else []
+
         # === Layer 2b: Evidence-based Confidence ===
         _t = time.monotonic()
 
@@ -1385,6 +1480,9 @@ class Phase1Pipeline:
                 "brand_evidence": brand_evidence,
                 "unknown_brand_regions": unknown_brand_regions,
                 "product_catalog_matches": product_matches,
+                "memory_size": self._brand_memory.size(),
+                "memory_brands": self._brand_memory.brands(),
+                "indirect_resolutions": indirect_resolutions,
             },
             "layer3": {
                 "recommendations": recommendations,
