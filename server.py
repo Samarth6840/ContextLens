@@ -44,6 +44,7 @@ import yaml
 from flask import Flask, Response, jsonify, request, send_from_directory
 
 from src.logodev import LogoDevClient
+from src.outreach import generate_personalized_outreach
 
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
@@ -735,6 +736,33 @@ def outreach_generate():
     job = _job(job_id) if job_id else None
     if job is None or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT FOUND"}), 404
+
+    # External fabrication safeguard: only a logo.dev "verified" brand may be
+    # presented as a collaboration opportunity (shared by both paths below).
+    validation = _validate_brand(brand)
+    if validation.get("status") != "verified":
+        return jsonify({
+            "error": "BRAND NOT EXTERNALLY VERIFIED",
+            "brand_validation": validation,
+        }), 400
+
+    # Phase 3 personalized outreach: when the job retained the rich pipeline
+    # result (ranked recommendations + creator profile + cross-video brand
+    # memory), use the data-driven generator. It fails closed — it refuses to
+    # fabricate copy for any brand with no grounded recommendation.
+    if job.get("result"):
+        res = job["result"]
+        if (res.get("layer3") or {}).get("recommendations"):
+            out = generate_personalized_outreach(
+                res,
+                brand,
+                target=(data.get("target") or "").strip(),
+                tone=(data.get("tone") or "professional").strip(),
+                creator_name=(data.get("creator_name") or "").strip(),
+            )
+            if out.get("status") == "ok":
+                out["brand_validation"] = validation
+                return jsonify(out)
 
     dash = job["dashboard"]
     creator = dash.get("creator") or "CHANNEL"

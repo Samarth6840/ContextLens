@@ -137,3 +137,71 @@ def test_outreach_generate_blocks_zero_appearance_brands():
         server.OUTREACH_ENABLED = original
         server.JOBS.pop("TESTJOB-ROL", None)
         _clear_validate_cache()
+
+
+def test_outreach_generate_uses_personalized_path_when_result_present():
+    """A job that retained the rich pipeline result uses the Phase 3 generator
+    (data-driven body with rationale + tone variants) instead of the legacy
+    static uppercase template."""
+    import server
+
+    _clear_validate_cache()
+    fake_job = {
+        "status": "done",
+        "dashboard": {"title": "TEST CHANNEL", "creator": "TESTER",
+                      "products": []},
+        "result": {
+            "layer3": {
+                "recommendations": [
+                    {
+                        "brand": "NIKE",
+                        "product": "running sneakers",
+                        "category": "FOOTWEAR",
+                        "type": "DIRECT",
+                        "score": 0.9,
+                        "reasons": [
+                            "LOGO / ON-SCREEN DETECTED — 3 appearance(s)",
+                            "CREATOR-BRAND AFFINITY — 88%",
+                        ],
+                    }
+                ]
+            },
+            "layer2d": {
+                "creator_profile": {
+                    "handle": "@runner", "followers": 120000,
+                    "dominant_category": "FOOTWEAR", "videos_analyzed": 10,
+                }
+            },
+            "layer2c": {"brand_memory": {"brands": ["NIKE"]}},
+        },
+    }
+    server.JOBS["TESTJOB-PERS"] = fake_job
+    client = server.app.test_client()
+    original = server.OUTREACH_ENABLED
+    server.OUTREACH_ENABLED = True
+
+    try:
+        with mock.patch.object(
+            server.LogoDevClient, "validate_brand",
+            return_value={"status": "verified", "brand": "NIKE",
+                          "domain": "nike.com"},
+        ):
+            resp = client.post("/api/outreach/generate", json={
+                "job_id": "TESTJOB-PERS", "brand": "NIKE",
+            })
+            assert resp.status_code == 200
+            body = resp.get_json()
+            assert body["status"] == "ok"
+            assert body["brand"] == "NIKE"
+            # Phase 3 signature: rationale + tone variants present.
+            assert "rationale" in body
+            assert "tones" in body
+            assert body["rationale"]["type"] == "DIRECT"
+            # Personalized copy mentions the creator handle, not the static
+            # uppercase template's channel line.
+            assert "@runner" in body["body"]
+            assert body["brand_validation"]["status"] == "verified"
+    finally:
+        server.OUTREACH_ENABLED = original
+        server.JOBS.pop("TESTJOB-PERS", None)
+        _clear_validate_cache()
