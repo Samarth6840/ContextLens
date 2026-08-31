@@ -25,15 +25,17 @@ def test_validate_brand_fails_closed_without_key():
     """No LOGO_DEV_SECRET_KEY configured -> status 'unavailable', never verified."""
     from src.logodev import LogoDevClient
 
-    client = LogoDevClient()
-    # Ensure the process has no key set (the test env must not carry one).
-    import os
-
-    assert not os.environ.get("LOGO_DEV_SECRET_KEY")
-    assert client.available is False
-    result = client.validate_brand("NIKE")
-    assert result["status"] == "unavailable"
-    assert result["status"] != "verified"
+    # Force the keyless path deterministically regardless of any local .env (a
+    # real user may have one with a placeholder/real key). _load_env_file only
+    # fills os.environ from .env when a key is NOT already present, so stubbing
+    # the key source guarantees the fail-closed branch runs with no network.
+    with mock.patch("src.logodev._get_secret_key", return_value=None), \
+         mock.patch("src.logodev._get_publishable_token", return_value=None):
+        client = LogoDevClient()
+        assert client.available is False
+        result = client.validate_brand("NIKE")
+        assert result["status"] == "unavailable"
+        assert result["status"] != "verified"
 
 
 def test_outreach_generate_requires_external_verification():

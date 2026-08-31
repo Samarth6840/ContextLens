@@ -291,7 +291,12 @@ open_set:
   enabled: true
   # backend: google_vision_web | bing_visual | serpapi | browser_grounded
   # browser_grounded drives a real reverse-image search through the agent-browser
-  # CLI (no paid API key required); the keyed backends unlock via their env vars.
+  # CLI (no paid API key required) — the recommended free, keyless default. It
+  # is active whenever the agent-browser binary is on PATH.
+  # Keyed backends unlock via their env var in .env (see .env.example):
+  #   google_vision_web -> GOOGLE_CLOUD_VISION_API_KEY
+  #   bing_visual       -> BING_VISUAL_SEARCH_KEY
+  #   serpapi           -> SERPAPI_KEY (+ public image host)
   backend: "browser_grounded"
   # Only logo detections with REAL model confidence at/above this threshold
   # become candidates — this is the documented cost guard against calling the
@@ -372,12 +377,14 @@ open_set:
 
 ui:
   # PART A INCIDENT CONTAINMENT — outreach (DRAFT EMAIL / email generation /
-  # forward) is feature-flagged OFF until the brand-collaboration data path is
-  # verified end-to-end. When disabled the server returns 403 and the frontend
-  # hides the DRAFT EMAIL controls. Re-enable ONLY after the data-integrity
-  # review in MAJOR_REMEDIATION_REPORT.md is signed off.
-  outreach_enabled: false
-  outreach_reason: "DRAFT EMAIL DISABLED — PENDING DATA-INTEGRITY REVIEW (see MAJOR_REMEDIATION_REPORT.md)"
+  # forward) was feature-flagged OFF until the brand-collaboration data path was
+  # verified end-to-end. It has been re-enabled (outreach_enabled: true) at the
+  # user's request. NOTE: the runtime still enforces a hard external-verification
+  # gate — _validate_brand must return status "verified", which requires a real
+  # LOGO_DEV_SECRET_KEY in .env. Without a valid key the route fails closed
+  # (BRAND NOT EXTERNALLY VERIFIED), so no fabricated brand can reach a draft.
+  outreach_enabled: true
+  outreach_reason: "OUTREACH ENABLED — DRAFT EMAIL LIVE (requires LOGO_DEV_SECRET_KEY for brand verification)"
 
 evaluation:
   audio_sample_rate: 16000
