@@ -30,16 +30,19 @@ class EvidenceConfidenceScorer:
     """
     Computes decomposed, explainable confidence scores from multimodal evidence.
 
-    Evidence sources and their base weights (configurable via evidence_sources):
-        - logo_detected: 0.45 (implemented)
-        - speech_mention: 0.20 (scaffolded — Layer 2c not built)
-        - ocr_hit: 0.15 (implemented)
-        - scene_context: 0.10 (implemented — BEATs audio event detector)
-        - product_retrieval: 0.10 (scaffolded — product retrieval not built)
+    Evidence sources are fully configured via the `evidence_sources` dict
+    (see config.yaml layer2b). The shipped config marks these implemented:
+        - logo_detected: 0.30 (YOLO-World logo + brand resolution)
+        - speech_mention: 0.20 (ASR transcript -> brand-catalog mention)
+        - ocr_hit: 0.18 (PaddleOCR within video frames)
+        - visual_product_match: 0.18 (DINOv2 NN against product index)
+        - audio_event: 0.10 (BEATs jingle/ad-cue -> brand mapping)
+    and these scaffolded (zero weight, excluded from scoring):
+        - scene_context (voxtral scene context — not wired)
+        - product_retrieval (reserved for product-retrieval evidence)
 
-    Scaffolded sources are excluded from scoring. Implemented-source weights
-    are renormalized to sum to 1.0 so that perfect evidence from available
-    sources can reach a confidence of 1.0.
+    Implemented-source weights are renormalized to sum to 1.0 so that perfect
+    evidence from the available sources can reach a confidence of 1.0.
     """
 
     def __init__(

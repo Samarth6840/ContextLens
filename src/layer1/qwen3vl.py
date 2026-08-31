@@ -15,6 +15,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+try:
+    import torch  # noqa: F401  (optional; used only for device auto-detect / inference)
+except Exception:  # noqa: BLE001 - torch is optional at import time
+    torch = None
+
 
 class Qwen3VLAbstract(ABC):
     """Abstract base for Qwen3-VL model interface."""
@@ -64,7 +69,10 @@ class Qwen3VL32B(Qwen3VLAbstract):
         **kwargs,
     ):
         self.model_name = model_name
-        self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+        if device is None:
+            mps = getattr(torch, "backends", None) and torch.backends.mps.is_available()
+            device = "mps" if mps else "cpu"
+        self.device = device
         self.load_8bit = load_8bit
         self.model = None
         self.tokenizer = None
@@ -289,7 +297,6 @@ def create_qwen3vl_32b(
     Returns:
         Qwen3VL32B instance
     """
-    import torch
     return Qwen3VL32B(
         model_name=model_name,
         device=device,
