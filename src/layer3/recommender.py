@@ -37,24 +37,65 @@ from src.layer3.knowledge_graph import KnowledgeGraph
 logger = logging.getLogger(__name__)
 
 DEFAULT_CATEGORY_AFFINITY = 0.7
+# When the learned affinity model is fitted AND knows the creator, its score is
+# blended with the graph/evidence score with this weight (the rest goes to the
+# explainable graph/evidence signal). 0.0 disables the learned signal entirely.
+DEFAULT_AFFINITY_BLEND = 0.5
 
 
 class BrandRecommender:
-    """Ranked, explainable brand recommendations."""
+    """Ranked, explainable brand recommendations.
+
+    Ranking combines:
+      - evidence strength (DIRECT) / category affinity (SUGGESTED) from the
+        knowledge graph — always on, explainable;
+      - an optional learned creator-brand affinity score (LightGCN) that is
+        blended in ONLY when the creator is known to a fitted model; otherwise
+        it is skipped (honest cold start).
+    """
 
     def __init__(
         self,
         graph: Optional[KnowledgeGraph] = None,
         category_affinity: float = DEFAULT_CATEGORY_AFFINITY,
+        affinity_model=None,
+        affinity_blend: float = DEFAULT_AFFINITY_BLEND,
     ):
         self.graph = graph or KnowledgeGraph()
         self.category_affinity = category_affinity
+        self.affinity_model = affinity_model
+        self.affinity_blend = affinity_blend
+
+    def _affinity_scores(self, creator_id, brands) -> Dict[str, float]:
+        """Return {brand: affinity(0-1)} for a creator, or {} on cold start."""
+        if not creator_id or self.affinity_model is None:
+            return {}
+        try:
+            fitted = getattr(self.affinity_model, "is_fitted", False)
+        except Exception:  # noqa: BLE001
+            fitted = False
+        if not fitted:
+            return {}
+        try:
+            scores = self.affinity_model.predict_affinity(creator_id, brands)
+        except Exception:  # noqa: BLE001
+            return {}
+        if scores is None:
+            return {}
+        return {b: float(s) for b, s in zip(brands, scores)}
+
+    @staticmethod
+    def _blend(graph_score: float, affinity: float, blend: float) -> float:
+        if affinity <= 0.0:
+            return graph_score
+        return (1.0 - blend) * graph_score + blend * affinity
 
     def recommend(
         self,
         timeline: Dict[str, dict],
         brand_evidence: Optional[Dict[str, float]] = None,
         top_k: int = 12,
+        creator_id: Optional[str] = None,
     ) -> List[dict]:
         """Rank recommendations from the brand timeline + evidence strengths.
 
@@ -85,6 +126,11 @@ class BrandRecommender:
 
         recs: List[dict] = []
 
+        # Optional learned-affinity scores for the creator across all candidate
+        # brands (detected + suggested). Empty/None on cold start.
+        all_candidates = set(detected) | set(self.graph.suggest_for(detected))
+        affinity = self._affinity_scores(creator_id, sorted(all_candidates))
+
         # ── DIRECT — brands with evidence in this video ─────────────────
         for brand in detected:
             info = self.graph.catalog.get(brand, {})
@@ -106,13 +152,17 @@ class BrandRecommender:
                 )
             if ev >= 0.5:
                 reasons.append(f"STRONG EVIDENCE — CONFIDENCE {ev:.0%}")
+            aff_val = affinity.get(brand, 0.0)
+            if aff_val > 0.0:
+                reasons.append(f"CREATOR-BRAND AFFINITY — {aff_val:.0%}")
+            final = self._blend(ev, aff_val, self.affinity_blend)
             recs.append({
                 "brand": brand,
                 "product": info.get("product", brand),
                 "category": (info.get("categories") or [info.get("category", "GENERAL")])[0],
                 "type": "DIRECT",
-                "score": round(min(1.0, ev), 3),
-                "confidence": round(min(1.0, ev), 3),
+                "score": round(min(1.0, final), 3),
+                "confidence": round(min(1.0, final), 3),
                 "appearances": entry.get("appearance_count", 0),
                 "reasons": reasons or ["DETECTED IN VIDEO"],
             })
@@ -131,7 +181,9 @@ class BrandRecommender:
             ev = 0.0
             for d in drivers:
                 ev = max(ev, _evidence(d))
-            score = round(ev * self.category_affinity, 3)
+            base = ev * self.category_affinity
+            if base < 0.15:
+                base = 0.15  # category-affinity baseline for cold start
 
             reasons = []
             top_cat = driver_cats or set(cats[:1])
@@ -142,8 +194,16 @@ class BrandRecommender:
                     )
                 else:
                     reasons.append(f"CATEGORY ({c}) FITS THE CONTENT NICHE")
-            if score < 0.15:
-                score = 0.15  # category-affinity baseline for cold start
+            # Complementary (related-category) relationship is worth surfacing.
+            for d in detected:
+                rel, _w = self.graph.relation(d, brand)
+                if rel == "complementary":
+                    reasons.append(f"COMPLEMENTARY TO {d}")
+                    break
+            aff_val = affinity.get(brand, 0.0)
+            if aff_val > 0.0:
+                reasons.append(f"CREATOR-BRAND AFFINITY — {aff_val:.0%}")
+            score = self._blend(base, aff_val, self.affinity_blend)
 
             recs.append({
                 "brand": brand,

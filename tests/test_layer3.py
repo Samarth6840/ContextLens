@@ -77,6 +77,65 @@ def test_unknown_brand_defaults_to_general_category():
     assert g.categories_for("NOPE") == ["GENERAL"]
 
 
+def test_relation_same_category():
+    g = KnowledgeGraph(_mini_catalog())
+    rel, weight = g.relation("NIKE", "PUMA")
+    assert rel == "same_category"
+    assert weight == 1.0
+
+
+def test_relation_none_when_no_shared_or_complementary():
+    g = KnowledgeGraph(_mini_catalog())
+    assert g.relation("NIKE", "SONY")[0] == "none"
+
+
+def test_relation_complementary_across_related_category_cluster():
+    # NIKE (APPAREL/FOOTWEAR/SPORTS) and a mock OUTDOOR/DRINKWARE brand are
+    # complementary via the apparel/outdoor cluster.
+    catalog = {
+        "NIKE": {"category": "APPAREL", "categories": ["APPAREL", "SPORTS"]},
+        "YETI": {"category": "OUTDOOR", "categories": ["OUTDOOR", "DRINKWARE"]},
+    }
+    g = KnowledgeGraph(catalog)
+    rel, _ = g.relation("NIKE", "YETI")
+    assert rel == "complementary"
+
+
+def test_suggested_with_relation_types_drivers():
+    # NIKE on screen -> PUMA is same_category (competitor) driven by NIKE;
+    # a YETI-like brand in the catalog is complementary.
+    catalog = {
+        "NIKE": {"category": "APPAREL", "categories": ["APPAREL", "FOOTWEAR", "SPORTS"]},
+        "PUMA": {"category": "APPAREL", "categories": ["APPAREL", "FOOTWEAR", "SPORTS"]},
+        "STANLEY": {"category": "OUTDOOR", "categories": ["OUTDOOR", "DRINKWARE"]},
+        "SONY": {"category": "ELECTRONICS", "categories": ["ELECTRONICS"]},
+    }
+    g = KnowledgeGraph(catalog)
+    sugg = g.suggested_with_relation(["NIKE"])
+    # PUMA: same_category, driven by NIKE
+    puma_rels = [r for r in sugg["PUMA"] if r[0] == "same_category"]
+    assert puma_rels and puma_rels[0][2] == "NIKE"
+    # STANLEY: complementary
+    stanley_rels = [r for r in sugg["STANLEY"] if r[0] == "complementary"]
+    assert stanley_rels
+    # SONY shares no category and is not complementary to Nike.
+    assert "SONY" not in sugg or all(r[0] == "none" for r in sugg["SONY"])
+
+
+def test_best_relation_to_prefers_same_category_over_complementary():
+    catalog = {
+        "NIKE": {"category": "APPAREL", "categories": ["APPAREL", "FOOTWEAR", "SPORTS"]},
+        "PUMA": {"category": "APPAREL", "categories": ["APPAREL", "FOOTWEAR", "SPORTS"]},
+        "STANLEY": {"category": "OUTDOOR", "categories": ["OUTDOOR", "DRINKWARE"]},
+    }
+    g = KnowledgeGraph(catalog)
+    rel, w, det = g.best_relation_to("PUMA", ["NIKE"])
+    assert rel == "same_category" and det == "NIKE"
+    rel2, w2, _ = g.best_relation_to("STANLEY", ["NIKE"])
+    assert rel2 == "complementary"
+    assert w2 < w  # complementary is weighted below same-category
+
+
 # ─────────────────────────────────────────────────────────────
 # BrandRecommender
 # ─────────────────────────────────────────────────────────────
@@ -183,3 +242,44 @@ def test_confidence_mirrors_score_on_records():
     rec = BrandRecommender(graph=KnowledgeGraph(_mini_catalog()))
     for r in rec.recommend(_timeline(), top_k=12):
         assert r["confidence"] == r["score"]
+
+
+def test_affinity_model_modulates_ranking_when_fitted():
+    from src.layer3.affinity import CreatorBrandAffinityModel
+
+    aff = CreatorBrandAffinityModel(embed_dim=16, n_layers=2, lr=1e-2)
+    # The creator has strong history with ADIDAS and PUMA.
+    aff.fit(
+        ["creator", "creator", "creator", "creator"],
+        ["ADIDAS", "PUMA", "NIKE", "NIKE"],
+        epochs=30,
+        seed=3,
+    )
+    rec = BrandRecommender(
+        graph=KnowledgeGraph(_mini_catalog()),
+        affinity_model=aff,
+        affinity_blend=0.6,
+    )
+    out = rec.recommend(_timeline(), top_k=12, creator_id="creator")
+    suggested = {r["brand"]: r for r in out if r["type"] == "SUGGESTED"}
+    # With learned affinity, ADIDAS/PUMA (past history) should outrank SONY/APPLE
+    # which the creator never engaged with.
+    if "ADIDAS" in suggested and "APPLE" in suggested:
+        assert suggested["ADIDAS"]["score"] > suggested["APPLE"]["score"]
+    assert any("AFFINITY" in " ".join(r["reasons"]).upper() for r in out)
+
+
+def test_affinity_ignored_on_cold_start_creator():
+    from src.layer3.affinity import CreatorBrandAffinityModel
+
+    aff = CreatorBrandAffinityModel(embed_dim=16, n_layers=1, lr=1e-2)
+    aff.fit(["known"], ["NIKE", "ADIDAS"], epochs=5, seed=1)
+    rec = BrandRecommender(
+        graph=KnowledgeGraph(_mini_catalog()),
+        affinity_model=aff,
+        affinity_blend=0.6,
+    )
+    # An unseen creator must fall back to pure graph/evidence scores.
+    out = rec.recommend(_timeline(), top_k=12, creator_id="brand_new_creator")
+    assert out[0]["brand"] == "NIKE"
+    assert out[0]["score"] == round(min(1.0, 0.9), 3)  # pure evidence, no blend
