@@ -42,3 +42,8 @@ var/
 
 # Node plugin deps (opencode ponytail)
 node_modules/
+
+# opencode/ponytail agent tooling (not part of the app)
+opencode.json
+package.json
+package-lock.json
