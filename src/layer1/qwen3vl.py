@@ -8,6 +8,7 @@ All inference is real — no mock/stub/placeholder.
 """
 
 import logging
+import time
 
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
@@ -132,7 +133,6 @@ class Qwen3VL32B(Qwen3VLAbstract):
         # Fallback to transformers
         try:
             from transformers import AutoModelForVision2Seq, AutoTokenizer
-            import torch
 
             model_id = "Qwen/Qwen3-VL-32B" if not self.model_name.startswith("Qwen") else self.model_name
 
@@ -215,9 +215,6 @@ class Qwen3VL32B(Qwen3VLAbstract):
             }
 
         try:
-            # Qwen3-VL expects images in RGB format, normalized
-            rgb_frame = frame[:, :, ::-1]  # Ensure RGB
-
             # Prepare conversation prompt
             if text_prompt:
                 prompt = f"<|image|>{text_prompt}<|end|>"
@@ -279,6 +276,95 @@ class Qwen3VL32B(Qwen3VLAbstract):
             result = self.analyze_frame(frame, text_prompt if i == 0 else "")
             results.append(result)
         return results
+
+    # ------------------------------------------------------------------ #
+    # Tier 3 — structured product→manufacturer resolution + cost tracking.
+    # ------------------------------------------------------------------ #
+    def resolve_product_manufacturer(
+        self,
+        product_span: str,
+        frame: Optional[np.ndarray] = None,
+        max_new_tokens: int = 24,
+    ) -> Dict[str, Any]:
+        """Narrow, structured Qwen query: manufacturer of a product, or null.
+
+        This is the Tier-3 path in product resolution. It asks the VLM ONLY a
+        tightly-scoped question (never free-form reasoning), asks for a single
+        company name or null, and records call count + latency so Qwen spend is
+        budget-gated (the caller consults qwen_budget / emit_qwen_stats).
+
+        Returns:
+            {"manufacturer": str|None, "confidence": float, "fallback": bool}
+            Fails closed: manufacturer=None on any error or when the model is
+            unavailable. An unauthoritative "UNKNOWN" is never asserted as a
+            brand (None).
+        """
+        started = time.monotonic()
+        self.qwen_calls = getattr(self, "qwen_calls", 0) + 1
+        if not self._initialized:
+            self._initialize()
+        try:
+            if self.model is None or self.tokenizer is None:
+                return {"manufacturer": None, "confidence": 0.0, "fallback": True}
+            prompt = (
+                f"Which company manufactures the product '{product_span}'? "
+                'Answer with ONLY a JSON object like {"manufacturer": "..."} '
+                'or {"manufacturer": null} if you do not know. No other text.'
+            )
+            content = [{"type": "text", "text": prompt}]
+            if frame is not None:
+                content = [{"type": "image"}, {"type": "text", "text": prompt}]
+            messages = [{"role": "user", "content": content}]
+            if hasattr(self.tokenizer, "apply_chat_template"):
+                input_text = self.tokenizer.apply_chat_template(
+                    messages, tokenize=False, add_generation_prompt=True)
+            else:
+                input_text = prompt
+            inputs = self.tokenizer(
+                input_text, return_tensors="pt", padding=True
+            ).to(self.model.device)
+            with __import__("torch").no_grad():
+                generated = self.model.generate(
+                    **inputs, max_new_tokens=max_new_tokens,
+                    temperature=0.0, do_sample=False,
+                )
+            out = self.tokenizer.batch_decode(
+                generated, skip_special_tokens=True)[0].strip()
+            import json as _json
+            import re as _re
+            m = _re.search(r"\{.*\}", out, _re.S)
+            if m:
+                try:
+                    payload = _json.loads(m.group(0))
+                except ValueError:
+                    payload = {}
+            else:
+                payload = {}
+            ans = payload.get("manufacturer")
+            if ans is None:
+                # Allow a bare company-name fallback when the model ignored JSON.
+                bare = out.split("\n")[-1].strip().strip("\"'.,:!?")
+                if bare and bare.upper() != "UNKNOWN":
+                    ans = bare
+            if not ans:
+                return {"manufacturer": None, "confidence": 0.0,
+                        "fallback": False}
+            return {"manufacturer": str(ans).strip(),
+                    "confidence": 0.45, "fallback": False}
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Qwen product-manufacturer resolve failed for %r: %s",
+                           product_span, exc)
+            return {"manufacturer": None, "confidence": 0.0, "fallback": True}
+        finally:
+            self.last_qwen_latency = time.monotonic() - started
+
+    def emit_qwen_stats(self) -> dict:
+        """Cost/latency instrumentation for the Qwen product tier."""
+        return {
+            "qwen_calls": getattr(self, "qwen_calls", 0),
+            "last_latency_sec": getattr(self, "last_qwen_latency", 0.0),
+            "budget_gated": getattr(self, "qwen_budget_gated", False),
+        }
 
 
 def create_qwen3vl_32b(

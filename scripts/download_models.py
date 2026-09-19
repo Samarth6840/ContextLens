@@ -77,19 +77,39 @@ def download_paddleocr():
 
 
 def check_beats():
-    """Check if BEATs checkpoint is available and provide download instructions."""
-    beats_path = Path("BEATs_iter3_plus_AS2M.pt")
-    if beats_path.exists():
-        logger.info(f"BEATs checkpoint found at {beats_path}")
+    """Download the fine-tuned BEATs AudioSet tagging checkpoint if missing.
+
+    Preferred source is the HuggingFace mirror (microsoft's Azure links have a
+    history of intermittent failures — see microsoft/unilm#1492). The file is
+    written to the repo root where config/layer1/audio_events.checkpoint points.
+    """
+    import urllib.request
+
+    destination = Path("BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt")
+    source_url = (
+        "https://huggingface.co/WeiChihChen/"
+        "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2/resolve/main/"
+        "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
+    )
+    if destination.exists():
+        logger.info(f"Fine-tuned BEATs checkpoint found at {destination}")
         return True
-    else:
-        logger.warning(
-            "BEATs checkpoint not found. Manual download required:\n"
-            "  1. Visit: https://github.com/microsoft/unilm/tree/master/beats\n"
-            "  2. Download 'BEATs_iter3_plus_AS2M.pt'\n"
-            "  3. Place it in the project root directory\n"
-            "  Note: BEATs is optional for Phase 1. Audio event detection\n"
-            "  will be disabled if the checkpoint is not available."
+    logger.warning("Fine-tuned BEATs checkpoint missing — downloading %s", source_url)
+    try:
+        urllib.request.urlretrieve(source_url, destination)
+        logger.info(
+            f"Downloaded fine-tuned BEATs checkpoint (%d bytes). "
+            f"Feature-extractor fallback BEATs_iter3_plus_AS2M.pt, if present, "
+            f"remains valid for the degraded path.",
+            destination.stat().st_size,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"BEATs auto-download failed: {e}")
+        logger.info(
+            "Manual download: %s\nPlace it as %s next to this repo's config, "
+            "or keep BEATs_iter3_plus_AS2M.pt for the degraded audio path.",
+            source_url, destination,
         )
         return False
 

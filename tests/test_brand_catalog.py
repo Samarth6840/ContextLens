@@ -75,21 +75,42 @@ class TestBrandCatalog:
 
     def test_match_brand_z_fold_family(self):
         # The foldable phone video names the device "Z Fold 8 Ultra" (spoken in
-        # English within a Hindi narration, transcribed verbatim by ASR). "Z Fold"
-        # / "Galaxy Z Fold" are Samsung's foldable family -> SAMSUNG.
-        assert match_brand("Z Fold 8 Ultra") == "SAMSUNG"
-        assert match_brand("Galaxy Z Fold8 Ultra Folas G") == "SAMSUNG"
-        # A generic "foldable" (no Z Fold / Galaxy brand) must NOT match.
-        assert match_brand("this is a generic foldable smartphone") is None
+        # English within a Hindi narration, transcribed verbatim by ASR). The
+        # catalog deliberately does NOT map product names to brands — resolution
+        # now goes through the tiered product resolver (Tier 2 Wikidata here).
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Samsung"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        resolver = ProductBrandResolver(wikidata=wd)
+        res = resolver.resolve("Z Fold 8 Ultra")
+        assert res and res[0]["brand"] == "SAMSUNG"
+        res = resolver.resolve("Galaxy Z Fold8 Ultra Folas G")
+        assert res and res[0]["brand"] == "SAMSUNG"
+        # A generic "foldable" (no Z Fold / Galaxy brand) must NOT match — the
+        # catalog itself stays product-free, and no resolver materializes a brand
+        # from an unspecific string.
+        assert ProductBrandResolver(wikidata=None).resolve(
+            "this is a generic foldable smartphone") == []
 
     def test_find_mentions_z_fold(self):
-        from src.brand_catalog import find_brand_mentions
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
         # Real ASR snippet from the foldable video: no explicit "samsung", the
-        # device is named only as "Z Fold 8 Ultra" -> must resolve to SAMSUNG.
-        mentions = find_brand_mentions(
+        # device is named only as "Z Fold 8 Ultra" -> resolves to SAMSUNG via the
+        # tiered product resolver (catalog has no product aliases).
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Samsung"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        res = ProductBrandResolver(wikidata=wd).resolve(
             "ये सबसे पतला फोल्डिंग स्मार्टफोन, Z Fold 8 Ultra."
         )
-        assert "SAMSUNG" in [m["brand"] for m in mentions]
+        assert "SAMSUNG" in [r["brand"] for r in res]
 
     def test_find_brand_mentions(self):
         mentions = find_brand_mentions(
@@ -160,6 +181,53 @@ class TestBrandCatalog:
         )
         assert "SAMSUNG" in [m["brand"] for m in mentions]
 
+    # ── Hindi ASR transliteration coverage (regression) ──────
+    # Real Hindi tech-narration transcripts spell brand names with common
+    # Devanagari transliterations (सामसंग / पिक्सेर / एनवीडिया) that differ from
+    # the canonical aliases. These used to be missed, so no ads/recommendations
+    # were produced for spoken brands. Keep them matched without fuzzy mode.
+    def test_find_mentions_hindi_speaking_samsung(self):
+        mentions = find_brand_mentions("सामसंग M07 का प्राइस क्या है")
+        assert "SAMSUNG" in [m["brand"] for m in mentions]
+
+    def test_find_mentions_hindi_speaking_pixel(self):
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
+        # Devanagari ASR transliteration of "pixel" (Google's phone line) — the
+        # product resolver romanizes it to Latin, then resolves via Tier 2.
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Google LLC"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        res = ProductBrandResolver(wikidata=wd).resolve(
+            "पिक्सेर 10 इन पर साल बढ़िया है"
+        )
+        assert "GOOGLE" in [r["brand"] for r in res]
+
+    def test_find_mentions_hindi_speaking_nvidia(self):
+        mentions = find_brand_mentions("और एनवीडिया एक चिप बना रही है")
+        assert "NVIDIA" in [m["brand"] for m in mentions]
+
+    def test_brand_catalog_has_major_phone_cpus(self):
+        # The smartphone-video failure: NVIDIA/XIAOMI/OPPO/VIVO were absent, so
+        # a phone-tech video produced no ads/recommendations for them.
+        for brand in ("NVIDIA", "XIAOMI", "OPPO", "VIVO"):
+            assert brand in BRAND_CATALOG, f"{brand} missing from catalog"
+
+    def test_find_mentions_nvidia_latin_and_devanagari(self):
+        assert "NVIDIA" in [m["brand"] for m in find_brand_mentions("rtx nvidia card")]
+        assert "NVIDIA" in [m["brand"] for m in find_brand_mentions("एनवीडिया जीपीयू")]
+
+    def test_find_mentions_phone_brands(self):
+        mentions = find_brand_mentions(
+            "oppo और vivo के अलावा xiaomi redmi काफी popular हैं"
+        )
+        brands = {m["brand"] for m in mentions}
+        assert "OPPO" in brands
+        assert "VIVO" in brands
+        assert "XIAOMI" in brands
+
     def test_fuzzy_off_by_default_no_phonetic_variant(self):
         # 'सैमसं' (missing trailing ग) is distance-1 from 'सैमसंग' but is NOT
         # an explicit alias — the default exact path must NOT match it.
@@ -222,22 +290,29 @@ class TestBrandResolver:
         # tight proposal box wraps only the lower 'Gen 5' line, so OCR on the tight
         # crop reads a fragment that matches no catalog brand -> None. The fix
         # retries OCR on a padded SUPERSET (biased upward where the wordmark line
-        # sits), so the full read "Snapdragon 8 Elite Gen 5" resolves QUALCOMM.
-        # Frame is 100 tall; bbox [10, 20, 40, 30] (10px) sits above the bottom.
-        # Tight crop is ~14px, upscaled by crop_scale=2 -> ~28px. The padded
-        # superset (biased upward) is ~18px, upscaled -> ~36px. A height > 32
-        # reliably distinguishes the superset from the tight crop.
+        # sits), so the full read "Snapdragon 8 Elite Gen 5" can be resolved. The
+        # catalog no longer aliases the product name 'Snapdragon' -> QUALCOMM; the
+        # tiered product resolver (Tier 2 Wikidata) supplies the brand.
         TIGHT_H = 32
         class MultiLineOCR:
             def extract_text(self, crop):
                 if crop.shape[0] > TIGHT_H:
                     return [{"text": "Snapdragon 8 Elite Gen 5"}]
                 return [{"text": "Gen 5"}]
-        resolver = BrandResolver(ocr_extractor=MultiLineOCR())
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Qualcomm"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        resolver = BrandResolver(
+            ocr_extractor=MultiLineOCR(),
+            product_resolver=ProductBrandResolver(wikidata=wd))
         dets = [[{"class_name": "text logo", "bbox": [10, 20, 40, 30], "confidence": 0.9}]]
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] == "QUALCOMM"
-        assert out[0][0]["resolution_source"] == "ocr"
+        assert out[0][0]["resolution_source"] == "product_2"
         assert out[0][0].get("superset_ocr") is True
 
     def test_multiline_card_ocr_superset_no_match_stays_unresolved(self):
@@ -515,14 +590,24 @@ class TestBrandResolver:
         assert out[0][0]["screen_content_reason"] == "ocr_text_reads_phone_ui"
 
     def test_legit_wordmark_not_suppressed(self):
-        # A clean title-card wordmark has no UI tokens -> kept as a brand.
-        resolver = BrandResolver(ocr_extractor=self.WordOCR(
-            "The all-new Galaxy Z Fold8 Ultra"),
-            class_confidence=0.40)
+        # A clean title-card wordmark has no UI tokens -> kept as a brand. "Galaxy
+        # Z Fold8" is a product name (not a catalog alias), so the tiered product
+        # resolver supplies SAMSUNG.
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Samsung"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        resolver = BrandResolver(
+            ocr_extractor=self.WordOCR("The all-new Galaxy Z Fold8 Ultra"),
+            class_confidence=0.40,
+            product_resolver=ProductBrandResolver(wikidata=wd))
         dets = [[{"class_name": "text logo", "bbox": [10, 10, 50, 50], "confidence": 0.3}]]
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] == "SAMSUNG"
-        assert out[0][0]["resolution_source"] == "ocr"
+        assert out[0][0]["resolution_source"] == "product_2"
         assert out[0][0].get("screen_content") is not True
 
     def test_screen_content_filter_can_be_disabled(self):

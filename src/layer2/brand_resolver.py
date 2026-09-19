@@ -115,6 +115,7 @@ class BrandResolver:
         class_require_corroboration: bool = True,
         max_logo_area_fraction: float = 0.50,
         superset_margin_ratio: float = 0.45,
+        product_resolver=None,
     ):
         self.ocr = ocr_extractor
         self.class_confidence = float(class_confidence)
@@ -164,6 +165,13 @@ class BrandResolver:
         # title text resolved to GOOGLE). When the box is oversized it is
         # suppressed fail-closed (brand stays None) and tagged for audit.
         self.max_logo_area_fraction = float(max_logo_area_fraction)
+        # Optional tiered product→brand resolver (Layer 2b). When OCR reads a
+        # product name but no catalog brand (e.g. "Mac Mini"), this fallback
+        # resolves the product to its parent brand via Wikidata / learned
+        # memory (Tier 2/4). None disables the fallback (fail-closed). The
+        # resolver returns provenance (resolution_tier/source) so every such
+        # resolution is auditable and never silently asserted.
+        self.product_resolver = product_resolver
 
     @staticmethod
     def _crop(frame: np.ndarray, bbox) -> Optional[np.ndarray]:
@@ -356,13 +364,26 @@ class BrandResolver:
                         superset_brand = (
                             match_brand(superset_joined) if superset_texts else None
                         )
-                        if superset_brand:
+                        # Product-name resolution also benefits from the superset
+                        # read: a fragment ("Gen 5") resolves to nothing, but the
+                        # full card ("Snapdragon 8 Elite Gen 5") can. When either
+                        # the catalog or the product resolver finds a brand in the
+                        # superset, adopt the superset text so the same (brand OR
+                        # product) path resolves the real name.
+                        superset_product = None
+                        if (not superset_brand and superset_texts
+                                and self.product_resolver is not None):
+                            sup_res = self.product_resolver.resolve(superset_joined)
+                            if sup_res:
+                                superset_product = max(
+                                    sup_res, key=lambda r: r.get("confidence", 0.0))
+                        if superset_brand or superset_product:
                             logger.info(
-                                "Brand resolved via OCR superset: tight box OCR=%r "
-                                "-> superset OCR=%r -> %s",
-                                joined_ocr[:40], superset_joined[:40], superset_brand,
+                                "OCR superset extended the read: tight OCR=%r "
+                                "-> superset OCR=%r (brand=%s product=%s)",
+                                joined_ocr[:40], superset_joined[:40],
+                                superset_brand, bool(superset_product),
                             )
-                            ocr_brand = superset_brand
                             joined_ocr = superset_joined
                             out["superset_ocr"] = True
             if self.retrieval_index is not None and not self.retrieval_index.is_empty:
@@ -425,6 +446,41 @@ class BrandResolver:
                 class_name, confidence, joined_ocr[:40], ocr_brand,
             )
             return out
+
+        # Tiered product→brand fallback (Layer 2b). OCR read a PRODUCT name but
+        # no catalog brand (e.g. "Mac Mini", "AirPods Pro"). Resolve it to its
+        # parent brand via Wikidata / learned memory (Tier 2/4). Provenance
+        # (resolution_tier/resolution_source) is recorded so the resolution is
+        # auditable and never silently asserted. Fails closed when unresolved.
+        if self.product_resolver is not None and joined_ocr and not ocr_brand:
+            pres = self.product_resolver.resolve(joined_ocr)
+            if pres:
+                best = max(pres, key=lambda r: r.get("confidence", 0.0))
+                resolved_brand = best.get("brand")
+                if resolved_brand:
+                    out["brand"] = resolved_brand
+                    out["class_name"] = resolved_brand
+                    out["class_confirmed"] = False
+                    out["resolution_source"] = ("product_" + str(
+                        best.get("resolution_tier", "tier")))
+                    out["resolution_quality"] = best.get(
+                        "resolution_quality", 0.5)
+                    out["resolution_tier"] = best.get("resolution_tier")
+                    out["product_span"] = best.get("product_span")
+                    out["ocr_text"] = joined_ocr[:40]
+                    out["retrieval_top3"] = retrieval_candidates
+                    if class_brand and class_brand != resolved_brand:
+                        out["resolved_vs_class"] = {
+                            "class_brand": class_brand,
+                            "class_confidence": round(confidence, 3),
+                        }
+                    logger.info(
+                        "Brand resolved via product resolver: class='%s' "
+                        "(conf=%.2f) ocr_text=%r -> %s (tier=%s)",
+                        class_name, confidence, joined_ocr[:40], resolved_brand,
+                        best.get("resolution_tier"),
+                    )
+                    return out
 
         if retrieval_brand:
             out["brand"] = retrieval_brand
@@ -573,7 +629,7 @@ class BrandResolver:
 
     def _log_near_misses(self, joined: str, class_name: str, confidence: float) -> None:
         """Log OCR/class text that nearly matches a catalog brand (diagnostics)."""
-        from src.brand_catalog import BRAND_CATALOG, normalize_text, _fuzzy_token_match
+        from src.brand_catalog import normalize_text, _fuzzy_token_match
 
         norm = normalize_text(joined)
         near = []
@@ -757,7 +813,8 @@ def build_brand_timeline(
             "appearance_count": int,
             "first_seen": float|None, "last_seen": float|None,
             "modalities": [...], "cross_scene": bool,
-            "appearances": [{frame_index, timestamp, modality, confidence}]
+            "appearances": [{frame_index, timestamp, modality, confidence,
+                             resolution_source, resolution_quality}]
         }
     """
     timeline: Dict[str, dict] = {}
@@ -781,6 +838,8 @@ def build_brand_timeline(
                 "timestamp": round(idx / video_fps, 1) if video_fps else idx,
                 "modality": "logo",
                 "confidence": round(float(det.get("confidence", 0.0)), 3),
+                "resolution_source": det.get("resolution_source"),
+                "resolution_quality": det.get("resolution_quality"),
             })
             entry["modalities"].add("logo")
 
@@ -789,14 +848,19 @@ def build_brand_timeline(
         if not brand:
             continue
         entry = _entry(brand)
-        ts = None
-        if transcript and transcript_duration and len(transcript) > 0:
-            ts = transcript_duration * (
+        # Real STT segment timestamps win; the proportional transcript-length
+        # estimate is the legacy fallback when the ASR backend gave no timing.
+        start = mention.get("start_time")
+        end = mention.get("end_time")
+        if start is None and transcript and transcript_duration and len(transcript) > 0:
+            start = transcript_duration * (
                 mention.get("position", 0) / len(transcript)
             )
         entry["appearances"].append({
             "frame_index": None,
-            "timestamp": round(ts, 1) if ts is not None else None,
+            "timestamp": round(float(start), 1) if start is not None else None,
+            "start_time": start,
+            "end_time": end,
             "modality": "speech",
             "confidence": 1.0,
         })

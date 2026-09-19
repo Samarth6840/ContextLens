@@ -17,10 +17,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np  # noqa: E402
 
 from src.openset import (  # noqa: E402
+    GeminiGroundedBackend,
     OpenSetBrandIdentifier,
     ReverseImageResult,
     _brand_likeness,
     _derive_candidate_name,
+    create_backend,
 )
 
 _CROP_DIR = str(Path(__file__).parent.parent / "static" / "openset_crops")
@@ -31,10 +33,17 @@ _GENERIC_WORDS = ["logo", "tshirt", "t-shirt", "футболка", "логоти
 _GENERIC_DOMAINS = ["google.com", "facebook.com"]
 
 
-def _identifier(backend, min_conf: float = 0.01) -> OpenSetBrandIdentifier:
+def _identifier(
+    backend,
+    min_conf: float = 0.01,
+    min_crop_area: float = 100.0,
+    max_crop_aspect: float = 5.0,
+) -> OpenSetBrandIdentifier:
     return OpenSetBrandIdentifier(
         backend=backend,
         min_logo_confidence=min_conf,
+        min_crop_area=min_crop_area,
+        max_crop_aspect=max_crop_aspect,
         max_candidates_per_video=5,
         crop_cache_dir=_CROP_DIR,
         generic_tag_filter=_GENERIC_WORDS,
@@ -124,6 +133,8 @@ def test_identify_fails_closed_without_configured_gate():
         OpenSetBrandIdentifier(
             backend=_UnavailableBackend(),
             min_logo_confidence=0.0,
+            min_crop_area=0.0,
+            max_crop_aspect=0.0,
             max_candidates_per_video=5,
             crop_cache_dir=_CROP_DIR,
             generic_tag_filter=_GENERIC_WORDS,
@@ -167,3 +178,163 @@ class _UnavailableBackend:
 class _FakeLogodev:
     def validate_brand(self, brand):
         return {"status": "unavailable", "brand": brand, "domain": None}
+
+
+class _FakeGeminiResponse:
+    """Minimal requests-style stand-in with a real Google API body shape."""
+
+    status_code = 200
+
+    def __init__(self, text=""):
+        self._text = text
+
+    def json(self):
+        return {
+            "candidates": [{
+                "content": {"parts": [{"text": self._text}]},
+                "groundingMetadata": {
+                    "groundingChunks": [
+                        {"web": {"uri": "https://beste.com/", "title": "BestE Home"}},
+                        {"web": {"uri": "https://wiki.org/BestE", "title": "BestE — Wiki"}},
+                    ],
+                },
+            }]
+        }
+
+
+def _gemini_backend(monkeypatch) -> GeminiGroundedBackend:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    return GeminiGroundedBackend()
+
+
+def test_gemini_backend_registered_in_factory(monkeypatch):
+    """create_backend resolves the gemini_grounded backend."""
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    backend = create_backend("gemini_grounded")
+    assert backend.name == "gemini_grounded"
+    assert backend.available is True
+
+
+def test_gemini_backend_unavailable_without_key(monkeypatch):
+    """No GEMINI_API_KEY -> fail closed, never a fabricated name."""
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    backend = GeminiGroundedBackend()
+    assert backend.available is False
+
+
+def test_gemini_search_parses_grounded_chunks_into_real_sources(monkeypatch):
+    """Real grounding chunks become citable ReverseImageResults."""
+    import requests as real_requests
+
+    backend = _gemini_backend(monkeypatch)
+    crop = np.zeros((16, 16, 3), dtype=np.uint8)
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["payload"] = json
+        assert "google_search" in [t for t in [json["tools"][0]]][0]
+        return _FakeGeminiResponse(
+            "This is BestE logistics. BRAND: BestE\nSources confirm it."
+        )
+
+    monkeypatch.setattr(real_requests, "post", fake_post)
+    results = backend.search_crop(crop)
+    urls = [r.url for r in results if r.url]
+    assert "https://beste.com/" in urls
+    assert "https://wiki.org/BestE" in urls
+    web = [r for r in results if r.source == "gemini_grounded_web"]
+    assert all(r.url for r in web)
+    tags = [r for r in results if r.source == "gemini_grounded_tags"]
+    assert tags and tags[0].title == "BestE"
+    assert any(r.source == "gemini_grounded_desc" for r in results)
+
+
+def test_gemini_identification_line_parses_brand_format():
+    assert GeminiGroundedBackend._identification_line(
+        "It's a courier firm. BRAND: BestE"
+    ) == "BestE"
+    assert GeminiGroundedBackend._identification_line("bestey express") == "bestey express"
+    assert GeminiGroundedBackend._identification_line("  ") == ""
+    assert GeminiGroundedBackend._identification_line("BRAND:  FastShip  ") == "FastShip"
+
+
+def test_gemini_tags_feed_candidate_name_deterministically(monkeypatch):
+    """Grounded Gemini tags flow into the same deterministic name pipeline."""
+    import requests as real_requests
+
+    backend = _gemini_backend(monkeypatch)
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        return _FakeGeminiResponse("A courier service logo. BRAND: BestE")
+
+    monkeypatch.setattr(real_requests, "post", fake_post)
+    crop = np.zeros((16, 16, 3), dtype=np.uint8)
+    results = backend.search_crop(crop)
+    name = _derive_candidate_name(results, _GENERIC_WORDS, _GENERIC_DOMAINS)
+    assert name == "BESTE"
+
+
+def test_derive_candidate_never_surfaces_void_names():
+    """'unknown'/'UNRESOLVED' engine output is a failed identification, not a
+    brand label — surfacing it would be a fabricated name."""
+    for void in ("unknown", "UNRESOLVED", "none", "n/a", "Unknown brand"):
+        results = [
+            ReverseImageResult(title=void, url="", source="gemini_grounded_tags"),
+            ReverseImageResult(title="logo", url="", source="yandex_cbir_tags"),
+        ]
+        assert _derive_candidate_name(results, _GENERIC_WORDS, _GENERIC_DOMAINS) is None
+
+
+def test_identify_records_banner_shape_rejection():
+    """A wide-analogue bbox (full-width strap) is rejected pre-frame-read and
+    the reason is recorded for the UI's open-set status states."""
+    identifier = _identifier(backend=_UnavailableBackend(), max_crop_aspect=3.0)
+    result = {"layer1": {"logo_detections": [[
+        {"bbox": [0, 0, 40, 8], "confidence": 0.99},
+    ]]}}
+    out = identifier.identify(result, "/nonexistent.mp4")
+    assert out["candidates"] == []
+    assert out["rejected"][0]["reason"] == "banner_shape"
+    assert out["rejected"][0]["aspect"] >= 3.0
+    assert out["rejected"][0]["frame_index"] == 0
+
+
+def test_identify_records_too_small_rejection():
+    """A crop below the minimum searchable area is rejected with a reason."""
+    identifier = _identifier(
+        backend=_UnavailableBackend(), min_crop_area=100.0, max_crop_aspect=5.0
+    )
+    result = {"layer1": {"logo_detections": [[
+        {"bbox": [0, 0, 8, 8], "confidence": 0.99},
+    ]]}}
+    video = _tiny_video()
+    try:
+        out = identifier.identify(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert out["candidates"] == []
+    assert out["rejected"][0]["reason"] == "too_small"
+    assert out["rejected"][0]["width"] * out["rejected"][0]["height"] < 100.0
+
+
+def test_identify_void_search_result_is_no_name_not_a_brand():
+    """When search runs but only yields void/generic output, the crop is
+    recorded as a real search with no confident match — never a named brand."""
+    identifier = _identifier(backend=_FakeBackend([
+        ReverseImageResult(title="unknown", url="", source="yandex_cbir_tags"),
+    ]))
+    identifier._logodev_client = _FakeLogodev()
+    result = {"layer1": {"logo_detections": [[
+        {"bbox": [0, 0, 20, 20], "confidence": 0.99},
+    ]]}}
+    video = _tiny_video()
+    try:
+        out = identifier.identify(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert len(out["candidates"]) == 1
+    cand = out["candidates"][0]
+    assert cand["candidate_name"] is None
+    assert cand["status"] == "candidate_no_name"
+    assert cand["search_results"]

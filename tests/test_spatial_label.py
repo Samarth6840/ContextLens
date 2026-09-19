@@ -7,8 +7,6 @@ Covers:
   - apply_spatial_brand_context: object detections overlapping a resolved
     brand's on-screen location are tagged with the brand; distant ones aren't.
 """
-import pytest
-
 from src.layer2.spatial_label import (
     SceneConsistencyResolver,
     TemporalObjectSmoother,

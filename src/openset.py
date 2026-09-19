@@ -14,9 +14,9 @@ Flow (escalation Task 3):
    dropped, never labeled with a guessed name.
 3. The cropped region is sent to a REAL reverse-image-search / grounded
    web-search backend (Google Cloud Vision Web Detection, Bing Visual Search,
-   SerpApi reverse image search, or a browser-driven grounded search against
-   Google Lens / Bing). The search must return real, citable source URLs —
-   never a free-text guess.
+   SerpApi reverse image search, Google Gemini with google_search grounding,
+   or a browser-driven grounded search against Google Lens / Bing). The
+   search must return real, citable source URLs — never a free-text guess.
 4. The candidate name is cross-validated against logo.dev's search endpoint
    (the Part A B2b safeguard). A name is only "surfaced as a detection" when
    logo.dev resolves it to a real registered brand/domain.
@@ -58,11 +58,15 @@ BACKEND_ENV = {
     "bing_visual": "BING_VISUAL_SEARCH_KEY",
     "serpapi": "SERPAPI_KEY",
     "browser_grounded": None,
+    "gemini_grounded": "GEMINI_API_KEY",
 }
 
 GOOGLE_VISION_URL = "https://vision.googleapis.com/v1/images:annotate"
 BING_VISUAL_URL = "https://api.bing.microsoft.com/v7.0/images/visualsearch"
 SERPAPI_URL = "https://serpapi.com/search.json"
+GEMINI_API_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+)
 
 
 class ReverseImageResult:
@@ -100,7 +104,14 @@ class ReverseImageSearchBackend(ABC):
         raise NotImplementedError
 
 
+_ENV_LOADED = False
+
+
 def _load_env_file(project_root: Optional[Path] = None) -> None:
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
     root = project_root or Path(__file__).resolve().parent.parent
     env_path = root / ".env"
     if not env_path.is_file():
@@ -259,6 +270,143 @@ class SerpApiReverseBackend(ReverseImageSearchBackend):
             "SerpApi reverse-image requires hosting the crop at a public URL; "
             "set image_base_url and upload via your own object storage."
         )
+
+
+class GeminiGroundedBackend(ReverseImageSearchBackend):
+    """Free, web-grounded identification via Google Gemini (google_search tool).
+
+    Uses the Google Generative Language API free tier with the built-in
+    ``google_search`` tool: Gemini *sees* the crop, then grounds its
+    identification in a real Google web search. This needs no paid key and no
+    public image host (the crop is uploaded inline as base64), and it returns
+    real, citable source URLs via the API's ``groundingMetadata`` — the same
+    evidence contract as the other backends (no free-text guess).
+
+    Flow (same fail-closed contract as the other engines):
+      1. Encode the crop and POST it to ``generateContent`` with
+         ``tools=[{"google_search": {}}]``.
+      2. The model returns an identification plus ``groundingChunks``
+         (title + URI per real search result) supporting its claims.
+      3. Every real chunk becomes a ``ReverseImageResult`` (source
+         ``gemini_grounded_web``); the model's compact ``BRAND: <name>`` line
+         becomes a tags result (source ``gemini_grounded_tags``) routed
+         through the same deterministic ``_derive_candidate_name`` + logo.dev
+         gate as every other engine; the full grounded summary is carried as
+         source ``gemini_grounded_desc`` for the evidence trail only (never a
+         candidate name).
+
+    Fail-closed: no GEMINI_API_KEY (env, .env, or ~/.gemini_key) => unavailable.
+    """
+
+    name = "gemini_grounded"
+
+    _PROMPT = (
+        "You are a brand-identification tool. Look at this image (usually a "
+        "logo, product, or label crop) and identify the brand or product as "
+        "precisely as you can. Use the google_search tool to verify with real "
+        "web results and base every claim on what you retrieved. End your "
+        "answer with one line in exactly this format:\nBRAND: <name>\n"
+    )
+
+    def __init__(self, timeout: float = 60.0, model: Optional[str] = None):
+        self.timeout = timeout
+        self.model = model or _env("GEMINI_MODEL") or "gemini-2.0-flash"
+        self._key = _env("GEMINI_API_KEY")
+        if not self._key:
+            key_path = Path.home() / ".gemini_key"
+            if key_path.is_file():
+                try:
+                    self._key = key_path.read_text(encoding="utf-8").strip() or None
+                except OSError:
+                    self._key = None
+
+    @property
+    def available(self) -> bool:
+        return bool(self._key)
+
+    def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
+        if not self.available:
+            raise RuntimeError("Gemini: no GEMINI_API_KEY")
+        import requests
+
+        b64 = base64.b64encode(_img_bytes(crop)).decode("ascii")
+        payload = {
+            "contents": [{
+                "role": "user",
+                "parts": [
+                    {"text": self._PROMPT},
+                    {"inline_data": {"mime_type": "image/png", "data": b64}},
+                ],
+            }],
+            "tools": [{"google_search": {}}],
+            "generationConfig": {"temperature": 0.2},
+        }
+        resp = requests.post(
+            GEMINI_API_URL.format(model=self.model),
+            params={"key": self._key},
+            json=payload,
+            timeout=self.timeout,
+        )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        try:
+            cand = data["candidates"][0]
+        except (KeyError, IndexError):
+            raise RuntimeError("Gemini API returned no candidates")
+
+        parts = ((cand.get("content") or {}).get("parts")) or []
+        text = " ".join(
+            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+        )
+        metadata = cand.get("groundingMetadata") or {}
+        chunks = metadata.get("groundingChunks") or []
+
+        results: List[ReverseImageResult] = []
+        for chunk in chunks:
+            web = (chunk or {}).get("web") or {}
+            uri = web.get("uri") or ""
+            if not uri:
+                continue
+            results.append(ReverseImageResult(
+                title=(web.get("title") or uri),
+                url=uri,
+                source="gemini_grounded_web",
+                thumbnail_url="",
+            ))
+
+        identification = self._identification_line(text)
+        if identification:
+            results.append(ReverseImageResult(
+                title=identification,
+                url="",
+                source="gemini_grounded_tags",
+                thumbnail_url="",
+            ))
+        if text:
+            results.append(ReverseImageResult(
+                title=text[:500],
+                url="",
+                source="gemini_grounded_desc",
+                thumbnail_url="",
+            ))
+        return results
+
+    @staticmethod
+    def _identification_line(text: str) -> str:
+        """Extract the compact ``BRAND: <name>`` line from model output.
+
+        Falls back to the first non-empty line (truncated) so verbose prose
+        never becomes a candidate name, but a well-formatted grounded answer
+        still produces a clean, deterministic candidate.
+        """
+        if not text:
+            return ""
+        match = re.search(r"\bBRAND\s*:\s*([^\n.]+)", text, re.IGNORECASE)
+        if match:
+            return match.group(1).strip()[:120]
+        joined = re.sub(r"\s+", " ", text).strip()
+        return joined[:120]
 
 
 class BrowserGroundedSearchBackend(ReverseImageSearchBackend):
@@ -492,6 +640,8 @@ def create_backend(name: str) -> ReverseImageSearchBackend:
         return SerpApiReverseBackend()
     if name == "browser_grounded":
         return BrowserGroundedSearchBackend()
+    if name == "gemini_grounded":
+        return GeminiGroundedBackend()
     raise ValueError(f"unknown reverse-image-search backend: {name}")
 
 
@@ -523,17 +673,24 @@ def _crop_hash(crop: np.ndarray) -> str:
     return hashlib.sha1(gray.tobytes()).hexdigest()[:16]
 
 
-def _read_frame(video_path: str, frame_index: int) -> Optional[np.ndarray]:
-    """Seek to an extracted-frame index and return the RGB frame (mirrors
-    server._read_video_frame)."""
+def _read_frame(
+    video_path: str, frame_index: int, video_stride: int = 1
+) -> Optional[np.ndarray]:
+    """Seek to the source frame behind an extracted-frame index and return the
+    RGB frame (mirrors server._read_video_frame).
+
+    `frame_index` is a position in the pipeline's sampled frame list. Long
+    videos are decoded with a stride > 1, so sampled index i corresponds to
+    source frame i*stride; seek there so the crop matches the frame the
+    analysis actually attributed the logo to.
+    """
     import cv2
 
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         return None
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    target = int(round(frame_index * fps))
+    target = int(round(frame_index * max(1, video_stride)))
     if total > 0:
         target = min(target, total - 1)
     cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, target))
@@ -603,7 +760,10 @@ def _derive_candidate_name(
                 candidates.append((score, r.title))
     if candidates:
         _, best = max(candidates, key=lambda c: c[0])
-        return re.sub(r"\s+", " ", best).strip().upper()
+        best = re.sub(r"\s+", " ", best).strip().upper()
+        if _is_void_name(best):
+            return None
+        return best
     domain_counts: Dict[str, int] = {}
     for r in results:
         if not r.url:
@@ -621,8 +781,37 @@ def _derive_candidate_name(
     # brand-ish token = the registrable part before the TLD
     parts = top_domain.split(".")
     if len(parts) >= 2:
-        return parts[-2].upper()
-    return top_domain.upper()
+        name = parts[-2].upper()
+        return None if _is_void_name(name) else name
+    name = top_domain.upper()
+    return None if _is_void_name(name) else name
+
+
+_VOID_NAMES = {
+    "unknown",
+    "unresolved",
+    "none",
+    "null",
+    "nothing",
+    "no",
+    "no brand",
+    "no match",
+    "invalid",
+    "unidentified",
+    "n a",
+    "n/a",
+    "unknown brand",
+}
+
+
+def _is_void_name(name: str) -> bool:
+    """A candidate name that semantically means "no identification" is treated
+    as no name — surfacing "UNKNOWN"/"NONE" as a brand would be a fabricated
+    label, not a real identification."""
+    if not name:
+        return True
+    t = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return (not t) or t in _VOID_NAMES
 
 
 class OpenSetBrandIdentifier:
@@ -632,6 +821,8 @@ class OpenSetBrandIdentifier:
         self,
         backend: Optional[ReverseImageSearchBackend],
         min_logo_confidence: float,
+        min_crop_area: float,
+        max_crop_aspect: float,
         max_candidates_per_video: int,
         crop_cache_dir,
         generic_tag_filter,
@@ -649,6 +840,10 @@ class OpenSetBrandIdentifier:
             raise ValueError("OpenSetBrandIdentifier requires a backend")
         if not min_logo_confidence or float(min_logo_confidence) <= 0.0:
             raise ValueError("OpenSetBrandIdentifier requires min_logo_confidence > 0")
+        if min_crop_area is None or float(min_crop_area) <= 0.0:
+            raise ValueError("OpenSetBrandIdentifier requires min_crop_area > 0")
+        if max_crop_aspect is None or float(max_crop_aspect) <= 0.0:
+            raise ValueError("OpenSetBrandIdentifier requires max_crop_aspect > 0")
         if not max_candidates_per_video or int(max_candidates_per_video) <= 0:
             raise ValueError("OpenSetBrandIdentifier requires max_candidates_per_video > 0")
         if not crop_cache_dir:
@@ -658,6 +853,8 @@ class OpenSetBrandIdentifier:
 
         self.backend = backend
         self.min_logo_confidence = float(min_logo_confidence)
+        self.min_crop_area = float(min_crop_area)
+        self.max_crop_aspect = float(max_crop_aspect)
         self.max_candidates_per_video = int(max_candidates_per_video)
         self.crop_cache_dir = Path(crop_cache_dir)
         self.crop_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -674,37 +871,87 @@ class OpenSetBrandIdentifier:
             self._logodev_client = LogoDevClient(timeout=self.logodev_timeout)
         return self._logodev_client
 
-    def _candidate_crops(self, result: dict, video_path: str) -> List[dict]:
+    def _candidate_crops(self, result: dict, video_path: str) -> tuple:
         """Collect cost-gated candidate crops from real logo detections.
 
-        Gates (Task 3.6):
+        Gates (editorial, all recorded for the UI's open-set status states):
           - detector confidence >= min_logo_confidence (documented threshold),
+          - banner-shape gate: bbox aspect ratio < max_crop_aspect (rejects
+            full-width ticker/news-strap crops that flood the top "confidence
+            hits" with non-logoographic material), checked pre-read for cost,
+          - minimum searchable crop area: crop pixels >= min_crop_area (a
+            crop smaller than this is below the resolution reverse-image
+            search meaningfully returns on),
           - dedup by crop hash (near-identical crops fire once),
           - capped at max_candidates_per_video,
           - per-crop search results cached.
+
+        Returns ``(accepted, rejected, skipped)`` where ``rejected`` is a list
+        of {frame_index, det_index, confidence, bbox, width, height, aspect,
+        reason} for every gate-skipped det (reason in {"too_small",
+        "banner_shape"}) and ``skipped`` counts the non-recordable skips
+        (below-min-confidence, duplicate hash).
         """
         l1 = result["layer1"]
-        candidates: List[dict] = []
+        video_stride = int(result.get("video_stride", 1) or 1)
+        accepted: List[dict] = []
+        rejected: List[dict] = []
+        skipped_below_conf = 0
+        skipped_dup = 0
         seen_hashes: set = set()
+        budget = int(self.max_candidates_per_video)
         for frame_idx, dets in enumerate(l1.get("logo_detections") or []):
             for det_idx, det in enumerate(dets or []):
+                if len(accepted) >= budget:
+                    break
                 conf = float(det.get("confidence", 0.0))
                 if conf < self.min_logo_confidence:
+                    skipped_below_conf += 1
                     continue
                 bbox = det.get("bbox")
                 if not bbox:
                     continue
-                frame = _read_frame(video_path, frame_idx)
+                bw = abs(int(bbox[2]) - int(bbox[0]))
+                bh = abs(int(bbox[3]) - int(bbox[1]))
+                bbox_aspect = bw / max(1, bh)
+                if bbox_aspect >= self.max_crop_aspect:
+                    rejected.append({
+                        "frame_index": frame_idx,
+                        "det_index": det_idx,
+                        "confidence": round(conf, 3),
+                        "bbox": [float(v) for v in bbox],
+                        "width": bw,
+                        "height": bh,
+                        "aspect": round(bbox_aspect, 2),
+                        "reason": "banner_shape",
+                    })
+                    continue
+                frame = _read_frame(video_path, frame_idx, video_stride)
                 if frame is None:
                     continue
                 crop = _crop_bbox(frame, bbox)
                 if crop is None or crop.size == 0:
                     continue
+                ch, cw = crop.shape[:2]
+                crop_area = cw * ch
+                if crop_area < self.min_crop_area:
+                    rejected.append({
+                        "frame_index": frame_idx,
+                        "det_index": det_idx,
+                        "confidence": round(conf, 3),
+                        "bbox": [float(v) for v in bbox],
+                        "width": cw,
+                        "height": ch,
+                        "aspect": round(cw / max(1, ch), 2),
+                        "reason": "too_small",
+                    })
+                    continue
                 h = _crop_hash(crop)
                 if h in seen_hashes:
+                    skipped_dup += 1
                     continue
                 seen_hashes.add(h)
-                candidates.append({
+                accepted.append({
                     "frame_index": frame_idx,
                     "det_index": det_idx,
                     "confidence": conf,
@@ -712,31 +959,37 @@ class OpenSetBrandIdentifier:
                     "crop": crop,
                     "crop_hash": h,
                 })
-                if len(candidates) >= self.max_candidates_per_video:
-                    break
-            if len(candidates) >= self.max_candidates_per_video:
+            if len(accepted) >= budget:
                 break
-        return candidates
+        skipped = {"below_min_confidence": skipped_below_conf, "duplicate_hash": skipped_dup}
+        return accepted, rejected, skipped
 
     def identify(self, result: dict, video_path: str) -> Dict[str, Any]:
         """Run open-set identification for a finished job.
 
         Returns the dashboard `open_set` block:
-          {available, backend, min_confidence, candidates: [...]}
+          {available, backend, min_confidence, candidates: [...],
+           rejected: [...], skipped_counts: {...}}
         Fail-closed: with no runnable backend and no search results, no
-        candidate name is ever surfaced.
+        candidate name is ever surfaced. Every gate skip is recorded in
+        `rejected` with its reason so the UI never shows a silent blank for a
+        candidate slot and never presents a void name as an identification.
         """
         candidates: List[Dict[str, Any]] = []
+        rejected: List[Dict[str, Any]] = []
+        skipped_counts: Dict[str, int] = {}
         backend_available = self.backend.available
         reason = ""
         if not backend_available:
             reason = (
                 "OPEN-SET IDENTIFICATION UNAVAILABLE — NO RUNNABLE "
                 "REVERSE-IMAGE-SEARCH BACKEND (set GOOGLE_CLOUD_VISION_API_KEY / "
-                "BING_VISUAL_SEARCH_KEY / SERPAPI_KEY, or install agent-browser)"
+                "BING_VISUAL_SEARCH_KEY / SERPAPI_KEY / GEMINI_API_KEY, or "
+                "install agent-browser)"
             )
 
-        for cand in self._candidate_crops(result, video_path):
+        accepted, rejected, skipped_counts = self._candidate_crops(result, video_path)
+        for cand in accepted:
             crop = cand.pop("crop")
             entry: Dict[str, Any] = {
                 "frame_index": cand["frame_index"],
@@ -769,8 +1022,9 @@ class OpenSetBrandIdentifier:
                         self._result_cache[cand["crop_hash"]] = results
                     entry["search_results"] = [r.to_dict() for r in results]
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning("reverse-image search failed: %s", exc)
+                    logger.warning("reverse-image search failed for %s: %s", cand["crop_hash"], exc)
                     entry["search_results"] = []
+                    entry["search_error"] = f"Reverse-image search failed: {exc}"
 
                 name = _derive_candidate_name(
                     [ReverseImageResult(**{k: r[k] for k in r}) for r in entry["search_results"]],
@@ -794,10 +1048,16 @@ class OpenSetBrandIdentifier:
 
             candidates.append(entry)
 
+        resolved = len([c for c in candidates if c["status"] == "candidate_verified"])
         return {
             "available": backend_available,
             "backend": self.backend.name,
             "min_confidence": self.min_logo_confidence,
+            "min_crop_area": self.min_crop_area,
+            "max_crop_aspect": self.max_crop_aspect,
             "reason": reason,
             "candidates": candidates,
+            "rejected": rejected,
+            "skipped_counts": skipped_counts,
+            "resolved": resolved,
         }

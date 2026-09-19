@@ -1,7 +1,6 @@
 from src.outreach import (
     PersonalizedOutreachGenerator,
     _lookup_recommendation,
-    _pick_personalization_facts,
     generate_personalized_outreach,
 )
 

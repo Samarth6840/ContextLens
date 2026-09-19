@@ -39,6 +39,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from src.layer1.visual_embeddings import assert_embedding_version
+
 logger = logging.getLogger(__name__)
 
 
@@ -71,10 +73,21 @@ class LogoRetrievalIndex:
         self._brand_of_row: List[str] = []              # brand per reference crop
         self._brand_rows: Dict[str, List[int]] = {}     # brand -> row indices
 
+    # False until _load() has run; lets us record which CLIP checkpoint/space
+    # produced the stored embeddings so querying with a different one fails
+    # loudly instead of silently corrupting nearest-neighbor results.
+    @property
+    def embedding_version(self) -> Optional[str]:
+        if not self._use_open_clip and self._clip is None:
+            return None
+        if self._use_open_clip:
+            source = self.checkpoint_path or "open_clip:ViT-B-32"
+        else:
+            source = "clip:ViT-B/32"
+        return f"logo_clip:{source}"
+
     # ── CLIP lifecycle (lazy; mirrors RegionProposalCLIPBackend) ─────────
     def _load(self, device: str = "cpu"):
-        import torch
-
         self._device = device
         if self._clip is not None:
             return
@@ -152,7 +165,8 @@ class LogoRetrievalIndex:
 
     # ── Querying ─────────────────────────────────────────────────────────
     def query(
-        self, crop: np.ndarray, top_k: Optional[int] = None
+        self, crop: np.ndarray, top_k: Optional[int] = None,
+        embedding_version: Optional[str] = None,
     ) -> List[Tuple[str, float]]:
         """Return top-k (canonical_brand, similarity) candidates, desc by score.
 
@@ -162,11 +176,18 @@ class LogoRetrievalIndex:
         top-1-vs-top-2 similarity "margin" meaningful (they are always distinct
         brands).
 
+        `embedding_version` (when provided) must match this index's own
+        CLIP-space version, else the caller is comparing vectors from different
+        embedding spaces and we fail loudly rather than return wrong neighbors.
+
         Fail-closed: empty/None crop or empty index -> []. Candidates below
         `min_similarity` are dropped (unknown / not-in-bank brands give []).
         """
         if crop is None or crop.size == 0 or self.is_empty:
             return []
+        assert_embedding_version(
+            self.embedding_version, embedding_version, "LogoRetrievalIndex"
+        )
         k = top_k or self.top_k
         q = self._embed_image_batch([crop])[0]          # (D,)
         sims = self._embeddings @ q                      # (N,)

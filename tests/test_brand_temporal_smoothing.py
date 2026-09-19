@@ -7,8 +7,6 @@ logo boxes from a solid, persistent resolved brand on a spatially-overlapping
 region, without ever weakening an already-resolved detection.
 """
 
-import numpy as np
-
 from src.layer2.brand_resolver import TemporalBrandSmoother
 
 

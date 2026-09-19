@@ -45,8 +45,16 @@ ENV_SECRET = "LOGO_DEV_SECRET_KEY"
 ENV_PUBLISHABLE = "LOGO_DEV_PUBLISHABLE_TOKEN"
 
 
+_ENV_LOADED = False
+
+
 def _load_env_file(project_root: Optional[Path] = None) -> None:
-    """Load .env into os.environ if present (keys stay process-local)."""
+    """Load .env into os.environ if present (keys stay process-local).
+    Only reads the file from disk once per process."""
+    global _ENV_LOADED
+    if _ENV_LOADED:
+        return
+    _ENV_LOADED = True
     root = project_root or Path(__file__).resolve().parent.parent
     env_path = root / ".env"
     if not env_path.is_file():

@@ -4,6 +4,7 @@ All tests use synthetic fixtures from tests/fixtures/ — NOT real data.
 The production data path (./data) is never touched by these tests.
 """
 
+import os
 import sys
 from pathlib import Path
 
@@ -355,13 +356,24 @@ class TestEvidenceConfidenceScorer:
         assert "ocr_hit" not in scaffolded
 
     def test_effective_weights_renormalized(self):
-        """Effective weights should be original weights normalized to sum=1."""
+        """Effective weights should be original weights normalized to sum=1.
+
+        Expected values are derived from the scorer's own implemented-source
+        registry so the test does not silently break when config weights change.
+        """
         scorer = EvidenceConfidenceScorer()
         ew = scorer.effective_weights
-        # logo_detected: 0.45/0.70 ≈ 0.643, ocr_hit: 0.15/0.70 ≈ 0.214, scene_context: 0.10/0.70 ≈ 0.143
-        assert ew["logo_detected"] == pytest.approx(0.45 / 0.70, abs=0.01)
-        assert ew["ocr_hit"] == pytest.approx(0.15 / 0.70, abs=0.01)
-        assert ew["scene_context"] == pytest.approx(0.10 / 0.70, abs=0.01)
+        impl = {
+            name: info["weight"]
+            for name, info in scorer._implemented.items()
+        }
+        total = sum(impl.values())
+        assert total > 0
+        for name, weight in impl.items():
+            assert ew[name] == pytest.approx(weight / total, abs=0.01)
+        # Scaffolded sources have zero effective weight.
+        for name in scorer._scaffolded:
+            assert ew.get(name, 0.0) == pytest.approx(0.0, abs=0.01)
         assert sum(ew.values()) == pytest.approx(1.0, abs=0.01)
 
     def test_output_contains_coverage_and_scaffolded(self):
@@ -471,6 +483,51 @@ class TestEvidenceConfidenceScorer:
         assert result["confidence"] == pytest.approx(0.56, abs=1e-6)
 
 
+class TestAudioBrandingStrength:
+    """_audio_branding_strength maps BEATs events to a weak, capped brand cue.
+
+    Classified AudioSet cues resolve against the ontology names (cap 0.4);
+    sustained feature-extractor fallback events ('audio_activity') count as a
+    weaker cue (cap 0.2); and no events / no sustained cues return 0.0 —
+    the signal is never fabricated.
+    """
+
+    @staticmethod
+    def _pipe():
+        from src.pipeline import Phase1Pipeline
+        return Phase1Pipeline.__new__(Phase1Pipeline)
+
+    def test_no_events_is_zero(self):
+        assert self._pipe()._audio_branding_strength([]) == 0.0
+
+    def test_single_audio_activity_is_zero(self):
+        # One fallback event is not sustained -> 0.0.
+        events = [
+            {"event": "audio_activity", "confidence": 0.8, "mode": "fallback"},
+        ]
+        assert self._pipe()._audio_branding_strength(events) == 0.0
+
+    def test_sustained_fallback_events_weak_cue(self):
+        # >=2 fallback events (feature-extractor checkpoint) -> weak cue <= 0.2.
+        events = [
+            {"event": "audio_activity", "confidence": 0.6, "mode": "fallback"},
+            {"event": "audio_activity", "confidence": 0.7, "mode": "fallback"},
+        ]
+        strength = self._pipe()._audio_branding_strength(events)
+        assert 0.0 < strength <= 0.2
+
+    def test_classified_jingle_cue_stronger_than_fallback(self):
+        # Classified AudioSet 'Jingle (music)' + 'Applause' cues -> cap 0.4,
+        # strictly above the fallback cap (0.2).
+        events = [
+            {"event": "Jingle (music)", "confidence": 0.9, "mode": "classified"},
+            {"event": "Applause", "confidence": 0.8, "mode": "classified"},
+        ]
+        strength = self._pipe()._audio_branding_strength(events)
+        assert 0.0 < strength <= 0.4
+        assert strength > 0.2
+
+
 
 # ============================================================
 # Tests for Layer 2b evidence aggregation (resolution-quality logo
@@ -525,23 +582,128 @@ class TestAggregateEvidence:
         ev = p._aggregate_evidence([], [], [], [])
         assert ev["speech_mention"] == 0.0
 
+    def test_ocr_product_span_routes_through_resolver(self):
+        # Section 6 of the plan: full-frame OCR text that match_brand misses
+        # (a product name like "Mac Mini", not a brand wordmark) must still
+        # contribute to ocr_hit by routing through the tiered resolver — keyed
+        # on the accepted resolution's tier quality (Tier 4 -> 0.85), not the
+        # raw OCR confidence. The OCR-evidence path is CACHE-ONLY (no live
+        # Wikidata/Qwen), so the resolution comes from the local learned table.
+        from src.layer2.brand_memory import ProductResolutionMemory
+        from src.layer2.product_resolver import ProductBrandResolver
+
+        p = self._agg()
+        mem = ProductResolutionMemory(min_distinct_videos=3)
+        for v in ("v1", "v2", "v3"):
+            mem.record("Mac Mini", "APPLE", v)
+        p._product_resolver = ProductBrandResolver(
+            wikidata=None, learned_lookup=mem.lookup,
+        )
+        ocr_results = [[{"text": "Mac Mini", "confidence": 0.97}]]
+        ev = p._aggregate_evidence([], [], ocr_results, [])
+        # Tier-4 resolution quality 0.85 caps the OCR contribution.
+        assert ev["ocr_hit"] == pytest.approx(0.85, abs=1e-6)
+
+    def test_ocr_product_span_unresolved_contributes_nothing(self):
+        # A product span the resolver FAILS to resolve (fail-closed) contributes
+        # zero — precision is preserved, no fabricated brand.
+        from src.layer2.product_resolver import ProductBrandResolver
+        p = self._agg()
+        p._product_resolver = ProductBrandResolver(wikidata=None)
+        ocr_results = [[{"text": "Mac Mini", "confidence": 0.97}]]
+        ev = p._aggregate_evidence([], [], ocr_results, [])
+        assert ev["ocr_hit"] == 0.0
+
+    def test_direct_brand_ocr_read_capped_at_resolution_ceiling(self):
+        # A direct brand-alias OCR read ("SAMSUNG" ticker text) with very high
+        # raw optical confidence must NOT drive ocr_hit above the documented
+        # OCR resolution-quality ceiling (0.90) — raw box confidence on
+        # incidental on-screen text never outranks the attribution cap.
+        p = self._agg()
+        ocr_results = [[{"text": "Samsung", "confidence": 0.98}]]
+        ev = p._aggregate_evidence([], [], ocr_results, [])
+        assert ev["ocr_hit"] == pytest.approx(0.90, abs=1e-6)
+
+    def test_direct_brand_ocr_read_below_ceiling_keeps_raw(self):
+        # Reads below the ceiling keep their honest raw value; only the ceiling
+        # bounds the contribution.
+        p = self._agg()
+        ocr_results = [[{"text": "Samsung", "confidence": 0.42}]]
+        ev = p._aggregate_evidence([], [], ocr_results, [])
+        assert ev["ocr_hit"] == pytest.approx(0.42, abs=1e-6)
+
     def test_foldable_video_single_genuine_mention_not_inflated(self):
         # The foldable-phone video's narration names the device once as
         # "Z Fold 8 Ultra" (transcribed verbatim; no repeated "samsung"). The
-        # match is a SINGLE genuine mention matching via the `z fold` alias, so
-        # speech_n must be 1 (never the inflated repetition-loop count that a
-        # non-VAD-segmented transcript would double-count). speech_strength is
-        # n/(n+3) = 1/4 = 0.25 — an honest single-mention score, NOT a flat 0.3
-        # or a padded value. This pins the anti-inflation behavior at the
-        # scoring boundary: `speech_n = len(find_brand_mentions(transcript))`.
-        from src.brand_catalog import find_brand_mentions
+        # catalog no longer aliases the product name; the tiered product resolver
+        # (Tier 2 Wikidata) supplies SAMSUNG as a SINGLE mention. speech_n = 1
+        # (never the inflated repetition-loop count that a non-VAD-segmented
+        # transcript would double-count), so speech_strength is n/(n+3) = 1/4 =
+        # 0.25 — an honest single-mention score, NOT a flat 0.3 or a padded value.
+        # This pins the anti-inflation behavior at the scoring boundary:
+        # `speech_n = len(resolver_resolutions)`.
+        from src.layer2.product_resolver import (
+            ProductBrandResolver, WikidataProductLookup,
+        )
         p = self._agg()
         transcript = "ये सबसे पतला फोल्डिंग स्मार्टफोन, Z Fold 8 Ultra."
-        mentions = find_brand_mentions(transcript)
+        def _wd(url, params, timeout):
+            return {"results": {"bindings": [
+                {"makerLabel": {"value": "Samsung"}}]}}
+        wd = WikidataProductLookup(cache_path=None, http_get=_wd)
+        res = ProductBrandResolver(wikidata=wd).resolve(transcript)
+        mentions = [{"brand": r["brand"], "resolution_tier": r.get("resolution_tier"),
+                     "resolution_source": r.get("source")} for r in res]
         assert len(mentions) == 1
         assert mentions[0]["brand"] == "SAMSUNG"
         ev = p._aggregate_evidence([], mentions, [], [])
         assert ev["speech_mention"] == pytest.approx(1 / 4.0, abs=1e-6)
+
+    def test_visual_product_match_keys_on_best_confirmed_match(self):
+        # Every entry from the product index already cleared the strict
+        # similarity threshold, so the evidence question is "did a catalog
+        # product appear?" — strength keys on the STRONGEST confirmed sighting
+        # (a clear 0.95 frame), not the mean across partially-visible frames
+        # (which would dilute it toward a weaker 0.66 frame).
+        p = self._agg()
+        matches = [
+            {"brand": "SAMSUNG", "similarity": 0.66},
+            {"brand": "SAMSUNG", "similarity": 0.95},
+        ]
+        ev = p._aggregate_evidence([], [], [], [], visual_product_matches=matches)
+        assert ev["visual_product_match"] == pytest.approx(0.95, abs=1e-6)
+
+    def test_visual_product_match_no_matches_is_zero(self):
+        # Fail-closed: no index match (or empty index) contributes zero —
+        # the evidence is never fabricated.
+        p = self._agg()
+        ev = p._aggregate_evidence([], [], [], [], visual_product_matches=None)
+        assert ev["visual_product_match"] == 0.0
+
+    def test_save_brand_memory_persists_product_resolution_memory(self):
+        # Plan #8 persistence requirement ("and that the pipeline calls save"):
+        # save_brand_memory() must persist the Tier-4 learned product table when
+        # the resolver is present, so learnings are durable across runs.
+        import tempfile
+        from src.layer2.brand_memory import ProductResolutionMemory
+        from src.layer2.product_resolver import ProductBrandResolver
+
+        p = self._agg()
+        mem = ProductResolutionMemory(min_distinct_videos=3)
+        for v in ("v1", "v2", "v3"):
+            mem.record("Vision Pro", "APPLE", v)
+        p._product_resolver = ProductBrandResolver(
+            wikidata=None, learned_lookup=mem.lookup,
+        )
+        p._product_resolver.memory = mem
+        with tempfile.TemporaryDirectory() as tmp:
+            p.cfg["layer1"]["product_resolution"]["memory_path"] = \
+                os.path.join(tmp, "pr_mem.json")
+            p.save_brand_memory()
+            path = p.cfg["layer1"]["product_resolution"]["memory_path"]
+            assert os.path.exists(path)
+            loaded = ProductResolutionMemory.load(path)
+            assert loaded.lookup("Vision Pro")["brand"] == "APPLE"
 
 
 # ============================================================

@@ -151,6 +151,8 @@ def prune_for_store(result: Dict[str, Any]) -> Dict[str, Any]:
         "video_fps": result.get("video_fps"),
         "has_audio": result.get("has_audio"),
         "layer2b_confidence": l2b.get("confidence"),
+        "resolver_acceptance": l2c.get("resolver_acceptance"),
+        "temporal_corroboration": l2c.get("temporal_corroboration"),
         "layer3": {
             "recommendations": l3.get("recommendations") or [],
         },

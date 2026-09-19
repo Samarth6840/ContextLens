@@ -80,8 +80,6 @@ def scale_to(img, w=640, h=360):
 
 def zoom_pan(image, t_frac: float, w=640, h=360):
     """t_frac in [0,1): slow zoom-out + left-to-right pan over one image."""
-    import cv2
-
     src_h, src_w = image.shape[:2]
     # crop window grows from 70% to 100% of the image while panning
     scale = 0.70 + 0.30 * t_frac

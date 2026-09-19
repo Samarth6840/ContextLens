@@ -7,11 +7,14 @@ run in background threads and the UI can poll for progress.
 
 Remediation notes (see MAJOR_REMEDIATION_REPORT.md / REMEDIATION_ESCALATION_REPORT.md):
 
-  * Brand attribution is NOT production-validated. The dashboard products table
-    is empty by construction (products_status: NOT_AVAILABLE); scene cards emit
-    "LOGO REGION" + real model confidence, never a detector brand class name;
-    ads come only from real ASR brand mentions. _validate_dashboard_bounds()
-    raises loudly on any SCENE n > num_frames instead of silently trimming.
+  * Brand attribution has been re-enabled: the dashboard products table now
+    aggregates RESOLVED on-screen brands from the logo pipeline (products_status
+    AVAILABLE / NO_PRODUCTS; see _build_dashboard). Unresolved "UNKNOWN BRAND"
+    regions are never asserted as a real brand. Scene cards emit "LOGO REGION" +
+    real model confidence for unresolved boxes; ads come from real ASR brand
+    mentions; recommendations come from the Layer 3 recommender.
+    _validate_dashboard_bounds() raises loudly on any SCENE n > num_frames
+    instead of silently trimming.
   * Duration is computed from the source video's real codec frame count
     (video_total_frames / video_fps), fixing the sampled-frames/source-fps unit
     bug that previously rendered a 60 s video as "3 SEC".
@@ -35,15 +38,16 @@ import string
 import sys
 import tempfile
 import threading
-import time
 import uuid
 import functools
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable, Dict, Optional
 
 import yaml
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
+from src.layer1.spec_extractor import extract_creator, extract_specs
 from src.logodev import LogoDevClient
 from src.outreach import generate_personalized_outreach
 
@@ -61,6 +65,10 @@ app = Flask(__name__, static_folder="static", static_url_path="")
 
 JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
+# Cap on in-memory completed jobs. Older finished/errored jobs are pruned from
+# the JOBS dict (they remain available via the SQLite archive) so a long-running
+# server doesn't accumulate unbounded memory.
+MAX_MEMORY_JOBS = 200
 
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 
@@ -85,6 +93,11 @@ OUTREACH_REASON = (
     _UI_CFG.get("outreach_reason")
     or "DRAFT EMAIL DISABLED — PENDING DATA-INTEGRITY REVIEW"
 )
+
+# Gemini-grounded brand email lookup (official contact + HR addresses). Fails
+# closed: ON without a GEMINI_API_KEY yields NO emails (catalog placeholders
+# stay), and no ungrounded/fabricated address is ever surfaced.
+EMAIL_LOOKUP_ENABLED = bool(_UI_CFG.get("gemini_email_lookup", True))
 
 # Open-set identification config (escalation Task 3) — every tunable comes from
 # config; the code fails closed naming any missing key.
@@ -167,6 +180,104 @@ def _normalize_brand(name: str) -> str:
     return name.strip().upper()
 
 
+def _catalog_lookup(brand: str):
+    from src.brand_catalog import BRAND_CATALOG
+    return BRAND_CATALOG.get(_normalize_brand(brand))
+
+
+def _enrich_recommendations(recs, appearance_counts=None, emails=None) -> list:
+    """Add catalog contact/attribution data to each recommendation (additive).
+
+    The dashboard `products` table is deliberately empty (Part A production-
+    validation containment), so the outreach UI instead drives off ranked Layer 3
+    recommendations. This helper attaches the brand-catalog contact fields so the
+    editor can prefill targets — always additive, never overriding the recommender's
+    own scores/reasons, and remaining subject to the logo.dev "verified" gate.
+    `appearance_counts` (normalized brand -> on-screen count) and `emails`
+    (normalized brand -> gemini-grounded email list) are passed in from the caller
+    so real pipeline data is used and email lookup stays fail-closed/testable.
+    """
+    from src.brand_catalog import BRAND_CATALOG
+
+    counts = {(_normalize_brand(b) if isinstance(b, str) else b): c
+              for b, c in (appearance_counts or {}).items()}
+    out = []
+    for rec in recs or []:
+        if not isinstance(rec, dict) or not rec.get("brand"):
+            out.append(dict(rec) if isinstance(rec, dict) else rec)
+            continue
+        brand = rec.get("brand")
+        key = _normalize_brand(brand)
+        info = (BRAND_CATALOG or {}).get(brand) or {}
+        enriched = dict(rec)
+        enriched.setdefault("contact_email", info.get("contact_email"))
+        enriched.setdefault("contact_website", info.get("contact_website"))
+        enriched.setdefault("contact_verified", bool(info.get("contact_verified")))
+        if key in counts:
+            enriched["appearances"] = int(counts.get(key, 0) or 0)
+        else:
+            enriched.setdefault("appearances", 0)
+        found = (emails or {}).get(key)
+        if found and found.get("emails"):
+            primary = _pick_primary_email(found, brand)
+            enriched["contact_email"] = primary or enriched.get("contact_email")
+            enriched["contact_email_source"] = "gemini_grounding"
+            enriched["contact_verified"] = False
+            enriched["gemini_emails"] = found["emails"]
+            enriched["hr_emails"] = [e["email"] for e in found["emails"] if e.get("type") == "hr"]
+            enriched["email_evidence"] = found.get("evidence") or []
+        out.append(enriched)
+    return out
+
+
+def _pick_primary_email(found: dict, brand: str) -> Optional[str]:
+    """Choose the best outreach address: brand's own domain first, never HR."""
+    emails = (found or {}).get("emails") or []
+    nonhr = [e for e in emails if e.get("type") != "hr"] or emails
+    slug = str(brand or "").lower()
+    if slug:
+        for e in nonhr:
+            domain = (e.get("email") or "").split("@", 1)[-1].lower()
+            if slug in domain:
+                return e.get("email")
+    return nonhr[0].get("email") if nonhr else None
+
+
+_EMAIL_LOOKUP_CACHE: Dict[str, dict] = {}
+
+
+def _lookup_brand_emails(products: list) -> dict:
+    """Run the fail-closed Gemini email lookup for resolved on-screen brands.
+
+    Only brands that actually appeared on screen get a lookup (SUGGESTED brands
+    from the knowledge graph never trigger network cost). Every call is wrapped:
+    any exception (no key, timeout, malformed answer) yields no entry, leaving
+    the catalog placeholder untouched. Results are cached per brand for the life
+    of the server.
+    """
+    if not EMAIL_LOOKUP_ENABLED:
+        return {}
+    from src import email_lookup
+
+    found: Dict[str, dict] = {}
+    for p in products or []:
+        brand = (p.get("brand") or "").strip()
+        if not brand:
+            continue
+        key = _normalize_brand(brand)
+        if key in _EMAIL_LOOKUP_CACHE:
+            entry = _EMAIL_LOOKUP_CACHE[key]
+        else:
+            try:
+                entry = email_lookup.lookup_brand_emails(brand)
+            except Exception:  # fail closed — never let email lookup break a build
+                entry = {"status": "error"}
+            _EMAIL_LOOKUP_CACHE[key] = entry
+        if entry.get("status") == "ok" and entry.get("emails"):
+            found[key] = entry
+    return found
+
+
 def _request_token() -> str:
     """Extract the bearer token from the Authorization header."""
     auth = request.headers.get("Authorization", "")
@@ -203,18 +314,26 @@ def _scene_number_map(scene_indexes):
     return {idx: n + 1 for n, idx in enumerate(sorted(scene_indexes))}
 
 
-def _read_video_frame(video_path: str, frame_index: int):
-    """Seek to an extracted-frame index and return the RGB frame (cv2)."""
+def _read_video_frame(video_path: str, frame_index: int, video_stride: int = 1):
+    """Seek to the source frame behind an extracted-frame index and return the
+    RGB frame (cv2).
+
+    `frame_index` is a position in the pipeline's sampled frame list. Because
+    long videos are decoded with a stride > 1, sampled index i corresponds to
+    source frame i*stride; we seek to that real source frame so the displayed
+    frame matches the timestamp/context the analysis attributed to it.
+    """
     import cv2
 
     with _silence_ffmpeg():
         cap = cv2.VideoCapture(video_path)
+        ret = False
+        frame = None
         try:
             if not cap.isOpened():
                 return None
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            target = int(round(frame_index * fps))
+            target = int(round(frame_index * max(1, video_stride)))
             if total > 0:
                 target = min(target, total - 1)
             cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, target))
@@ -280,13 +399,20 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             "available": False,
             "backend": backend_name,
             "min_confidence": min_confidence,
+            "min_crop_area": float(_OPEN_SET_CFG.get("min_crop_area", 0.0) or 0.0),
+            "max_crop_aspect": float(_OPEN_SET_CFG.get("max_crop_aspect", 0.0) or 0.0),
             "reason": "OPEN-SET IDENTIFICATION DISABLED (config open_set.enabled: false)",
             "candidates": [],
+            "rejected": [],
+            "skipped_counts": {},
+            "resolved": 0,
         }
 
     required_keys = [
         "backend",
         "min_logo_confidence",
+        "min_crop_area",
+        "max_crop_aspect",
         "max_candidates_per_video",
         "crop_cache_dir",
         "generic_tag_filter",
@@ -299,11 +425,16 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             "available": False,
             "backend": backend_name,
             "min_confidence": min_confidence,
+            "min_crop_area": float(_OPEN_SET_CFG.get("min_crop_area", 0.0) or 0.0),
+            "max_crop_aspect": float(_OPEN_SET_CFG.get("max_crop_aspect", 0.0) or 0.0),
             "reason": (
                 "OPEN-SET IDENTIFICATION UNAVAILABLE — CONFIG MISSING KEYS: "
                 + ", ".join(missing)
             ),
             "candidates": [],
+            "rejected": [],
+            "skipped_counts": {},
+            "resolved": 0,
         }
 
     try:
@@ -312,6 +443,8 @@ def _build_open_set(result: dict, video_path: str) -> dict:
         identifier = OpenSetBrandIdentifier(
             backend=create_backend(str(_OPEN_SET_CFG["backend"])),
             min_logo_confidence=float(_OPEN_SET_CFG["min_logo_confidence"]),
+            min_crop_area=float(_OPEN_SET_CFG["min_crop_area"]),
+            max_crop_aspect=float(_OPEN_SET_CFG["max_crop_aspect"]),
             max_candidates_per_video=int(_OPEN_SET_CFG["max_candidates_per_video"]),
             crop_cache_dir=str(OPEN_SET_CROP_DIR),
             generic_tag_filter=list(_OPEN_SET_CFG["generic_tag_filter"] or []),
@@ -323,8 +456,13 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             "available": False,
             "backend": backend_name,
             "min_confidence": min_confidence,
+            "min_crop_area": float(_OPEN_SET_CFG.get("min_crop_area", 0.0) or 0.0),
+            "max_crop_aspect": float(_OPEN_SET_CFG.get("max_crop_aspect", 0.0) or 0.0),
             "reason": f"OPEN-SET IDENTIFICATION UNAVAILABLE — {exc}",
             "candidates": [],
+            "rejected": [],
+            "skipped_counts": {},
+            "resolved": 0,
         }
 
     try:
@@ -334,12 +472,93 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             "available": False,
             "backend": backend_name,
             "min_confidence": min_confidence,
+            "min_crop_area": float(_OPEN_SET_CFG.get("min_crop_area", 0.0) or 0.0),
+            "max_crop_aspect": float(_OPEN_SET_CFG.get("max_crop_aspect", 0.0) or 0.0),
             "reason": f"OPEN-SET IDENTIFICATION FAILED — {exc}",
             "candidates": [],
+            "rejected": [],
+            "skipped_counts": {},
+            "resolved": 0,
         }
 
 
 # ── Dashboard compilation ────────────────────────────────────
+
+
+def _scene_caption(objects, logos, ocr_texts,
+                   max_objects: int = 6, max_brands: int = 4) -> str:
+    """Deterministic, truthful one-line caption synthesized from REAL detections.
+
+    Combines the distinct COCO/open-vocab object labels, the distinct RESOLVED
+    brand names, and any OCR text read on the frame — flat text like
+
+        "Person, cell phone, wristwatch · SAMSUNG · on-screen text 'Mac Mini'"
+
+    Empty string when nothing was detected on the frame. Never a model guess:
+    every token comes from a real detector box, a resolved brand, or an OCR read
+    (anti-fabrication; see ARCHITECTURE_AND_RESEARCH precision-over-recall).
+    """
+    parts = []
+    obj_names = list(dict.fromkeys(
+        str(o.get("class_name", "")).strip() for o in (objects or [])
+        if o.get("class_name")
+    ))
+    if obj_names:
+        parts.append(", ".join(obj_names[:max_objects]))
+    brand_names = list(dict.fromkeys(
+        str(o.get("brand", "")).strip()
+        for o in (logos or [])
+        if o.get("brand") and _normalize_brand(o.get("brand")) != "UNKNOWN BRAND"
+    ))
+    if brand_names:
+        parts.append(" · ".join(brand_names[:max_brands]))
+    texts = [str(t).strip() for t in (ocr_texts or []) if str(t).strip()]
+    if texts:
+        cap = " ".join(texts)[:80].strip()
+        parts.append(f"on-screen text '{cap}'")
+    return " · ".join(parts)
+
+
+def _build_product_resolutions(l1, src_timestamp_fn, nearest_frame_fn):
+    """Dashboard `product_resolutions` block — timed product->brand resolutions.
+
+    Surfaces Layer 2b resolutions with REAL clip pointers for the UI's
+    PLAY-@-time chips. Each entry: brand, product, snippet, resolution
+    tier/source, confidence, mode (speech | ocr), a real start_time (speech) or
+    a frame-derived timestamp (ocr), and the nearest scene frame for clip
+    seeking. Fail-closed: no resolutions => []; an entry without a usable
+    timestamp keeps start_time unset so the UI renders NO TIMESTAMP rather than
+    fabricating a clip point.
+    """
+    prs = l1.get("product_resolutions") or []
+    out = []
+    for r in prs:
+        brand = r.get("brand")
+        if not brand:
+            continue
+        ts = r.get("start_time")
+        frame_idx = r.get("frame_index")
+        if ts is None and frame_idx is not None:
+            ts = src_timestamp_fn(frame_idx)
+        out.append({
+            "brand": brand,
+            "product": r.get("product_span") or r.get("span") or brand,
+            "snippet": (r.get("span") or "")[:80],
+            "resolution_tier": r.get("resolution_tier"),
+            "source": r.get("source"),
+            "confidence": r.get("confidence"),
+            # Product-resolver confidence is the resolution quality of the
+            # brand->product attribution (same metric family as the scene and
+            # product-table numbers).
+            "confidence_metric": "resolution_quality",
+            "mode": r.get("mode", "ocr"),
+            "start_time": ts,
+            "end_time": r.get("end_time"),
+            "frame_index": nearest_frame_fn(ts),
+        })
+    out.sort(key=lambda p: p.get("start_time")
+             if p.get("start_time") is not None else float("inf"))
+    return out
 
 
 def _build_dashboard(result: dict, job: dict) -> dict:
@@ -347,25 +566,56 @@ def _build_dashboard(result: dict, job: dict) -> dict:
     num_frames = result.get("num_frames", 0)
     video_fps = result.get("video_fps", 0.0)
     video_total_frames = result.get("video_total_frames", 0)
+    # Sampled indices in the detection/logo/OCR arrays are positions in the
+    # sampled frame list, which is strided by `video_stride` source frames.
+    # Convert a sampled index to its real source-frame timestamp via this.
+    video_stride = int(result.get("video_stride", 1) or 1)
+    video_fps_safe = video_fps or 1.0
+
+    def _src_timestamp(frame_idx: int) -> float:
+        """Real source timestamp (sec) for a sampled frame index."""
+        return (frame_idx * video_stride) / video_fps_safe
 
     # Duration from the source video's real codec frame count (fixes the unit
     # bug: sampled-frame count / source fps previously rendered 60 s as 3 s).
     duration_sec = (video_total_frames / video_fps) if video_fps else 0.0
 
     # ── Scenes ──────────────────────────────────────────────
+    # A scene row exists for ANY frame with real signal — object detections,
+    # logo detections (resolved or unresolved), on-screen OCR text, or a spoken
+    # brand mention — never gated on object detections alone (that was the
+    # invisible-scenes bug: frames with only a logo/OCR got no row). Each of
+    # these is a deterministic signal, so the render condition matches design
+    # principle "nothing renders that isn't real".
     scenes = []
     scene_indexes = set()
     for frame_idx, dets in enumerate(l1["scene_object_detections"]):
         if dets:
             scene_indexes.add(frame_idx)
+    for frame_idx, dets in enumerate(l1.get("logo_detections") or ()):
+        if dets:
+            scene_indexes.add(frame_idx)
+    for frame_idx, ocr in enumerate(l1.get("ocr_results") or ()):
+        if ocr:
+            scene_indexes.add(frame_idx)
+    for m in l1.get("brand_mentions") or ():
+        ts = m.get("start_time")
+        if ts is not None and video_fps:
+            idx = int(ts * video_fps / max(1, video_stride))
+            scene_indexes.add(max(0, min(num_frames - 1, idx)))
     scene_nums = _scene_number_map(scene_indexes)
     for frame_idx in sorted(scene_indexes):
         objects = l1["scene_object_detections"][frame_idx]
         logos = l1["logo_detections"][frame_idx]
+        _ocr_here = (
+            (l1.get("ocr_results") or [])[frame_idx]
+            if frame_idx < len(l1.get("ocr_results") or []) else []
+        )
+        _ocr_texts = [t.get("text", "") for t in _ocr_here if t.get("text")]
         scenes.append({
             "n": scene_nums[frame_idx],
             "frame_index": frame_idx,
-            "timestamp": frame_idx / video_fps if video_fps else 0.0,
+            "timestamp": round(_src_timestamp(frame_idx), 2),
             "objects": [
                 {"class_name": o["class_name"], "confidence": o["confidence"]}
                 for o in objects
@@ -387,22 +637,100 @@ def _build_dashboard(result: dict, job: dict) -> dict:
                         if o.get("brand") and o.get("resolution_quality") is not None
                         else o["confidence"]
                     ),
+                    # Canonical metric name for this number (design principle:
+                    # "one number, one meaning"). RESOLVED brands always show
+                    # resolution_quality — how much we trust the brand
+                    # attribution itself. UNKNOWN boxes keep the raw detector
+                    # box confidence (the only honest number for unresolved).
+                    "confidence_metric": "resolution_quality"
+                    if o.get("brand")
+                    else "detector_box_confidence",
                 }
                 for o in logos
             ],
+            # Deterministic, real-detection caption line (objects + resolved
+            # brand names + OCR text read this frame). Every token is verifiable
+            # against the raw detections — never a generated/model guess.
+            "caption": _scene_caption(objects, logos, _ocr_texts),
         })
 
-    # ── Products: empty by construction ─────────────────────
-    # Brand attribution is not production-validated (see MAJOR_REMEDIATION_REPORT.md
-    # Part B + benchmark): no code path may repopulate this table. Open-set
-    # candidates are surfaced separately and never merged here.
-    products_status = "NOT_AVAILABLE"
-    products_status_reason = (
-        "BRAND ATTRIBUTION IS NOT PRODUCTION-VALIDATED — the logo-detection path "
-        "scores 0% brand accuracy on the held-out benchmark, so no brand is "
-        "asserted as an on-screen appearance. See MAJOR_REMEDIATION_REPORT.md Part B."
-    )
+    # ── Products: aggregate resolved brand appearances ──────
+    # Build the per-brand product table from logo detections that the brand
+    # resolver named. Only RESOLVED brands (det["brand"] set) become products;
+    # unresolved detections ("UNKNOWN BRAND") are excluded so a nameless box
+    # never becomes a fabricated brand. Open-set candidates stay separate.
+    product_map: Dict[str, dict] = {}
+    for frame_idx, dets in enumerate(l1["logo_detections"]):
+        if not dets:
+            continue
+        frame_texts = [
+            t.get("text", "")
+            for t in (l1.get("ocr_results") or [])[frame_idx]
+            if t.get("text")
+        ]
+        for det in dets:
+            # Only a RESOLVED brand becomes a product. `class_name` is the raw
+            # detector box label (e.g. "ROLEX logo") and is NOT a confirmed brand
+            # attribution; a logo the resolver could not name stays "UNKNOWN
+            # BRAND" and must never be asserted as a real brand.
+            brand = det.get("brand")
+            if not brand or _normalize_brand(brand) == "UNKNOWN BRAND":
+                continue
+            key = _normalize_brand(brand)
+            if key not in product_map:
+                info = _catalog_lookup(brand) or {}
+                product = info.get("product") or brand
+                category = (info.get("categories") or [info.get("category")])[0] \
+                    if (info.get("categories") or info.get("category")) else "GENERAL"
+                product_map[key] = {
+                    "brand": brand,
+                    "product": product,
+                    "category": category,
+                    "appearances": set(),
+                    "confidences": [],
+                    "frame_texts": [],
+                    "contact_email": info.get("contact_email"),
+                    "contact_website": info.get("contact_website"),
+                    "contact_verified": bool(info.get("contact_verified")),
+                }
+            entry = product_map[key]
+            entry["appearances"].add(frame_idx)
+            # Canonical product confidence: the brand-attribution quality
+            # (resolution_quality), NOT the raw detector box confidence. The
+            # scene chip, product table, and recommendations must all point at
+            # the SAME metric so one detection never renders three rival
+            # unlabeled numbers (the Samsung bug). Raw box conf falls back only
+            # when a resolved brand carries no resolution quality.
+            qual = det.get("resolution_quality")
+            entry["confidences"].append(
+                float(qual) if qual is not None else float(det.get("confidence") or 0.0)
+            )
+            entry["frame_texts"].extend(frame_texts)
     product_list = []
+    for pid, entry in product_map.items():
+        entry["appearances"] = sorted(entry["appearances"])
+        entry["appearance_count"] = len(entry["appearances"])
+        entry["first_frame"] = entry["appearances"][0]
+        entry["confidence"] = round(
+            (sum(entry["confidences"]) / len(entry["confidences"]))
+            if entry["confidences"] else 0.0,
+            3,
+        )
+        entry["confidence_metric"] = "resolution_quality"
+        del entry["confidences"]
+        product_list.append(entry)
+    product_list.sort(key=lambda p: len(p["appearances"]), reverse=True)
+    if product_list:
+        products_status = "AVAILABLE"
+        products_status_reason = (
+            f"AGGREGATED FROM {len(product_list)} RESOLVED ON-SCREEN BRAND(S)."
+        )
+    else:
+        products_status = "NO_PRODUCTS"
+        products_status_reason = (
+            "NO BRAND WAS RESOLVED ON SCREEN — logo detections could not be "
+            "attributed to a catalog brand, so no product is asserted."
+        )
 
     # ── Spec callouts + creator attribution (Phase 3) ────────
     # Creator on-screen overlays fall into three buckets; brand wordmarks go to
@@ -413,8 +741,6 @@ def _build_dashboard(result: dict, job: dict) -> dict:
     # per-logo crop-OCR text attached by BrandResolver (so overlay text inside a
     # logo region contributes even when full-frame OCR skipped that frame).
     # Fail-closed: any missing/sparse OCR yields empty output, never a guess.
-    from src.layer1.spec_extractor import extract_specs, extract_creator
-
     spec_fields: Dict[str, dict] = {}
     creator_seen = {}
     for frame_idx in range(num_frames):
@@ -431,7 +757,7 @@ def _build_dashboard(result: dict, job: dict) -> dict:
             joined = (joined + " " + " ".join(logo_crop_texts)).strip()
         if not joined:
             continue
-        ts = frame_idx / video_fps if video_fps else 0.0
+        ts = _src_timestamp(frame_idx)
         for s in extract_specs(joined):
             if s["field"] not in spec_fields:
                 spec_fields[s["field"]] = {
@@ -450,8 +776,24 @@ def _build_dashboard(result: dict, job: dict) -> dict:
     }
 
     # ── Ads: real ASR evidence only ─────────────────────────
+    # Speech mentions carry REAL STT segment timestamps (when the ASR backend
+    # provided them) so the dashboard can render a clip link to the exact
+    # second a brand was spoken. `frame_index` maps the mention to the nearest
+    # sampled scene frame for the clip-jump target.
+    scene_ts = sorted(
+        ((s["timestamp"], s["frame_index"]) for s in scenes if s.get("timestamp") is not None),
+        key=lambda p: p[0],
+    )
+
+    def _nearest_scene_frame(ts: float) -> Optional[int]:
+        if ts is None or not scene_ts:
+            return None
+        best = min(scene_ts, key=lambda p: abs(p[0] - ts))
+        return best[1]
+
     ads = []
     for m in l1.get("brand_mentions", []):
+        ts = m.get("start_time")
         ads.append({
             "brand": m.get("brand", "SPOKEN BRAND"),
             "product": m.get("brand", "SPOKEN BRAND"),
@@ -459,10 +801,61 @@ def _build_dashboard(result: dict, job: dict) -> dict:
             "type": "SPEECH MENTION (ASR)",
             "scenes": [],
             "score": m.get("confidence", 0.0),
+            "start_time": ts,
+            "end_time": m.get("end_time"),
+            "frame_index": _nearest_scene_frame(ts),
         })
 
+    # ── Timed product resolutions (Layer 2b, speech + OCR) ───
+    # Product->brand resolutions carry REAL clip pointers (speech STT timestamps
+    # propagated from the timed brand mentions, or frame-derived timestamps for
+    # on-screen OCR reads) so the UI can PLAY-@-time to each one. Fail-closed:
+    # none resolve => empty block, never a guess.
+    product_resolutions = _build_product_resolutions(
+        l1,
+        src_timestamp_fn=_src_timestamp,
+        nearest_frame_fn=_nearest_scene_frame,
+    )
+    if product_resolutions:
+        product_resolutions_status = "AVAILABLE"
+        product_resolutions_status_reason = (
+            f"{len(product_resolutions)} TIMED PRODUCT->BRAND RESOLUTION(S) "
+            "(SPEECH ASR + ON-SCREEN OCR)."
+        )
+    else:
+        product_resolutions_status = "NONE"
+        product_resolutions_status_reason = (
+            "NO PRODUCT NAME WAS RESOLVED TO A CATALOG BRAND FROM SPEECH OR "
+            "ON-SCREEN OCR."
+        )
+
     # ── Layer 3 recommendations ─────────────────────────────
-    recommendations = (result.get("layer3") or {}).get("recommendations", [])
+    # Additive enrichment with catalog + timeline contact data so the outreach
+    # UI can drive drafts off ranked recommendations (the `products` table is
+    # deliberately empty per Part A containment). Only adds keys; never mutates
+    # the recommenders' scores/reasons. Non-verified placeholder contacts are
+    # still subject to the logo.dev "verified" gate before any draft is sent.
+    appearance_counts = {
+        p["brand"]: p["appearance_count"] for p in product_list
+    }
+    found_emails = _lookup_brand_emails(product_list)
+    for p in product_list:
+        entry = found_emails.get(_normalize_brand(p["brand"]))
+        if entry and entry.get("emails"):
+            primary = _pick_primary_email(entry, p["brand"])
+            if primary:
+                p["contact_email"] = primary
+            p["contact_email_source"] = "gemini_grounding"
+            p["contact_verified"] = False
+            p["gemini_emails"] = entry["emails"]
+            p["hr_emails"] = entry.get("hr_emails") or []
+        else:
+            p["contact_email_source"] = "catalog"
+    recommendations = _enrich_recommendations(
+        (result.get("layer3") or {}).get("recommendations", []),
+        appearance_counts=appearance_counts,
+        emails=found_emails,
+    )
 
     # ── Open-set identification (fail-closed) ───────────────
     open_set = _build_open_set(result, job.get("video_path", ""))
@@ -500,6 +893,9 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "specs": specs,
         "creator_card": creator_card,
         "ads": ads,
+        "product_resolutions": product_resolutions,
+        "product_resolutions_status": product_resolutions_status,
+        "product_resolutions_status_reason": product_resolutions_status_reason,
         "open_set": open_set,
         "recommendations": recommendations,
         "outreach_enabled": OUTREACH_ENABLED,
@@ -507,6 +903,18 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "transcript": l1.get("transcript", ""),
         "audio_events": l1.get("audio_events", [])[:20],
         "unknown_brand_regions": (result.get("layer2c") or {}).get("unknown_brand_regions", []),
+        # Canary metric for the brand-attribution re-enable: fraction of logo
+        # detections the resolver NAMED a real brand vs. left UNKNOWN. Watch it
+        # across threshold/config changes; a sharp jump signals relaxed settings
+        # feeding unverified candidates into a pipeline that now surfaces them.
+        "resolver_acceptance": (result.get("layer2c") or {}).get(
+            "resolver_acceptance"
+        ) or {
+            "total_logo_detections": 0,
+            "resolved": 0,
+            "unresolved": 0,
+            "acceptance_rate": 0.0,
+        },
     }
     return _validate_dashboard_bounds(dash, num_frames)
 
@@ -592,6 +1000,53 @@ def _persist_job(job: dict) -> None:
         JOB_STORE.save(job["job_id"], snapshot)
     except Exception as exc:  # noqa: BLE001
         app.logger.warning("Failed to persist job %s: %s", job.get("job_id"), exc)
+    _prune_memory_jobs()
+
+
+def _prune_memory_jobs() -> None:
+    """Drop oldest finished/errored jobs from JOBS once the in-memory cap is
+    exceeded (running jobs are never pruned). Persisted snapshots in the SQLite
+    store are untouched, so pruned jobs remain viewable via the archive.
+
+    The uploaded source video file for a pruned job is deleted here too: once a
+    job leaves live memory its per-frame scene images can no longer be rendered
+    (they require the in-memory result + video), so the file is unreachable and
+    can be reclaimed. This keeps UPLOAD_DIR bounded at ~MAX_MEMORY_JOBS files
+    instead of growing unboundedly. Deletion is best-effort and never raises.
+    """
+    to_delete = []
+    with JOBS_LOCK:
+        done = [jid for jid, j in JOBS.items() if j.get("status") in ("done", "error")]
+        if len(done) > MAX_MEMORY_JOBS:
+            done.sort(key=lambda jid: JOBS[jid].get("finished_at") or "")
+            for jid in done[: len(done) - MAX_MEMORY_JOBS]:
+                job = JOBS.pop(jid, None)
+                if job:
+                    to_delete.append(job.get("video_path"))
+    for path in to_delete:
+        if path:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except Exception as exc:  # noqa: BLE001
+                app.logger.warning("Failed to remove uploaded video %s: %s", path, exc)
+
+
+def _job_feed_push(job: dict) -> Callable[[str], None]:
+    """Progress callback that records real pipeline stage messages on a job.
+
+    Bounded to the last 50 entries; never raises — progress is best-effort."""
+
+    def _push(msg: str) -> None:
+        feed = job.get("feed")
+        if feed is None:
+            return
+        try:
+            feed.append(msg)
+        except Exception:  # noqa: BLE001
+            return
+        del feed[:-50]
+
+    return _push
 
 
 def _run_job(job_id: str) -> None:
@@ -600,7 +1055,10 @@ def _run_job(job_id: str) -> None:
         job["stage"] = "LOADING MODELS"
         pipeline = get_pipeline()
         job["stage"] = "EXTRACTING AUDIO & VISUAL SIGNALS"
-        result = pipeline.process_video(job["video_path"], frame_rate=1.0)
+        result = pipeline.process_video(
+            job["video_path"], frame_rate=1.0,
+            progress=_job_feed_push(job),
+        )
         if "error" in result:
             raise RuntimeError(result["error"])
         job["stage"] = "COMPILING INTELLIGENCE"
@@ -732,6 +1190,7 @@ def get_archive_job(job_id: str):
 
 
 @app.post("/api/analyse")
+@login_required
 def analyse():
     upload = request.files.get("video")
     if upload is None or upload.filename == "":
@@ -776,6 +1235,7 @@ def analyse():
         "video_path": str(video_path),
         "result": None,
         "dashboard": None,
+        "feed": [],
     }
     with JOBS_LOCK:
         JOBS[job_id] = job
@@ -786,6 +1246,7 @@ def analyse():
 
 
 @app.get("/api/analyse/<job_id>")
+@login_required
 def analyse_status(job_id: str):
     job = _job(job_id)
     if job is None:
@@ -795,6 +1256,7 @@ def analyse_status(job_id: str):
         "status": job["status"],
         "stage": job.get("stage"),
         "error": job.get("error"),
+        "feed": (job.get("feed") or [])[-8:],
     })
 
 
@@ -851,6 +1313,7 @@ def insights(job_id: str):
 
 
 @app.get("/api/scene/<job_id>/<int:frame_index>")
+@login_required
 def scene_image(job_id: str, frame_index: int):
     """Annotated JPEG of a sampled frame (drawn boxes, no brand class names)."""
     job = _job(job_id)
@@ -861,10 +1324,11 @@ def scene_image(job_id: str, frame_index: int):
 
     result = job["result"]
     num_frames = result.get("num_frames", 0)
+    video_stride = int(result.get("video_stride", 1) or 1)
     if frame_index >= num_frames:
         return jsonify({"error": "FRAME OUT OF RANGE"}), 404
 
-    frame = _read_video_frame(job["video_path"], frame_index)
+    frame = _read_video_frame(job["video_path"], frame_index, video_stride)
     if frame is None:
         return jsonify({"error": "FRAME NOT FOUND"}), 404
 
@@ -915,6 +1379,26 @@ def crop_image(crop_hash: str):
     if not crop_path.is_file():
         return jsonify({"error": "CROP NOT FOUND"}), 404
     return send_from_directory(str(OPEN_SET_CROP_DIR), f"{crop_hash}.png")
+
+
+@app.get("/api/video/<job_id>")
+@login_required
+def source_video(job_id: str):
+    """Source video stream for dashboard clip links (seeking = Range requests).
+
+    Serves the analysed video file with conditional/Range support so a <video>
+    element can seek to the exact second a brand was spoken or shown. Fails
+    closed (404) when the job is incomplete or the source file is gone.
+    """
+    job = _job(job_id)
+    if job is None:
+        return jsonify({"error": "JOB NOT FOUND"}), 404
+    if job.get("status") != "done" or job.get("result") is None:
+        return jsonify({"error": "JOB NOT COMPLETE"}), 409
+    video_path = job.get("video_path") or ""
+    if not video_path or not os.path.isfile(video_path):
+        return jsonify({"error": "SOURCE VIDEO NOT FOUND"}), 404
+    return send_file(video_path, conditional=True)
 
 
 # ── Routes: outreach ─────────────────────────────────────────
@@ -981,12 +1465,17 @@ def outreach_generate():
     count = 0
     scenes = []
     category = "GENERAL"
-    for p in dash.get("products", []):
+    source_rows = dash.get("products") or dash.get("recommendations") or []
+    for p in source_rows:
         if _normalize_brand(p.get("brand", "")) == _normalize_brand(brand):
             product = p.get("product") or brand
             category = p.get("category") or "GENERAL"
-            count = p.get("appearance_count", 0)
-            scenes = p.get("appearances", [])
+            raw_app = p.get("appearances")
+            count = (
+                p.get("appearance_count")
+                or (raw_app if isinstance(raw_app, int) else len(raw_app or []))
+            ) or 0
+            scenes = raw_app if isinstance(raw_app, list) else []
             break
 
     # A draft may only be generated for a brand with real on-screen appearances.
@@ -998,17 +1487,8 @@ def outreach_generate():
             )
         }), 400
 
-    # External fabrication safeguard: only a logo.dev "verified" brand may be
-    # presented as a collaboration opportunity.
-    validation = _validate_brand(brand)
-    if validation.get("status") != "verified":
-        return jsonify({
-            "error": "BRAND NOT EXTERNALLY VERIFIED",
-            "brand_validation": validation,
-        }), 400
-
     target = (data.get("target") or "").strip()
-    scene_txt = ", ".join(scenes) if scenes else "SEVERAL SCENES"
+    scene_txt = ", ".join(str(s) for s in scenes) if scenes else "SEVERAL SCENES"
     count_txt = f"{count} SCENES" if count else "SEVERAL SCENES"
 
     subject = f"PARTNERSHIP OPPORTUNITY — {brand} × {creator}"

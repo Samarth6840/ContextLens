@@ -4,12 +4,10 @@ All-in-one client for OCR, STT, Vision, and Embeddings via Free.ai API.
 30K free tokens/day, no credit card required.
 """
 
-import io
 import logging
 import os
 import tempfile
-from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import cv2
 import numpy as np
@@ -308,3 +306,20 @@ class FreeAISpeechToText:
         if audio is None or len(audio) == 0:
             return ""
         return self.client.transcribe(audio, sample_rate=sample_rate)
+
+    def transcribe_segments(
+        self, audio: np.ndarray, sample_rate: int = 16000
+    ) -> List[dict]:
+        """Timestamped transcription of the full track, as a single segment.
+
+        The Free.ai STT API returns plain text without word/segment timing, so
+        the segment spans the whole audio (fail-closed: timestamps are wide,
+        never fabricated sub-second boundaries).
+        """
+        if audio is None or len(audio) == 0:
+            return []
+        text = self.transcribe_segment(audio, sample_rate).strip()
+        if not text:
+            return []
+        duration = len(audio) / sample_rate
+        return [{"text": text, "start": 0.0, "end": round(duration, 3)}]

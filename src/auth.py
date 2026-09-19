@@ -20,7 +20,6 @@ the dashboard/API behave exactly as before for the standalone/desktop use case.
 
 import hmac
 import hashlib
-import os
 import secrets
 import threading
 import time

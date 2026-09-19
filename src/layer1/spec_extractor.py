@@ -20,7 +20,7 @@ text plus a normalized value/unit pair where one is unambiguous.
 
 import logging
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,95 @@ _CHIP_TERMS = [
     "snapdragon", "exynos", "dimensity", "tensor", "a-series", "ryzen",
 ]
 
-# ── Creator-attribution patterns ─────────────────────────────
+# ── Price / currency callouts ────────────────────────────────
+# Hinglish tech-review videos price phones with "₹", "$", "€", sometimes INR
+# shorthand: "Rs. 6,999", "₹1,29,999", "1.2 lakh", "55K", "95,000". This is a
+# weak-but-specific signal used by the product-resolution plausibility gate: it
+# tells us the surrounding text is describing a purchaseable PRODUCT, not
+# arbitrary scene text. Fails closed (None) when no price is present.
+_PRICE_CUR_RE = re.compile(
+    r"(?:Rs\.?\s*|INR\s*|USD\s*|EUR\s*|₹\s*|\$\s*|€\s*)"
+    r"(\d[\d,]*(?:\.\d+)?)",
+    re.I,
+)
+_PRICE_BARE_RE = re.compile(
+    r"(?<![A-Za-z\d.])"
+    r"((?:\d{1,3},\d{3}(?:,\d{3})?)|\d{1,4}(?:\.\d+)?)\s*"
+    r"(lakh|lac|cr|crore|k|thousand)\b",
+    re.I,
+)
+# Bare Indian-style grouped price with no suffix: "55,000", "1,29,999".
+_PRICE_GROUPED_RE = re.compile(
+    r"(?<![A-Za-z\d])(\d{1,3},\d{3}(?:,\d{3})?)(?![A-Za-z\d])",
+)
+_PRICE_SUFFIX_RE = re.compile(
+    r"(\d[\d,]*(?:\.\d+)?)\s*(lakh|lac|cr|crore|k|thousand)\b",
+    re.I,
+)
+
+
+def _expand_price(value: float, suffix: str) -> float:
+    s = (suffix or "").lower()
+    if s in ("lakh", "lac"):
+        return value * 100_000
+    if s in ("cr", "crore"):
+        return value * 10_000_000
+    if s in ("k", "thousand"):
+        return value * 1_000
+    return value
+
+
+def extract_price(text: str) -> Dict:
+    """Extract a price (value, currency) from OCR/speech text.
+
+    Returns {"value": float, "currency": str, "raw": str, "suffix": str} or {}.
+    Fails closed ({}).
+    """
+    if not text:
+        return {}
+    norm_text = " " + " ".join((text or "").split()) + " "
+    # Currency-prefixed style: ₹/$/€/Rs. 6,999 / ₹1,29,999
+    m = _PRICE_CUR_RE.search(norm_text)
+    if m:
+        raw = m.group(0).strip()
+        try:
+            value = float(m.group(1).replace(",", ""))
+        except ValueError:
+            value = 0.0
+        low = raw.lower().replace(" ", "")
+        currency = "INR" if ("rs" in low or "₹" in raw or "inr" in low) \
+            else ("USD" if "$" in raw else ("EUR" if "€" in raw else "USD"))
+        return {"value": round(value, 2), "currency": currency, "raw": raw, "suffix": ""}
+    # Bare Indian-style grouped number with a lakh/cr/k suffix: "1.2 lakh", "55K".
+    m = _PRICE_BARE_RE.search(norm_text)
+    if m:
+        try:
+            value = float(m.group(1).replace(",", ""))
+        except ValueError:
+            value = 0.0
+        return {
+            "value": round(_expand_price(value, m.group(2)), 2),
+            "currency": "USD",
+            "raw": m.group(0).strip(),
+            "suffix": m.group(2).lower(),
+        }
+    # Bare Indian grouped price with no suffix: "55,000", "1,29,999".
+    m = _PRICE_GROUPED_RE.search(norm_text)
+    if m:
+        try:
+            value = float(m.group(1).replace(",", ""))
+        except ValueError:
+            value = 0.0
+        return {
+            "value": round(value, 2),
+            "currency": "USD",
+            "raw": m.group(0).strip(),
+            "suffix": "",
+        }
+    return {}
+
+
+
 # "@<handle>" anywhere; follower counts like "4.3m followers" / "1.2M followers".
 _HANDLE_RE = re.compile(r"@([A-Za-z0-9_.]{1,30})", re.I)
 _FOLLOWERS_RE = re.compile(

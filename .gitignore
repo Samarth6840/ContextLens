@@ -10,6 +10,11 @@ models/
 outputs/
 data/
 
+# Runtime learned-memory state (cross-video brand + Tier-4 product co-occurrence)
+# — regenerable per environment, must never be committed as source.
+config/brand_memory.json
+config/product_resolutions.json
+
 # Secrets — never commit API keys
 .env
 .env.*
@@ -34,3 +39,6 @@ htmlcov/
 
 # Phase 3 SQLite job store (runtime data)
 var/
+
+# Node plugin deps (opencode ponytail)
+node_modules/

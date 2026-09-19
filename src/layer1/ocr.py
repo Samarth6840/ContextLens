@@ -1,10 +1,23 @@
 """
 Layer 1 — OCR Module
-Uses PaddleOCR for text detection and recognition in video frames.
-Loads real model weights — no mock/stub/placeholder inference.
+
+Runs PaddleOCR inside a dedicated worker subprocess (src/layer1/ocr_worker.py)
+so the paddle runtime is never imported into the torch/MPS server process.
+Co-existing paddle + torch in one process intermittently corrupts operator
+dispatch ("Tensor holds no memory" inside torchvision NMS — PaddleOCR
+#11559/#16199), so OCR is isolated by process, not just by thread.
+
+The public interface (extract_text / extract_text_batch) is unchanged so
+callers (pipeline, brand_resolver, product resolver) keep working as-is.
 """
 
+import base64
+import json
 import logging
+import os
+import subprocess
+import sys
+import threading
 from typing import List
 
 import cv2
@@ -12,11 +25,26 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+_CONFIG_LANG = "en"
+
+
+def _encode_rgb_jpeg(image: np.ndarray) -> bytes:
+    """RGB frame -> JPEG bytes (PaddleOCR expects BGR; the worker decodes from
+    JPEG straight into BGR, so the colorspace flip needs no bookkeeping here)."""
+    if image.ndim == 3 and image.shape[2] == 3:
+        image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    else:
+        image_bgr = image
+    _, buf = cv2.imencode(".jpg", image_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    return buf.tobytes()
+
 
 class OCRExtractor:
     """
-    OCR text extraction using PaddleOCR.
-    Detects and recognizes text in video frames — real inference.
+    OCR text extraction via an isolated PaddleOCR worker subprocess.
+
+    Detects and recognizes text in video frames — real inference, just in a
+    separate process so paddle never shares a runtime with torch.
     """
 
     def __init__(
@@ -25,76 +53,157 @@ class OCRExtractor:
         use_angle_cls: bool = True,
         det_db_thresh: float = 0.3,
         rec_batch_num: int = 6,
+        cpu_threads: int = 0,
     ):
         self.lang = lang
+        # Ignored — retained for config compatibility; thread/process resources
+        # are governed inside the worker.
+        del use_angle_cls, det_db_thresh, rec_batch_num, cpu_threads
+        self._proc: "subprocess.Popen | None" = None
+        self._req_id = 0
+        self._lock = threading.Lock()
+        logger.info("OCRExtractor configured (lang=%s, worker-process mode)", lang)
 
-        # Lazy import PaddleOCR — it has heavy dependencies
-        logger.info(f"Initializing PaddleOCR (lang={lang})")
-        from paddleocr import PaddleOCR as _PaddleOCR
+    # ── Worker subprocess lifecycle ─────────────────────────────
 
-        self.model = _PaddleOCR(
-            use_angle_cls=use_angle_cls,
-            lang=lang,
-            det_db_thresh=det_db_thresh,
-            rec_batch_num=rec_batch_num,
+    def _ensure_worker(self):
+        if self._proc is not None and self._proc.poll() is None:
+            return
+        os.environ.setdefault("PYTHONUNBUFFERED", "1")
+        self._proc = subprocess.Popen(
+            [
+                sys.executable, "-u",
+                "-m", "src.layer1.ocr_worker", self.lang,
+            ],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            encoding="utf-8",
         )
-        logger.info("PaddleOCR initialized successfully")
+        logger.info("Started PaddleOCR worker pid=%s", self._proc.pid)
+
+    def _worker_exec(self, images: List[np.ndarray]) -> List[List[dict]]:
+        """Send one batch of RGB frames to the worker and return parsed results.
+
+        The worker is supervised: if it dies mid-request the batch is retried
+        once against a freshly spawned worker, so a crash never silently drops
+        OCR results (and the dead handle is recycled).
+        """
+        encoded = [
+            base64.b64encode(_encode_rgb_jpeg(f)).decode("ascii")
+            for f in images if f is not None and f.size > 0
+        ]
+        valid = [j for j, f in enumerate(images) if f is not None and f.size > 0]
+        with self._lock:
+            results = None
+            for attempt in range(2):
+                results = self._request_once(encoded)
+                if results is not None:
+                    break
+                logger.warning(
+                    "OCR worker died mid-request; respawning (attempt %d/2)",
+                    attempt + 1,
+                )
+            if results is None:
+                raise RuntimeError("OCR worker crashed repeatedly — giving up")
+        full: List[List[dict]] = [[] for _ in images]
+        for slot, dets in zip(valid, results):
+            full[slot] = dets
+        return full
+
+    def _request_once(self, encoded: List[str]) -> "List[List[dict]] | None":
+        """One request round-trip. Returns parsed results, or None if the worker
+        died (handle recycled for a supervised retry). Raises on worker error.
+        Caller must hold self._lock so request/response pairs never interleave
+        across threads."""
+        self._ensure_worker()
+        self._req_id += 1
+        payload = json.dumps({"id": self._req_id, "images": encoded})
+        try:
+            if self._proc.stdin is None or self._proc.stdout is None:
+                raise RuntimeError("OCR worker pipe unavailable")
+            self._proc.stdin.write(payload + "\n")
+            self._proc.stdin.flush()
+            resp_line = self._proc.stdout.readline()
+        except (BrokenPipeError, ValueError, OSError):
+            self._proc = None
+            return None
+        if not resp_line:
+            self._proc = None
+            return None
+        resp = json.loads(resp_line)
+        if resp.get("error"):
+            raise RuntimeError(f"OCR worker error: {resp['error']}")
+        return resp.get("results", [])
+
+    def _shutdown(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                if self._proc.stdin is not None:
+                    self._proc.stdin.write(json.dumps({"id": -1, "method": "exit"}) + "\n")
+                    self._proc.stdin.flush()
+                    self._proc.stdin.close()
+                self._proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                self._proc.terminate()
+        self._proc = None
+
+    # ── Public OCR interface (unchanged) ─────────────────────────
 
     def extract_text(self, image: np.ndarray) -> List[dict]:
-        """
-        Extract text from a single image frame.
-
-        Args:
-            image: RGB image as numpy array (H, W, 3)
-
-        Returns:
-            List of OCR result dicts with keys:
-                - text: recognized string
-                - confidence: float
-                - bbox: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] polygon
-        """
+        """Extract text from a single RGB image frame."""
         if image is None or image.size == 0:
             return []
+        return self._worker_exec([image])[0]
 
-        # PaddleOCR expects BGR input; VideoProcessor.load_video produces RGB
-        if image.ndim == 3 and image.shape[2] == 3:
-            image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        else:
-            image_bgr = image
-
-        # PaddleOCR 3.7.0: use predict() instead of deprecated ocr()
-        results = self.model.predict(image_bgr)
-
-        if results is None:
+    def extract_text_batch(self, frames: List[np.ndarray]) -> List[List[dict]]:
+        """Run OCR on a batch of frames, aligning results to inputs."""
+        if not frames:
             return []
+        return self._worker_exec(frames)
 
-        # PaddleOCR 3.7.0+ predict() returns OCRResult objects (attribute access)
-        # Older versions may return dict-like objects. Handle both formats.
-        ocr_results = []
-        for result in results:
-            if hasattr(result, "get"):
-                # Dict-like object (legacy format)
-                rec_texts = result.get("rec_texts", [])
-                rec_scores = result.get("rec_scores", [])
-                rec_polys = result.get("rec_polys", [])
-            else:
-                # OCRResult dataclass (PaddleOCR 3.7.0+)
-                rec_texts = getattr(result, "rec_texts", [])
-                rec_scores = getattr(result, "rec_scores", [])
-                rec_polys = getattr(result, "rec_polys", [])
+    def __del__(self):
+        try:
+            self._shutdown()
+        except Exception:  # noqa: BLE001
+            pass
 
-            for text, score, poly in zip(rec_texts, rec_scores, rec_polys):
-                ocr_results.append({
-                    "text": text,
-                    "confidence": float(score),
-                    "bbox": poly.tolist() if hasattr(poly, "tolist") else list(poly),
-                })
 
-        return ocr_results
+def create_ocr_extractor(
+    lang: str = "en",
+    use_angle_cls: bool = True,
+    det_db_thresh: float = 0.3,
+    rec_batch_num: int = 6,
+    cpu_threads: int = 0,
+    **_kwargs,
+) -> OCRExtractor:
+    """Factory: create the configured OCR extractor (worker-process mode)."""
+    if lang != "en":
+        logger.info("OCR lang override: %s", lang)
+    return OCRExtractor(
+        lang=lang,
+        use_angle_cls=use_angle_cls,
+        det_db_thresh=det_db_thresh,
+        rec_batch_num=rec_batch_num,
+        cpu_threads=cpu_threads,
+    )
 
-    def extract_text_batch(
-        self,
-        frames: List[np.ndarray],
-    ) -> List[List[dict]]:
-        """Run OCR on a batch of frames."""
-        return [self.extract_text(frame) for frame in frames]
+
+if __name__ == "__main__":
+    # Self-check: protocol alignment without spawning a subprocess.
+    extractor = OCRExtractor.__new__(OCRExtractor)
+    extractor._lock = threading.Lock()
+
+    def _fake_worker(images):
+        return [[
+            {"text": "TEXT", "confidence": 0.9,
+             "bbox": [[0, 0], [1, 0], [1, 1], [0, 1]]}
+        ] if i % 2 == 0 else [] for i in range(len(images))]
+
+    extractor._worker_exec = _fake_worker
+    frames = [np.zeros((4, 4, 3), np.uint8) for _ in range(3)] + [None]
+    parsed = extractor.extract_text_batch(frames)
+    assert [len(r) for r in parsed] == [1, 0, 1, 0], parsed
+    assert parsed[2][0]["text"] == "TEXT"
+    print("ocr worker-mode self-check OK")

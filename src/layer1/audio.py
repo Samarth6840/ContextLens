@@ -12,6 +12,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 
+from src.layer1.audioset_labels import AUDIOSET_LABELS
+
 logger = logging.getLogger(__name__)
 
 
@@ -224,44 +226,62 @@ class SpeechToText:
         self, audio: np.ndarray, sample_rate: int = 16000
     ) -> str:
         """
-        Transcribe audio with VAD pre-segmentation to prevent repetition loops.
+        Transcribe audio returning joined text (backward-compatible).
 
-        Uses energy-based VAD to split audio into independent speech segments,
-        transcribes each segment separately (fresh decoder context each time),
-        and concatenates results. This is the standard mitigation for Whisper's
-        repetition-loop hallucination on continuous audio.
-
-        Args:
-            audio: Audio signal as numpy array
-            sample_rate: Sample rate of the audio
-
-        Returns:
-            Transcribed text string
+        This is now a thin wrapper over `transcribe_segments`, which additionally
+        returns real per-segment timestamps for clip/mention mapping.
         """
+        segments = self.transcribe_segments(audio, sample_rate)
+        return " ".join(s["text"] for s in segments if s.get("text"))
+
+    def transcribe_segments(
+        self, audio: np.ndarray, sample_rate: int = 16000
+    ) -> List[dict]:
+        """
+        Transcribe audio with REAL per-segment timestamps (save -> end seconds).
+
+        Returned list of dicts: [{"text": str, "start": float, "end": float}].
+        Timestamps come from the segmentation the backend actually uses:
+          - mlx:     VAD-split segments (independent decoder context each; the
+                     repetition-loop mitigation), timestamps = VAD boundaries.
+          - faster:  faster-whisper's own segments carry start/end seconds.
+          - openai:  Whisper segment list when the backend exposes it, else a
+                     single whole-audio segment.
+
+        These timestamps let brand-mention detection (and clip links) point at
+        the exact second a brand/product was spoken, instead of an estimated
+        position proportional to transcript length.
+        """
+        if audio is None or len(audio) == 0:
+            return []
+
+        out: List[dict] = []
         if self._backend == "mlx":
             import mlx_whisper
-            segments = self._vad_split(audio, sample_rate)
-            all_text = []
-            for seg_start, seg_end in segments:
-                seg_audio = audio[seg_start:seg_end]
-                if len(seg_audio) < sample_rate * 0.3:
+            for seg_start, seg_end in self._vad_split(audio, sample_rate):
+                if seg_end - seg_start < sample_rate * 0.3:
                     continue
                 try:
                     result = mlx_whisper.transcribe(
-                        seg_audio,
+                        audio[seg_start:seg_end],
                         path_or_hf_repo=self.model_path,
                         language=self.language,
                         verbose=False,
                     )
-                    seg_text = result.get("text", "").strip()
-                    if seg_text:
-                        all_text.append(seg_text)
+                    seg_text = (result.get("text") or "").strip()
                 except Exception as e:
                     logger.warning(
                         "mlx-whisper segment [%.2fs-%.2fs] failed: %s — skipping",
                         seg_start / sample_rate, seg_end / sample_rate, e,
                     )
-            return " ".join(all_text) if all_text else ""
+                    continue
+                if seg_text:
+                    out.append({
+                        "text": seg_text,
+                        "start": round(seg_start / sample_rate, 3),
+                        "end": round(seg_end / sample_rate, 3),
+                    })
+            return out
         elif self._backend == "faster":
             segments_iter, _ = self.model.transcribe(
                 audio,
@@ -269,18 +289,38 @@ class SpeechToText:
                 beam_size=5,
                 vad_filter=True,
             )
-            parts = []
             for seg in segments_iter:
-                parts.append(seg.text.strip())
-            return " ".join(parts)
-        else:
-            result = self.model.transcribe(
-                audio,
-                language=self.language,
-                fp16=False,
-                verbose=False,
-            )
-            return result["text"]
+                text = (seg.text or "").strip()
+                if text:
+                    out.append({
+                        "text": text,
+                        "start": round(float(seg.start), 3),
+                        "end": round(float(seg.end), 3),
+                    })
+            return out
+
+        result = self.model.transcribe(
+            audio,
+            language=self.language,
+            fp16=False,
+            verbose=False,
+        )
+        text = (result.get("text") or "").strip()
+        if not text:
+            return []
+        segments = result.get("segments") or []
+        if segments:
+            for seg in segments:
+                seg_text = (seg.get("text") or "").strip()
+                if seg_text:
+                    out.append({
+                        "text": seg_text,
+                        "start": round(float(seg["start"]), 3),
+                        "end": round(float(seg["end"]), 3),
+                    })
+            return out
+        duration = len(audio) / sample_rate
+        return [{"text": text, "start": 0.0, "end": round(duration, 3)}]
 
     def detect_brand_mentions(
         self, transcript: str, brand_names: List[str]
@@ -364,9 +404,24 @@ class AudioEventDetector:
         cfg = BEATsConfig(checkpoint["cfg"])
         self.model = BEATs(cfg)
         self.model.load_state_dict(checkpoint["model"])
+        self.finetuned = bool(getattr(cfg, "finetuned_model", False))
+        # A fine-tuned tagging head emits 527 AudioSet probabilities; its own
+        # label_dict (index -> AudioSet mID) is authoritatively translated to
+        # display names so events carry human-readable classes for cue mapping.
+        self.label_source = "audioset_ontology"
+        if self.finetuned and checkpoint.get("label_dict"):
+            from src.layer1.audioset_labels import build_label_map
+            label_map = build_label_map(checkpoint["label_dict"])
+            if label_map:
+                self.model.label_map = label_map
+                self.label_source = "model_label_map"
         self.model.to(device)
         self.model.eval()
-        logger.info(f"BEATs loaded successfully on {device}")
+        logger.info(
+            "BEATs loaded successfully on %s (finetuned=%s, predictor_class=%s, "
+            "labels=%s)", device, self.finetuned,
+            getattr(cfg, "predictor_class", None), self.label_source,
+        )
 
     @torch.no_grad()
     def detect_events(
@@ -413,6 +468,11 @@ class AudioEventDetector:
                     or getattr(self.model, "label_set", None)
                     or getattr(self.model, "labels", None)
                     or getattr(self.model, "id2label", None)
+                    # Fall back to the canonical AudioSet ontology (527 classes
+                    # in model output order) when the model heads carries no
+                    # explicit label map but emits AudioSet probabilities
+                    # (fine-tuned BEATs tagging head).
+                    or AUDIOSET_LABELS
                 )
                 for i, prob in enumerate(probs):
                     if prob > 0.5:
@@ -427,6 +487,17 @@ class AudioEventDetector:
                             "confidence": float(prob),
                             "start_time": t_start,
                             "end_time": t_end,
+                            # Real BEATs class label from the model's own map
+                            # (or the standard AudioSet ontology fallback).
+                            "mode": "classified",
+                            "source": (
+                                "model_label_map"
+                                if getattr(self.model, "label_map", None)
+                                or getattr(self.model, "label_set", None)
+                                or getattr(self.model, "labels", None)
+                                or getattr(self.model, "id2label", None)
+                                else "audioset_ontology"
+                            ),
                         })
 
             elif features.dim() == 3:
@@ -440,6 +511,17 @@ class AudioEventDetector:
                         "confidence": confidence,
                         "start_time": t_start,
                         "end_time": t_end,
+                        # DEGRADED SIGNAL, not a real event classification: this
+                        # branch fires when the model exposes no class label map
+                        # (fallback RMS-energy heuristic). The UI renders these
+                        # with the dashed "fallback" chip treatment so a
+                        # meaningless generic "audio_activity" is never styled
+                        # as if it were a real BEATs class label.
+                        "mode": "fallback",
+                        "fallback_reason": (
+                            "RMS energy heuristic (model returned no class "
+                            "label map)"
+                        ),
                     })
 
             else:

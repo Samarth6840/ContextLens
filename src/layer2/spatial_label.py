@@ -164,9 +164,6 @@ def apply_spatial_brand_context(
         return detections
 
     out: List[List[dict]] = [list(fd) for fd in detections]
-    brand_centers: Dict[str, Tuple[float, float]] = {
-        b: _center(bb) for _, bb, b in brand_regions
-    }
 
     for f_idx, frame_dets in enumerate(detections):
         for i, det in enumerate(frame_dets):

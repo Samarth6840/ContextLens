@@ -22,11 +22,12 @@ Honesty contract (matches the rest of the pipeline):
 
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 
 from src.brand_catalog import BRAND_CATALOG
+from src.layer1.visual_embeddings import assert_embedding_version
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,12 @@ class ProductEmbeddingIndex:
         self._matrix: Optional[np.ndarray] = None  # (N, D) unit-normalized
         self._labels: List[Tuple[str, str]] = []   # (brand, path) per row
         self._built = False
+        # The embedding-space version the index vectors were produced in. Set by
+        # build() from the extractor; query() refuses to run against a live
+        # extractor that produces a different version. Guards against the
+        # DINOv2->DINOv3 silent-corruption case where shapes match (both 768)
+        # but the spaces are incompatible.
+        self.embedding_version: Optional[str] = None
 
     def _discover_images(self) -> List[Tuple[str, Path]]:
         """Return [(brand, image_path)] by scanning for reference images.
@@ -129,6 +136,9 @@ class ProductEmbeddingIndex:
             self._built = True
             self._matrix = None
             self._labels = []
+            self.embedding_version = getattr(
+                embed_extractor, "embedding_version", None
+            )
             return 0
 
         # Load + embed in batches (reuse PIL path from the extractor).
@@ -153,6 +163,9 @@ class ProductEmbeddingIndex:
             self._built = True
             self._matrix = None
             self._labels = []
+            self.embedding_version = getattr(
+                embed_extractor, "embedding_version", None
+            )
             return 0
 
         matrix = np.concatenate(all_embs, axis=0)
@@ -165,6 +178,12 @@ class ProductEmbeddingIndex:
         self._matrix = matrix.astype(np.float32)
         self._labels = batch_labels
         self._built = True
+        # Record WHICH embedding model produced these vectors so a later query
+        # from a different-space extractor fails loudly instead of returning
+        # plausible-but-wrong nearest neighbors.
+        self.embedding_version = getattr(
+            embed_extractor, "embedding_version", None
+        )
         logger.info(
             "Product index built: %d reference image(s) for %d brand(s)",
             len(self._labels),
@@ -179,10 +198,12 @@ class ProductEmbeddingIndex:
     def query(
         self,
         frame_embeddings: np.ndarray,
-        frame_indices: List[int],
+        frame_indices,
         video_fps: float = 0.0,
         top_k: int = 1,
         similarity_threshold: float = 0.80,
+        video_stride: int = 1,
+        embedding_version: Optional[str] = None,
     ) -> List[dict]:
         """Run cosine NN search for each frame embedding against the index.
 
@@ -193,12 +214,24 @@ class ProductEmbeddingIndex:
             video_fps: for converting frame index -> timestamp.
             top_k: how many nearest brand matches to return per frame.
             similarity_threshold: minimum cosine similarity for a match to count.
+            video_stride: source-frame stride between sampled frames. Sampled
+                          index i maps to source frame i*stride, so timestamps
+                          reflect the real source position (not the sampled
+                          position).
+            embedding_version: the version of the live embedding model that
+                          produced `frame_embeddings`. Must equal the version the
+                          index was built with; a mismatch is a hard error (it
+                          means comparing vectors from incompatible spaces).
 
         Returns:
             List of match dicts:
                 {brand, similarity, frame_index, timestamp, reference_image}
             Empty list when the index is empty (fail-closed) or nothing clears
             the threshold.
+
+        Raises:
+            ValueError: if `embedding_version` is provided and does not match the
+                        version the index was built with.
         """
         if not self._built:
             logger.warning(
@@ -207,6 +240,9 @@ class ProductEmbeddingIndex:
             return []
         if self._matrix is None or len(self._labels) == 0:
             return []
+        assert_embedding_version(
+            self.embedding_version, embedding_version, "ProductEmbeddingIndex"
+        )
         if frame_embeddings is None or len(frame_embeddings) == 0:
             return []
 
@@ -220,11 +256,12 @@ class ProductEmbeddingIndex:
                 if sim < similarity_threshold:
                     continue
                 brand, ref_path = self._labels[rank_idx]
+                src_idx = int(frame_idx) * max(1, int(video_stride))
                 matches.append({
                     "brand": brand,
                     "similarity": round(sim, 4),
                     "frame_index": int(frame_idx),
-                    "timestamp": round(frame_idx / video_fps, 1) if video_fps else int(frame_idx),
+                    "timestamp": round(src_idx / video_fps, 1) if video_fps else src_idx,
                     "reference_image": ref_path,
                 })
         return matches

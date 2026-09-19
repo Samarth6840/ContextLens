@@ -1,4 +1,4 @@
-"""Production gunicorn configuration (gunicorn wsgi:app -c gunicorn.conf.py).
+"""Production gunicorn configuration (gunicorn wsgi:application -c gunicorn.conf.py).
 
 Every knob is driven by environment so the same config serves dev and prod.
 The Flask app is thread-safe (per-model threading locks in the pipeline), so the

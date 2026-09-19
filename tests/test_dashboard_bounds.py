@@ -14,7 +14,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server import _validate_dashboard_bounds  # noqa: E402
+from server import _validate_dashboard_bounds, _enrich_recommendations  # noqa: E402
 
 
 def _dashboard(num_frames, scenes, products=None, ads=None, open_set=None):
@@ -72,3 +72,30 @@ def test_valid_dashboard_passes_unchanged():
     )
     out = _validate_dashboard_bounds(dash, 60)
     assert out is dash
+
+
+def test_enrich_recommendations_adds_catalog_contact():
+    recs = [{"brand": "NIKE", "type": "DIRECT", "score": 0.9}]
+    out = _enrich_recommendations(recs)
+    assert out[0]["contact_email"] == "partnerships@nike.com"
+    assert out[0]["contact_verified"] is False
+    assert out[0]["appearances"] == 0
+    # Original fields preserved, not mutated.
+    assert out[0]["type"] == "DIRECT" and out[0]["score"] == 0.9
+
+
+def test_enrich_recommendations_preserves_existing_appearances():
+    recs = [{"brand": "NIKE", "appearances": 4}]
+    out = _enrich_recommendations(recs)
+    assert out[0]["appearances"] == 4  # not overwritten to 0
+
+
+def test_enrich_recommendations_handles_unknown_and_malformed():
+    out = _enrich_recommendations([
+        {"brand": "NOT_A_CATALOG_BRAND"},
+        "junk",
+        None,
+    ])
+    assert out[0]["contact_email"] is None
+    assert out[0]["appearances"] == 0
+    assert "junk" in out and None in out

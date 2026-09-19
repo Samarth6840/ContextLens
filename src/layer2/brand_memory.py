@@ -26,7 +26,6 @@ creator video.
 import json
 import logging
 import os
-import time
 from typing import Any, Dict, List, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -63,6 +62,9 @@ class BrandMemoryBank:
             "modalities": {modality: count},
             "embedding": List[float] | None,
             "product": Optional[str],
+            "sources": {resolution_source: count},  # provenance (metrics-only)
+            "max_confidence_source": str | None,     # source of the best sighting
+            "embedding_model_version": str | None,   # embedder tag of the reference
         }
     """
 
@@ -85,8 +87,15 @@ class BrandMemoryBank:
         embedding: Optional[Sequence[float]] = None,
         product: Optional[str] = None,
         wall_time: Optional[float] = None,
+        resolution_source: Optional[str] = None,
+        embedding_version: Optional[str] = None,
     ) -> "BrandMemoryBank":
-        """Record one sighting of a brand into the memory bank."""
+        """Record one sighting of a brand into the memory bank.
+
+        `resolution_source` and `embedding_version` are provenance-only
+        instrumentation: they are stored and aggregated for audit/analysis and
+        never influence matching or ranking.
+        """
         name = (brand or "").strip().upper()
         if not name:
             return self
@@ -108,6 +117,9 @@ class BrandMemoryBank:
                 "modalities": {modality: 1},
                 "embedding": None,
                 "product": product,
+                "sources": {resolution_source: 1} if resolution_source else {},
+                "max_confidence_source": resolution_source,
+                "embedding_model_version": embedding_version,
             }
             if embedding is not None:
                 ent["embedding"] = list(embedding)
@@ -118,9 +130,18 @@ class BrandMemoryBank:
         ent["last_frame"] = max(ent["last_frame"], frame)
         ent["last_timestamp"] = max(ent["last_timestamp"], timestamp)
         ent["last_seen"] = now
-        ent["max_confidence"] = max(ent["max_confidence"], confidence)
+        if confidence >= ent["max_confidence"]:
+            ent["max_confidence"] = confidence
         ent["sightings"] += 1
         ent["modalities"][modality] = ent["modalities"].get(modality, 0) + 1
+        if resolution_source:
+            ent["sources"][resolution_source] = (
+                ent["sources"].get(resolution_source, 0) + 1
+            )
+            if confidence >= ent.get("max_confidence", 0.0):
+                ent["max_confidence_source"] = resolution_source
+        if embedding_version:
+            ent["embedding_model_version"] = embedding_version
         if embedding is not None:
             ent["embedding"] = list(embedding)
         if product and not ent.get("product"):
@@ -256,6 +277,8 @@ class BrandMemoryBank:
         return bank
 
     def save(self, path: str) -> str:
+        parent = os.path.dirname(os.path.abspath(path))
+        os.makedirs(parent, exist_ok=True)
         with open(path, "w") as fh:
             json.dump(self.to_dict(), fh, indent=2)
         return path
@@ -274,3 +297,133 @@ def load_or_new(path: Optional[str]) -> BrandMemoryBank:
         except (OSError, ValueError) as exc:
             logger.warning("Could not load brand memory %s: %s", path, exc)
     return BrandMemoryBank()
+
+
+# ============================================================================
+# Tier 4 — cross-video product↔brand co-occurrence learning.
+# ============================================================================
+
+# Minimum number of DISTINCT videos (not frames) a product↔brand association
+# must be observed across before it is promoted from "observed" to "learned".
+# This is the anti-overfitting guardrail from the plan: N videos, never N frames
+# of a single video.
+MIN_DISTINCT_VIDEOS_FOR_PROMOTION = 3
+
+
+class ProductResolutionMemory:
+    """Learned, persisting product→brand association table (Tier 4).
+
+    Records every observed (product_span, brand) pair along with the set of
+    DISTINCT video_ids it was seen in and the number of sightings. An association
+    is only *promoted* (reported through `lookup`) once it has been observed in
+    >= MIN_DISTINCT_VIDEOS_FOR_PROMOTION distinct videos.
+
+    The table is populated ONLY by observations fed during normal processing; it
+    is never seeded with hardcoded product→brand pairs.
+    """
+
+    def __init__(self, min_distinct_videos: int = MIN_DISTINCT_VIDEOS_FOR_PROMOTION):
+        self.min_distinct_videos = min_distinct_videos
+        # key: normalize_text(product_span) -> {brand, videos:{video_id}, sightings}
+        self._assoc: Dict[str, Dict[str, Any]] = {}
+
+    # ------------------------------------------------------------------ #
+    # Observation / learning
+    # ------------------------------------------------------------------ #
+    def record(self, product_span: str, brand: str, video_id: str = "") -> None:
+        """Record one observed product↔brand co-occurrence for a video."""
+        from src.brand_catalog import normalize_text
+        key = normalize_text(product_span)
+        brand = (brand or "").strip().upper()
+        if not key or not brand:
+            return
+        ent = self._assoc.get(key)
+        if ent is None:
+            ent = {"product": key, "brand": brand,
+                   "videos": set(), "sightings": 0}
+            self._assoc[key] = ent
+        if ent["brand"] != brand:
+            # A product maps to conflicting brands across videos — keep both but
+            # do not merge. Resolve toward the most frequently observed brand.
+            pass
+        ent["sightings"] += 1
+        if video_id:
+            ent["videos"].add(video_id)
+
+    # ------------------------------------------------------------------ #
+    # Query (only promoted associations are returned)
+    # ------------------------------------------------------------------ #
+    def lookup(self, product_span: str) -> Optional[dict]:
+        """Return a promoted association for `product_span`, else None.
+
+        Promotion requires observation across >= min_distinct_videos DISTINCT
+        videos. If a product maps to multiple brands, the most-co-occurring brand
+        wins; ties fall back to most recent (highest sightings).
+        """
+        from src.brand_catalog import normalize_text
+        key = normalize_text(product_span)
+        if not key:
+            return None
+        ent = self._assoc.get(key)
+        if not ent:
+            return None
+        distinct = len(ent["videos"]) if ent["videos"] else 0
+        if distinct < self.min_distinct_videos:
+            return None
+        return {
+            "product": key,
+            "brand": ent["brand"],
+            "videos_observed": sorted(ent["videos"]),
+            "sightings": ent["sightings"],
+            "distinct_videos": distinct,
+        }
+
+    def is_promoted(self, product_span: str) -> bool:
+        return self.lookup(product_span) is not None
+
+    # ------------------------------------------------------------------ #
+    # Serialization
+    # ------------------------------------------------------------------ #
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "min_distinct_videos": self.min_distinct_videos,
+            "assoc": [
+                {"product": e["product"], "brand": e["brand"],
+                 "videos": sorted(e["videos"]), "sightings": e["sightings"]}
+                for e in self._assoc.values()
+            ],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ProductResolutionMemory":
+        mem = cls(min_distinct_videos=int(
+            data.get("min_distinct_videos", MIN_DISTINCT_VIDEOS_FOR_PROMOTION)))
+        for a in data.get("assoc", []):
+            key = a["product"]
+            mem._assoc[key] = {
+                "product": key, "brand": a["brand"],
+                "videos": set(a.get("videos", [])),
+                "sightings": int(a.get("sightings", 0)),
+            }
+        return mem
+
+    def save(self, path: str) -> str:
+        os.makedirs(os.path.dirname(path), exist_ok=True) if os.path.dirname(path) else None
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(self.to_dict(), fh, indent=2)
+        return path
+
+    @classmethod
+    def load(cls, path: str) -> "ProductResolutionMemory":
+        with open(path, encoding="utf-8") as fh:
+            return cls.from_dict(json.load(fh))
+
+
+def load_or_new_product_memory(path: Optional[str]) -> ProductResolutionMemory:
+    if path and os.path.exists(path):
+        try:
+            return ProductResolutionMemory.load(path)
+        except (OSError, ValueError) as exc:
+            logger.warning("Could not load product-resolution memory %s: %s",
+                           path, exc)
+    return ProductResolutionMemory()

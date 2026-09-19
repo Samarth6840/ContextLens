@@ -1,0 +1,110 @@
+[
+  {
+    "video_id": "easy_ADIDAS",
+    "gt_brand": "ADIDAS",
+    "difficulty": "easy",
+    "visible_brand": true,
+    "logo": true,
+    "ocr": true,
+    "speech": false,
+    "product": true,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/easy_ADIDAS.mp4"
+  },
+  {
+    "video_id": "easy_BMW",
+    "gt_brand": "BMW",
+    "difficulty": "easy",
+    "visible_brand": true,
+    "logo": true,
+    "ocr": true,
+    "speech": false,
+    "product": true,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/easy_BMW.mp4"
+  },
+  {
+    "video_id": "small_BMW",
+    "gt_brand": "BMW",
+    "difficulty": "small",
+    "visible_brand": true,
+    "logo": true,
+    "ocr": true,
+    "speech": false,
+    "product": true,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/small_BMW.mp4"
+  },
+  {
+    "video_id": "blur_BMW",
+    "gt_brand": "BMW",
+    "difficulty": "blur",
+    "visible_brand": true,
+    "logo": true,
+    "ocr": true,
+    "speech": false,
+    "product": true,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/blur_BMW.mp4"
+  },
+  {
+    "video_id": "conflict_BMW_vs_PEPSI",
+    "gt_brand": "BMW",
+    "difficulty": "conflict",
+    "visible_brand": true,
+    "logo": true,
+    "ocr": true,
+    "speech": false,
+    "product": true,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/conflict_BMW_vs_PEPSI.mp4"
+  },
+  {
+    "video_id": "negative_NEG",
+    "gt_brand": null,
+    "difficulty": "negative",
+    "visible_brand": false,
+    "logo": false,
+    "ocr": false,
+    "speech": false,
+    "product": false,
+    "audio_event": false,
+    "timestamps": [
+      [
+        0.0,
+        1.0
+      ]
+    ],
+    "video_path": "fusion_eval/out/negative_NEG.mp4"
+  }
+]

@@ -8,6 +8,33 @@ layer1:
     model: "yolov8x.pt"  # YOLOv8x — generic scene objects (COCO classes)
     confidence_threshold: 0.25
     iou_threshold: 0.45
+    # Open-vocabulary scene object detection (zero-shot, ADDITIONAL pass — never
+    # a replacement for the COCO pass). YOLO-World promotes curated product
+    # labels (wristwatch, wireless earbuds, sneaker, ...) that the fixed COCO
+    # vocabulary cannot represent — a wristwatch is misread as 'cell phone'/
+    # 'person'. On high-IoU overlap the curated label WINS over the COCO label
+    # for that region (merge rule, not a shape/aspect-ratio heuristic), and
+    # every detection is tagged detection_source ("coco"|"open_vocab").
+    # Provenance tags are informational and never influence matching.
+    open_vocab:
+      enabled: true
+      model: "yolov8s-worldv2.pt"  # zero-shot weights (present at repo root)
+      confidence_threshold: 0.25
+      min_merge_iou: 0.4     # IoU at which the curated label replaces the COCO label
+      max_frames: 30         # cap on open-vocab frames (scene-change keyframes)
+      text_queries:
+        - "wristwatch"
+        - "smartwatch"
+        - "digital watch"
+        - "wireless earbuds"
+        - "earbuds with charging case"
+        - "headphones"
+        - "wall clock"
+        - "sneaker"
+        - "fitness tracker"
+        - "smart ring"
+        - "sunglasses"
+        - "smartphone"
 
   logo_detection:
     # NOTE: The RF-DETR backend is NOT wired into the pipeline loader (the only
@@ -172,33 +199,71 @@ layer1:
 
   # BEATs audio event detector (supplementary)
   audio_events:
-    checkpoint: "BEATs_iter3_plus_AS2M.pt"
+    # Fine-tuned 527-class AudioSet tagging head (sigmoid probabilities per
+    # chunk) — real per-class events for cue mapping, unlike the feature-
+    # extractor checkpoint. Downloaded by scripts/download_models.py from the
+    # HuggingFace mirror (microsoft UNILM Azure links are unreliable); the
+    # pipeline degrades gracefully to the feature extractor when absent.
+    checkpoint: "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
     sample_rate: 16000
     embedding_dim: 256  # 128 mel bins × 2 stats (mean + std)
 
   visual_embeddings:
-    model: "facebook/dinov2-base"
+    model: "facebook/dinov3-vitb16-pretrain-lvd1689m"
     output_dim: 768
 
   # Product-catalog visual search (Phase 2.5): DINOv2 frame embeddings are run
   # through cosine nearest-neighbor search against a reference index of brand
   # product/logo images. FAILS CLOSED: with no reference images in reference_dir
   # the index stays empty and visual_product_match evidence is 0 — no fabricated
-  # matches. The reference set is benchmark/reference_logos, laid out either as
-  # one subdir per canonical catalog brand OR flat '<BRAND>_<n>.png' files.
-  # NOTE: previously pointed at 'benchmark/product_logos' (a dir that does not
-  # exist), so the index silently failed closed and visual_product_match was
-  # always 0 even though real brand reference images were on disk.
+  # matches. The reference set is benchmark/reference_logos_bank/reference (the
+  # per-brand logo.dev bank, 16 catalog brands / ~500 images) laid out one
+  # subdir per canonical catalog brand; the index falls back to the flat legacy
+  # benchmark/reference_logos ('<BRAND>_<n>.png', 4 brands) when the bank is
+  # absent.
   product_index:
-    reference_dir: "benchmark/reference_logos"
+    reference_dir: "benchmark/reference_logos_bank/reference"
     top_k: 1
-    similarity_threshold: 0.80
+    # DINOv2 cosine threshold for product-catalog matching. 0.80 is very
+    # strict — it requires near-identical visual appearance between the video
+    # frame and the reference product image. Lowering to 0.65 allows matching
+    # products that look similar but aren't pixel-identical (different angle,
+    # lighting, product variant). Still rejects random matches (noise clusters
+    # below 0.5).
+    similarity_threshold: 0.65
+
+  # Tiered product→brand resolution (Layer 2b). Replaces the (rejected)
+  # practice of hardcoding product/device names as brand aliases: a product
+  # name read on screen or spoken (e.g. "Mac Mini", "Z Fold 8 Ultra", "पिक्सेर")
+  # resolves to its parent brand via Wikidata (Tier 2) or cross-video learned
+  # co-occurrence (Tier 4), with a low-trust Qwen3-VL fallback (Tier 3).
+  # Every resolution records resolution_tier + source; provenance is additive
+  # and never influences matching. Fails closed by default (no API key needed).
+  product_resolution:
+    enable_speech: true          # resolve product names in ASR transcripts too
+    enable_ocr_evidence: true    # route full-frame OCR through resolver for ocr_hit
+    endpoint: "https://query.wikidata.org/sparql"
+    cache_path: "data/product_resolution_cache.json"   # auditable local cache
+    memory_path: "data/product_resolution_memory.json" # Tier-4 learned table
+    min_interval_sec: 1.0        # rate-limit between Wikidata queries
+    timeout_sec: 10.0
+    min_plausibility: 0.5        # boost gate before spending Tier 2/3 queries
+    enable_qwen: false           # Tier 3 (requires local Qwen weights)
+    qwen_max_calls_per_video: 10 # Tier-3 budget gate
+    min_distinct_videos: 3       # Tier-4 promotion threshold (>=3 distinct videos)
 
   ocr:
-    lang: "en"
+    # OCR script/language. Default now targets the stress-test domain: a Hindi
+    # broadcast with mixed Devanagari + Latin on-screen text (tickers, product
+    # labels). "hi" is passed to both OCR backends (PaddleOCR multi-language and
+    # the Free.ai cloud OCR fallback); index-2-script coverage means Devanagari
+    # AND Latin wordmarks both get read, so a Devanagari brand alias still
+    # resolves to a catalog brand.
+    lang: "hi"
     use_angle_cls: True
     det_db_thresh: 0.3
-    rec_batch_num: 6
+    rec_batch_num: 64
+    cpu_threads: 10          # physical core count — PaddleOCR runs on CPU
     max_frames: 30  # max frames to run OCR on (sampled uniformly from detections)
 
   # Free.ai API (OCR, STT, Vision) — optional cloud fallback.
@@ -259,16 +324,33 @@ layer2b:
     audio_event:
       weight: 0.10
       status: implemented  # BEATs audio-event -> brand-cue mapping
-    # Provisionally scaffolded legacy/next sources (excluded from scoring)
+    # Scene context evidence — derived from audio-event RMS energy and event
+    # density. When BEATs detects non-speech audio activity (music, jingles,
+    # ambient cues), the mean confidence × count factor provides a scene-level
+    # signal that ad-like or brand-relevant audio is present. Capped at 0.4
+    # by _audio_branding_strength so it never dominates direct visual/speech
+    # proof; the raw scene_context strength (before cap) reaches ~0.9 on
+    # videos with sustained audio events.
     scene_context:
-      weight: 0.04
-      status: scaffolded  # voxtral realtime scene context (not wired)
+      weight: 0.05
+      status: implemented  # audio-event RMS energy + event density
     product_retrieval:
       weight: 0.0
       status: scaffolded  # reserved for product-retrieval evidence
 
   aggregation: "weighted_sum"  # weighted_sum | learned_calibration | noisy_or
   min_evidence_threshold: 0.55
+
+  # Compiled multimodal fusion (candidate-centric, dependency-aware).
+  # Replaces naive weighted-sum with temporal grounding + dependency discount
+  # + agreement bonus + conflict/abstain verdict + temperature-scaled prob.
+  fusion:
+    enabled: True
+    temperature: 1.0        # calibration; >1 flattens probabilities
+    time_bucket_seconds: 2.0  # correlation window for the dependency discount
+    agreement_bonus: 0.30   # bonus on cross-modal temporal agreement
+    accept: 0.30            # below this, top candidate -> low_support verdict
+    margin_min: 0.15        # top-vs-2nd margin below this -> ambiguous verdict
 
 layer2c:
   # Temporal memory / cross-scene reasoning (brand entity timeline).
@@ -279,7 +361,7 @@ layer2c:
   # ("this phone" / "our foldable") that contain no brand token are resolved
   # against that bank via recency-weighted confidence + optional embedding sim.
   memory_enabled: True
-  memory_path: "config/brand_memory.json"  # relative to repo/config parent dir
+  memory_path: "brand_memory.json"  # resolved relative to repo/config dir
 
   # Qwen3-VL timeline reasoning enhancement
   vl_reasoning: True  # Enable Qwen3-VL-based temporal brand reasoning
@@ -326,19 +408,40 @@ open_set:
   # Every tunable lives here — the code reads config and fails closed if any
   # key is missing. There are no hardcoded fallback values in src/openset.py.
   enabled: true
-  # backend: google_vision_web | bing_visual | serpapi | browser_grounded
+  # backend: google_vision_web | bing_visual | serpapi | browser_grounded | gemini_grounded
   # browser_grounded drives a real reverse-image search through the agent-browser
-  # CLI (no paid API key required) — the recommended free, keyless default. It
-  # is active whenever the agent-browser binary is on PATH.
+  # CLI (no paid API key required). gemini_grounded uses Google Gemini's free
+  # tier with the built-in google_search tool (real, citable results; needs a
+  # free GEMINI_API_KEY from aistudio.google.com). The shipped default is
+  # gemini_grounded — free and returns grounded sources — with browser_grounded
+  # kept as the keyless fallback when agent-browser is installed.
   # Keyed backends unlock via their env var in .env (see .env.example):
   #   google_vision_web -> GOOGLE_CLOUD_VISION_API_KEY
   #   bing_visual       -> BING_VISUAL_SEARCH_KEY
   #   serpapi           -> SERPAPI_KEY (+ public image host)
-  backend: "browser_grounded"
+  #   gemini_grounded   -> GEMINI_API_KEY (or ~/.gemini_key; model via GEMINI_MODEL)
+  backend: "gemini_grounded"
   # Only logo detections with REAL model confidence at/above this threshold
   # become candidates — this is the documented cost guard against calling the
   # (billable) reverse-image API on the detector's confidence noise floor.
+  # REVERTED 0.10 → 0.30 and 12 → 5 pending a labeled precision/recall
+  # comparison. The relaxation contradicted the documented precision-over-recall
+  # design principle (ARCHITECTURE_AND_RESEARCH.md §6, §10) and shipped without
+  # benchmark data; it must earn its way back with evidence, not demo vibes.
   min_logo_confidence: 0.30
+  # Editorial search-crop gates. A crop is only ever sent to the (billable)
+  # reverse-image API if it is large enough and shaped like a logo, not like a
+  # full-width news/broadcast strap. Both gates also surface their rejected
+  # crops (with the exact pixel dims and reason) in the open-set block so a
+  # skipped frame is never a silent blank. Sourced from the real stress-video
+  # audit: 985px² text crop (frame 10), 58 365px² TSMC title (kept), 81 658px²
+  # ASUS/MSI strap at aspect 3.35, and 75 872px² CNBC strap at aspect 4.31 —
+  # so min_crop_area 3000 + max_crop_aspect 3.0 keeps only ABOVE-the-noise,
+  # logo-shaped crops.
+  # minimum crop pixel area (w*h) to be searchable
+  min_crop_area: 3000
+  # maximum bbox/crop aspect (w/h); wider = ticker/strap, not a searchable logo
+  max_crop_aspect: 3.0
   # Hard cap on reverse-image + logo.dev calls per video.
   max_candidates_per_video: 5
   crop_cache_dir: "static/openset_crops"
@@ -423,6 +526,14 @@ ui:
   outreach_enabled: true
   outreach_reason: "OUTREACH ENABLED — DRAFT EMAIL LIVE (requires LOGO_DEV_SECRET_KEY for brand verification)"
 
+  # Gemini-grounded brand email lookup: for each brand detected ON SCREEN, ask
+  # Gemini (google_search grounding) for the brand's official public contact and
+  # HR/careers addresses as published on real pages. Fail-closed: ON without a
+  # GEMINI_API_KEY yields no emails (catalog placeholders stay), and an address
+  # is only surfaced if it came with real grounding evidence (never invented).
+  # Emails found this way are always labeled UNVERIFIED in the UI.
+  gemini_email_lookup: true
+
 auth:
   # Phase 3 SaaS dashboard login. DEFAULT OFF so the standalone/desktop server
   # and existing tests behave exactly as before. When enabled, the /api/jobs,
@@ -445,5 +556,13 @@ evaluation:
   audio_sample_rate: 16000
   video_frame_rate: 1  # frames per second to sample
   max_frames: 300  # absolute maximum frames loaded (prevents OOM on long videos)
-  max_audio_seconds: 600  # truncate audio beyond this (prevents OOM from 9+ GiB buffers)
-  batch_size: 8
+  # NOTE: max_frames caps sample DENSITY, not coverage — load_video already
+  # strides uniformly across the FULL source duration when the video is longer
+  # than max_frames/frame_rate seconds, so the tail is never silently dropped.
+  # Audio is NOT truncated (null): a 700s broadcast produces ~45MB of 16kHz
+  # float32 audio, and the previous hard 600s `-t` cut ~100s of genuine audio
+  # off a real stress video. ffmpeg wall-clock timeout still guards runaway
+  # decodes (extract_audio derives it from max_duration when not set).
+  max_audio_seconds: null
+  extract_audio_timeout: null  # ffmpeg wall-clock timeout (sec); null derives from max_audio_seconds
+  batch_size: 32

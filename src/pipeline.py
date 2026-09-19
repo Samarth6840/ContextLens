@@ -11,18 +11,20 @@ Models are lazy-loaded on first use to keep startup fast.
 import logging
 import math
 import os
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import yaml
 
 from src.brand_catalog import find_brand_mentions, match_brand
 from src.layer2.brand_resolver import (
+    UNKNOWN_BRAND,
     BrandResolver,
     TemporalBrandSmoother,
     brand_evidence_from_timeline,
@@ -31,6 +33,12 @@ from src.layer2.brand_resolver import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Evidence-quality ceiling for a direct brand-alias OCR read. Mirrors the OCR
+# resolution_quality the resolver stamps on wordmark reads (0.90) and the
+# product resolver's TIER_DIRECT quality; raw optical box confidence on
+# incidental on-screen text must never outrank this attribution ceiling.
+_OCR_RESOLUTION_QUALITY = 0.90
 
 
 def probe_hardware() -> dict:
@@ -89,6 +97,241 @@ def _split_sentences(text: str):
     return [p for p in parts if p.strip()]
 
 
+def _timestamp_mentions(
+    mentions: List[dict],
+    segments: List[dict],
+) -> List[dict]:
+    """Attach REAL per-segment timestamps to transcript mentions.
+
+    The ASR backend returns timed segments ({text, start, end} seconds). Each
+    mention's character `position` in the joined transcript is mapped back to
+    the segment that contains it, and the mention's position within that
+    segment's text is proportionally placed inside the segment's real time
+    span. Mentions with no containing segment keep start_time/end_time unset
+    so callers fall back to the (proportional) legacy estimate.
+
+    Never fabricates timing: if there are no timed segments, mentions pass
+    through unmodified.
+    """
+    if not mentions or not segments:
+        return [dict(m) for m in mentions]
+
+    # Reconstruct the joined-transcript character offsets of each segment,
+    # mirroring `" ".join(...)` (single space separator).
+    spans = []
+    cursor = 0
+    for seg in segments:
+        seg_text = seg.get("text", "") or ""
+        spans.append((cursor, cursor + len(seg_text), seg))
+        cursor += len(seg_text) + 1  # the joining space
+
+    out = []
+    for m in mentions:
+        m = dict(m)
+        pos = int(m.get("position", 0))
+        chosen = None
+        for start_char, end_char, seg in spans:
+            if start_char <= pos < end_char:
+                chosen = (start_char, end_char, seg)
+                break
+        if chosen is None:
+            # Position fell in a gap (e.g. the joining space between segments):
+            # attribute to the nearest non-empty segment.
+            nonempty = [s for s in spans if s[1] > s[0]]
+            if nonempty:
+                chosen = min(
+                    nonempty, key=lambda s: abs(pos - s[0]),
+                )
+        if chosen:
+            start_char, end_char, seg = chosen
+            seg_text = seg.get("text", "") or ""
+            span_len = max(1, len(seg_text))
+            seg_start = float(seg.get("start", 0.0))
+            seg_end = float(seg.get("end", seg_start))
+            seg_span = max(0.0, seg_end - seg_start)
+            start = seg_start + ((pos - start_char) / span_len) * seg_span
+            fraction = len(m.get("brand", "") or "") / span_len
+            end = min(seg_end, start + fraction * seg_span)
+            m["start_time"] = round(start, 2)
+            m["end_time"] = round(max(start + 0.5, end), 2)
+        out.append(m)
+    return out
+
+
+def _timestamp_product_resolutions(
+    product_resolutions: List[dict],
+    brand_mentions: List[dict],
+) -> List[dict]:
+    """Propagate REAL speech timestamps from timed brand mentions to the
+    product->brand resolutions that produced them.
+
+    The speech path resolves product names in the transcript ("Z Fold 8",
+    "Mac Mini") into brands; each resolved mention is also appended to
+    `brand_mentions` and gets a real per-segment start_time/end_time from
+    `_timestamp_mentions`. This helper copies those times (plus the matching
+    sampled frame) onto the corresponding product_resolutions entries, matched
+    by brand + product span, so the dashboard can render PLAY-@-time clip chips.
+    Entries with no matching timed mention keep start_time/end_time unset
+    (fail-closed: never fabricated). The input list is not mutated.
+    """
+    if not product_resolutions:
+        return []
+    timed = {}
+    for m in brand_mentions:
+        if m.get("start_time") is None:
+            continue
+        key = (
+            str(m.get("brand", "")).upper(),
+            str(m.get("product_span") or m.get("brand", "")).upper(),
+        )
+        if key not in timed:
+            timed[key] = m
+    out = []
+    for r in product_resolutions:
+        r = dict(r)
+        key = (
+            str(r.get("brand", "")).upper(),
+            str(r.get("product_span") or r.get("span") or r.get("brand", "")).upper(),
+        )
+        m = timed.get(key)
+        if m and r.get("start_time") is None:
+            r["start_time"] = m.get("start_time")
+            r["end_time"] = m.get("end_time")
+            r["frame_index"] = m.get("frame_index")
+        out.append(r)
+    return out
+
+
+def _collect_ocr_product_resolutions(
+    ocr_results: List[List[dict]],
+    resolver: Any,
+    match_brand_fn: Any,
+    max_distinct: int = 30,
+    max_frames: int = 20,
+) -> List[dict]:
+    """Collect real product->brand resolutions read on screen (OCR), cache-only.
+
+    Mirrors the ocr_hit evidence path (`live=False`): OCR boxes are noisy and
+    incidental, so they never trigger live Wikidata queries or Qwen VLM calls —
+    only Tier-1 catalog matches / Tier-4 learned memory / the Wikidata cache
+    resolve. Each distinct (brand, span) resolution records the first sampled
+    frame it was read on plus up to `max_frames` total frames where it appeared;
+    real timestamps are derived downstream from the video stride/fps. Returns []
+    (never fabricates) when nothing resolves or no OCR text is present. Direct
+    brand-name matches (`match_brand`) are skipped — plain brand OCR is already
+    surfaced as products/ads, not a product resolution.
+    """
+    if not ocr_results or resolver is None:
+        return []
+    found: Dict[tuple, dict] = {}
+    for frame_idx, frame_ocr in enumerate(ocr_results):
+        if not frame_ocr:
+            continue
+        for result in frame_ocr:
+            text = (result.get("text") or "").strip()
+            if not text or match_brand_fn(text):
+                continue
+            try:
+                resolutions = resolver.resolve(text, live=False)
+            except Exception:  # noqa: BLE001 — never crash the pipeline
+                continue
+            for r in resolutions:
+                if not r.get("brand"):
+                    continue
+                key = (
+                    str(r["brand"]).upper(),
+                    str(r.get("span") or r.get("product_span") or "").upper(),
+                )
+                entry = found.get(key)
+                if entry is None:
+                    if len(found) >= max_distinct:
+                        continue
+                    entry = {
+                        "span": r.get("span"),
+                        "normalized": r.get("normalized"),
+                        "brand": r["brand"],
+                        "resolution_tier": r.get("resolution_tier"),
+                        "source": r.get("source"),
+                        "confidence": r.get("confidence"),
+                        "resolution_quality": r.get("resolution_quality"),
+                        "product_span": r.get("product_span"),
+                        "meta": r.get("meta"),
+                        "mode": "ocr",
+                        "frame_index": frame_idx,
+                        "frames": [],
+                    }
+                    found[key] = entry
+                if len(entry["frames"]) < max_frames:
+                    entry["frames"].append(frame_idx)
+    return list(found.values())
+
+
+def resolver_acceptance_canary(resolved_logos: List[List[dict]]) -> dict:
+    """Compute the brand-resolver acceptance rate for a video.
+
+    This is the canary metric for the brand-attribution re-enable: it measures
+    what fraction of logo detections the resolver actually NAMED a real brand
+    versus leaving as UNKNOWN (crop-OCR miss, retrieval mismatch, below-threshold
+    class). Watch it across changes — if it jumps sharply after a threshold or
+    config change, that is the signal the relaxed settings are feeding garbage
+    into a pipeline that now surfaces it to users (see ARCHITECTURE_AND_RESEARCH
+    precision-over-recall design principle).
+
+    Returns a dict with totals + acceptance_rate. Never returns zero-division;
+    an input with no detections yields total=0, resolved=0, rate=0.0 (honest).
+    """
+    total = 0
+    resolved = 0
+    for frame_dets in resolved_logos or []:
+        for det in frame_dets:
+            total += 1
+            brand = det.get("brand")
+            if brand and _normalize_brand_sentinel(brand) != UNKNOWN_BRAND:
+                resolved += 1
+    rate = round(resolved / total, 4) if total else 0.0
+    return {
+        "total_logo_detections": int(total),
+        "resolved": int(resolved),
+        "unresolved": int(total - resolved),
+        "acceptance_rate": rate,
+    }
+
+
+def _normalize_brand_sentinel(name: str) -> str:
+    return (name or "").strip().upper()
+
+
+def _count_resolved_logos(resolved_logos: List[List[dict]]) -> int:
+    """Count log detections that ended up with a resolved brand (metrics-only)."""
+    return sum(
+        1
+        for frame_dets in resolved_logos
+        for det in frame_dets
+        if det.get("brand")
+    )
+
+
+def temporal_corroboration(
+    resolved_before: int, resolved_after: int
+) -> dict:
+    """How many of the final resolved logos NEEDED multi-frame agreement.
+
+    Pure instrumentation over the resolver -> temporal-smoothing transition:
+    the difference after smoothing is exactly the back-fill the stability fix
+    adds, and the rate is the share of final resolutions that did NOT resolve
+    independently on a single frame. Read as "how much of our answer depends on
+    corroboration" — a drop in resolution quality (e.g. after an embedder swap)
+    shows up here before precision does.
+    """
+    agreed = max(0, resolved_after - resolved_before)
+    return {
+        "resolved_without_agreement": int(resolved_before),
+        "resolved_final": int(resolved_after),
+        "needed_multi_frame_agreement": int(agreed),
+        "corroboration_rate": round(agreed / resolved_after, 4) if resolved_after else 0.0,
+    }
+
+
 class VideoProcessor:
     """
     Handles video loading and frame extraction.
@@ -97,7 +340,7 @@ class VideoProcessor:
     @staticmethod
     def load_video(
         video_path: str, frame_rate: float = 1, max_frames: int = 300
-    ) -> Tuple[List[np.ndarray], float]:
+    ) -> Tuple[List[np.ndarray], float, int, int]:
         """
         Load video and extract frames at specified rate, capped at max_frames.
 
@@ -111,12 +354,14 @@ class VideoProcessor:
             max_frames: Absolute maximum number of frames to return
 
         Returns:
-            Tuple of (frames list, video_fps, total_frame_count).
+            Tuple of (frames list, video_fps, total_frame_count, sample_stride).
             total_frame_count is the true number of frames in the source video
             (from the codec), NOT the sampled count. It exists so downstream
             consumers can report the real video duration instead of dividing
             the sampled-frame count by the original fps (a unit mismatch that
             previously produced impossible-looking "N SEC / SCENE 999" states).
+            sample_stride is the source-frame step between consecutive sampled
+            frames; sampled index i maps to source frame i*sample_stride.
         """
         import cv2
 
@@ -205,11 +450,19 @@ class VideoProcessor:
         # otherwise fall back to what we actually iterated.
         if total_frames is None:
             total_frames = frame_count
-        return frames, video_fps, total_frames
+        # `step` is the source-frame stride between consecutive entries of the
+        # returned `frames` list. Sampled frame at position i corresponds to
+        # source frame i*step (uniform sampling from source frame 0), so
+        # downstream consumers can map sampled indices back to real source
+        # frames / timestamps. step==1 means sampled index == source index.
+        return frames, video_fps, total_frames, step
 
     @staticmethod
     def extract_audio(
-        video_path: str, sample_rate: int = 16000, max_duration: Optional[float] = None
+        video_path: str,
+        sample_rate: int = 16000,
+        max_duration: Optional[float] = None,
+        timeout: Optional[float] = None,
     ) -> Optional[np.ndarray]:
         """
         Extract audio from video file via ffmpeg → WAV, then load with soundfile.
@@ -218,12 +471,21 @@ class VideoProcessor:
             video_path: Path to video file
             sample_rate: Target sample rate
             max_duration: Truncate audio to this many seconds (None = no limit)
+            timeout: ffmpeg subprocess wall-clock timeout in seconds. Defaults
+                     to a value derived from max_duration (3x, with a floor) so
+                     long videos aren't killed prematurely.
 
         Returns:
             Audio waveform as numpy array, or None if no audio track
         """
         import subprocess
         import tempfile
+
+        if timeout is None:
+            # Allow real-time decodes headroom: 3x the target duration with a
+            # 30s floor and a 600s cap. A long video legitimately needs more
+            # than a fixed 30s.
+            timeout = min(600.0, max(30.0, (max_duration or 180.0) * 3.0))
 
         tmp_path = None
         try:
@@ -242,7 +504,7 @@ class VideoProcessor:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=30,
+                timeout=timeout,
             )
             if result.returncode == 0 and Path(tmp_path).stat().st_size > 44:
                 import soundfile as sf
@@ -255,7 +517,7 @@ class VideoProcessor:
                     result.stderr.decode("utf-8", errors="replace")[:500],
                 )
         except subprocess.TimeoutExpired:
-            logger.warning("ffmpeg timed out after 30s")
+            logger.warning("ffmpeg timed out after %.0fs", timeout)
         except FileNotFoundError:
             logger.warning("ffmpeg not found on PATH — falling back to librosa (slow on video containers)")
         except ImportError:
@@ -284,7 +546,7 @@ class Phase1Pipeline:
     """
 
     def __init__(self, config_path: str = "config/config.yaml", device_override: Optional[str] = None):
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             self.cfg = yaml.safe_load(f)
         self.workspace = os.path.abspath(os.path.dirname(config_path))
 
@@ -295,6 +557,18 @@ class Phase1Pipeline:
         else:
             self.device = self.hardware_profile["device"]
         logger.info(f"Phase1Pipeline initialized on device={self.device} (probe: {self.hardware_profile})")
+
+        # Guard: paddle must never share this process with torch — its presence
+        # corrupts torchvision op dispatch and produces "Tensor holds no memory"
+        # during model warmup. PaddleOCR runs in a dedicated subprocess instead.
+        paddle_mods = [m for m in sys.modules if m == "paddle" or m.startswith("paddle.")]
+        if paddle_mods:
+            logger.critical(
+                "paddle detected in the torch/MPS process (%s). This is known to "
+                "corrupt torchvision NMS dispatch (Paddle 'Tensor holds no memory'). "
+                "Restart the server — paddle must remain in src.layer1.ocr_worker only.",
+                paddle_mods[:5],
+            )
 
         # Concurrency preset based on available RAM
         ram_gb = self.hardware_profile.get("total_ram_gb", 0)
@@ -328,6 +602,8 @@ class Phase1Pipeline:
         self._logo_retrieval = None  # CLIP logo-retrieval index (Phase 1/2)
         self._central_vision_model = None  # Qwen3-VL 32B
         self._freeai_client = None  # Free.ai API client (OCR, STT, Vision)
+        self._product_resolver = None  # Tiered product→brand resolver (Layer 2b)
+        self._qwen_product_calls = 0  # Tier-3 budget counter (per video)
 
         # Per-model threading locks for GPU inference safety.
         # Each GPU-backed model gets its own lock so different models can
@@ -405,7 +681,11 @@ class Phase1Pipeline:
             ("_detector", self._detector_factory),
             ("_logo_detector", self._logo_detector_factory),
             ("_embedding_extractor", self._embedding_extractor_factory),
-            ("_ocr", self._ocr_factory),
+            # NOTE: _ocr (PaddleOCR) is intentionally NOT warmed here — its
+            # paddle predictor must never load while torch models run in
+            # parallel (PaddleOCR #11559/#16199: "Tensor holds no memory" in
+            # torchvision NMS). It initializes lazily in the job's sequential
+            # OCR pass instead.
             ("_stt", self._stt_factory),
             ("_audio_events", self._audio_events_factory),
             ("_product_index", self._product_index_factory),
@@ -437,11 +717,15 @@ class Phase1Pipeline:
     def _detector_factory(self):
         from src.layer1.detector import SceneObjectDetector
         od_cfg = self.cfg["layer1"]["object_detection"]
+        ov_cfg = od_cfg.get("open_vocab", {}) or {}
         return SceneObjectDetector(
             model_name=od_cfg["model"],
             confidence_threshold=od_cfg["confidence_threshold"],
             iou_threshold=od_cfg.get("iou_threshold", 0.45),
             device=self.device,
+            open_vocab_queries=ov_cfg.get("text_queries") or [],
+            open_vocab_confidence=ov_cfg.get("confidence_threshold"),
+            open_vocab_model_name=ov_cfg.get("model", "yolov8s-worldv2.pt"),
         )
 
     def _logo_detector_factory(self):
@@ -475,9 +759,10 @@ class Phase1Pipeline:
             from src.layer1.ocr import OCRExtractor
             return OCRExtractor(
                 lang=ocr_cfg["lang"],
-                use_angle_cls=ocr_cfg["use_angle_cls"],
-                det_db_thresh=ocr_cfg["det_db_thresh"],
+                use_angle_cls=ocr_cfg.get("use_angle_cls", True),
+                det_db_thresh=ocr_cfg.get("det_db_thresh", 0.3),
                 rec_batch_num=ocr_cfg.get("rec_batch_num", 6),
+                cpu_threads=ocr_cfg.get("cpu_threads", 0),
             )
         except Exception as e:
             if freeai_cfg.get("fallback", True) and freeai_cfg.get("enabled", True):
@@ -511,26 +796,53 @@ class Phase1Pipeline:
         from src.layer1.audio import AudioEventDetector
         ae_cfg = self.cfg["layer1"]["audio_events"]
         beats_ckpt = ae_cfg["checkpoint"]
-        if not Path(beats_ckpt).exists():
-            logger.warning(
-                "BEATs checkpoint not found at %s. Audio event detection disabled.",
-                beats_ckpt,
+        # The configured fine-tuned tagging head is preferred; fall back to the
+        # feature-extractor checkpoint so audio events still degrade (unclassified
+        # 'audio_activity') instead of silently disabling. Falls back to disabled
+        # only when neither checkpoint exists.
+        if Path(beats_ckpt).exists():
+            return AudioEventDetector(
+                checkpoint_path=beats_ckpt,
+                device=self.device,
+                sample_rate=ae_cfg["sample_rate"],
             )
-            return False
-        return AudioEventDetector(
-            checkpoint_path=beats_ckpt,
-            device=self.device,
-            sample_rate=ae_cfg["sample_rate"],
+        legacy_ckpt = "BEATs_iter3_plus_AS2M.pt"
+        if Path(legacy_ckpt).exists():
+            logger.warning(
+                "Configured BEATs checkpoint %s not found — falling back to "
+                "feature-extractor checkpoint %s.",
+                beats_ckpt, legacy_ckpt,
+            )
+            return AudioEventDetector(
+                checkpoint_path=legacy_ckpt,
+                device=self.device,
+                sample_rate=ae_cfg["sample_rate"],
+            )
+        logger.warning(
+            "BEATs checkpoint not found (%s or %s). Audio event detection disabled.",
+            beats_ckpt, legacy_ckpt,
         )
+        return False
 
     def _product_index_factory(self):
         from src.layer1.product_index import ProductEmbeddingIndex
-        index = ProductEmbeddingIndex(
-            reference_dir=self.cfg["layer1"].get("product_index", {}).get(
-                "reference_dir", "benchmark/product_logos"
-            )
+        ref_raw = self.cfg["layer1"].get("product_index", {}).get(
+            "reference_dir", "benchmark/product_logos"
         )
-        index.build(self.embedding_extractor)
+        # Resolve repo-root-relative paths against the repo root (parent of
+        # the config dir), not the process cwd, so the index is never silently
+        # empty when the server starts from a different working directory.
+        if not os.path.isabs(ref_raw):
+            repo_root = os.path.dirname(self.workspace)
+            ref_raw = os.path.join(repo_root, ref_raw)
+        index = ProductEmbeddingIndex(reference_dir=os.path.abspath(ref_raw))
+        n_ref = index.build(self.embedding_extractor)
+        if n_ref == 0:
+            logger.critical(
+                "Product index built 0 reference embeddings from %s — "
+                "visual_product_match will be 0 for every job until this is fixed",
+                os.path.abspath(ref_raw),
+            )
         return index
 
     def _logo_retrieval_factory(self):
@@ -544,7 +856,6 @@ class Phase1Pipeline:
         # neither layout is present.
         if not base.is_dir() and Path(ref_dir).parent.joinpath("reference_logos").is_dir():
             flat_dir = Path(ref_dir).parent.joinpath("reference_logos")
-            bank = flat_dir
             import shutil
             build_dir = Path("/tmp") / "adscene_lr_bank"
             shutil.rmtree(build_dir, ignore_errors=True)
@@ -714,8 +1025,25 @@ class Phase1Pipeline:
         return self._brand_memory
 
     def save_brand_memory(self) -> str:
-        """Persist the cross-video brand memory bank to disk."""
-        return self._brand_memory.save(self._brand_memory_path)
+        """Persist the cross-video brand memory bank to disk.
+
+        Also persists the Tier-4 product-resolution memory (when the product
+        resolver was constructed) so learned product↔brand associations are
+        durable across runs. This closes a persistence gap where the learned
+        co-occurrence table lived only in memory.
+        """
+        path = self._brand_memory.save(self._brand_memory_path)
+        resolver = getattr(self, "_product_resolver", None)
+        if resolver is not None and getattr(resolver, "memory", None) is not None:
+            pr_cfg = self.cfg["layer1"].get("product_resolution", {})
+            mem_path = pr_cfg.get("memory_path")
+            if mem_path:
+                try:
+                    resolver.memory.save(mem_path)
+                except OSError as exc:
+                    logger.warning("Could not save product-resolution memory %s: %s",
+                                   mem_path, exc)
+        return path
 
     def add_brand_resolutions(self, timeline: Dict[str, dict],
                               video_id: str = "") -> None:
@@ -731,6 +1059,12 @@ class Phase1Pipeline:
                 if confidences
                 else entry.get("max_confidence", entry.get("confidence", 0.0))
             )
+            appearances = entry.get("appearances", [])
+            max_app = (
+                max(appearances, key=lambda a: a.get("confidence") or 0.0)
+                if appearances
+                else None
+            )
             self._brand_memory.record(
                 brand=brand,
                 video_id=video_id,
@@ -739,6 +1073,14 @@ class Phase1Pipeline:
                 confidence=confidence,
                 modality="visual",
                 product=entry.get("product"),
+                resolution_source=(
+                    max_app.get("resolution_source") if max_app else None
+                ),
+                embedding_version=getattr(
+                    self.__dict__.get("_embedding_extractor"),
+                    "embedding_version",
+                    None,
+                ),
             )
 
     def _resolve_indirect_mentions(
@@ -798,6 +1140,79 @@ class Phase1Pipeline:
             return create_freeai_client()
         return self._get_or_create("_freeai_client", _create)
 
+    def _product_resolver_factory(self):
+        from src.layer2.brand_memory import (
+            load_or_new_product_memory,
+        )
+        from src.layer2.product_resolver import (
+            ProductBrandResolver,
+            WikidataProductLookup,
+        )
+        pr_cfg = self.cfg["layer1"].get("product_resolution", {})
+        wd = WikidataProductLookup(
+            endpoint=pr_cfg.get("endpoint", "https://query.wikidata.org/sparql"),
+            cache_path=pr_cfg.get("cache_path"),
+            min_interval_sec=float(pr_cfg.get("min_interval_sec", 1.0)),
+            timeout_sec=float(pr_cfg.get("timeout_sec", 10.0)),
+        )
+        memory = load_or_new_product_memory(pr_cfg.get("memory_path"))
+        qwen = None
+        if pr_cfg.get("enable_qwen", False):
+            qwen = self._qwen_product_tier
+        # Cross-wiring for Tier 4 learning: resolved OCR/direct detections feed
+        # the co-occurrence table; the table is only queried (never seeded).
+        resolver = ProductBrandResolver(
+            wikidata=wd,
+            learned_lookup=memory.lookup,
+            add_brand_resolution=memory.record,
+            qwen=qwen,
+            min_plausibility=float(pr_cfg.get("min_plausibility", 0.5)),
+        )
+        resolver.memory = memory
+        return resolver
+
+    @property
+    def product_resolver(self):
+        """Tiered product→brand resolver (Layer 2b), lazy + fail-closed."""
+        return self._get_or_create("_product_resolver", self._product_resolver_factory)
+
+    def _qwen_product_tier(self, product_span: str, frame=None) -> dict:
+        """Tier 3: structured Qwen3-VL 'manufacturer or null' query.
+
+        Fails closed to empty on any error / when the central vision model is
+        unavailable. Call count + latency are tracked on the model via
+        emit_qwen_stats(), and a per-video budget gate (config
+        product_resolution.qwen_max_calls_per_video) is enforced here so Qwen
+        spend is bounded even if many product spans appear.
+        """
+        pr_cfg = self.cfg["layer1"].get("product_resolution", {})
+        budget = int(pr_cfg.get("qwen_max_calls_per_video", 0))
+        if budget and self._qwen_product_calls >= budget:
+            logger.warning(
+                "Qwen product-tier budget exhausted (%d calls, cap %d) — "
+                "failing closed for '%s'",
+                self._qwen_product_calls, budget, product_span,
+            )
+            return {}
+        try:
+            vl = self.central_vision_model
+            # Route through the same per-model lock used by the batched
+            # analyze_batch path so the GPU-backed model is never touched from
+            # two threads at once (the failure mode the lock architecture
+            # exists to prevent).
+            lock = self._model_locks.setdefault(
+                "central_vision", threading.Lock()
+            )
+            result = self._locked_call(
+                lock, "central_vision",
+                vl.resolve_product_manufacturer, product_span, frame,
+            )
+            self._qwen_product_calls += 1
+            return result or {}
+        except Exception as exc:  # noqa: BLE001 — never let Tier 3 crash the pipeline
+            logger.warning("Qwen product tier failed for %r: %s", product_span, exc)
+            return {}
+
     @staticmethod
     def _select_keyframes(frames: List[np.ndarray], max_frames: int = 30) -> List[int]:
         """
@@ -823,7 +1238,8 @@ class Phase1Pipeline:
         return sorted(set(indices))
 
     def process_video(self, video_path: str, frame_rate: Optional[float] = None,
-                      creator_id: Optional[str] = None) -> Dict:
+                      creator_id: Optional[str] = None,
+                      progress: Optional[Callable[[str], None]] = None) -> Dict:
         """
         Run full Phase 1 pipeline on a video.
 
@@ -850,6 +1266,9 @@ class Phase1Pipeline:
         timings: Dict[str, float] = {}
         _t_total = time.monotonic()
         self._model_wall_times = {}
+        # Per-video Tier-3 (Qwen product-resolution) budget resets each job so a
+        # long-lived pipeline instance never permanently exhausts it across runs.
+        self._qwen_product_calls = 0
         logger.info(f"Processing video: {video_path}")
 
         # Load video frames AND extract audio concurrently. Both are independent
@@ -862,24 +1281,28 @@ class Phase1Pipeline:
             frame_rate = self.cfg["evaluation"]["video_frame_rate"]
         max_frames = self.cfg['evaluation'].get('max_frames', 300)
         max_audio_seconds = self.cfg['evaluation'].get('max_audio_seconds')
+        extract_audio_timeout = self.cfg['evaluation'].get('extract_audio_timeout')
         sample_rate = self.cfg["evaluation"]["audio_sample_rate"]
 
         frames, video_fps, video_total_frames, audio = None, 0.0, 0, None
+        video_stride = 1
         with ThreadPoolExecutor(max_workers=2) as _extract_pool:
             _video_f = _extract_pool.submit(
                 VideoProcessor.load_video, video_path, frame_rate, max_frames
             )
             _audio_f = _extract_pool.submit(
                 VideoProcessor.extract_audio, video_path, sample_rate,
-                max_duration=max_audio_seconds,
+                max_duration=max_audio_seconds, timeout=extract_audio_timeout,
             )
-            frames, video_fps, video_total_frames = _video_f.result()
+            frames, video_fps, video_total_frames, video_stride = _video_f.result()
             audio = _audio_f.result()
         timings["load_video"] = time.monotonic() - _t
         timings["extract_audio_if_any"] = time.monotonic() - _t
 
         if not frames:
             return {"error": "No frames extracted from video"}
+        if progress:
+            progress(f"Decoded {len(frames)} frames · audio {'extracted' if audio is not None else 'skipped'}")
 
         # === Layer 1: Multimodal Understanding ===
         _t = time.monotonic()
@@ -913,10 +1336,11 @@ class Phase1Pipeline:
         all_detections = None
         all_ocr_results = None
         transcript = ""
+        _stt_segments: List[dict] = []
         brand_mentions = []
+        product_resolutions: List[dict] = []
         audio_events_list = []
-        ocr_future = None
-        detection_done = threading.Event()
+        ocr_pass = None
         self._qwen_enabled = False
         self._qwen_future = None
         self._qwen_frames = []
@@ -937,6 +1361,20 @@ class Phase1Pipeline:
                 logo_frames, None, batch_size,
             )] = "logo_detection"
 
+            # Open-vocabulary scene objects (YOLO-World zero-shot, ADDITIONAL
+            # pass). Prompts config-driven product queries ("wristwatch",
+            # "wireless earbuds", ...) that the COCO vocabulary cannot represent.
+            # Uses the same scene-change keyframes as logo detection; merge (with
+            # curated-label-wins-on-IoU) happens after all layer-1 passes return.
+            _ov_cfg = self.cfg["layer1"]["object_detection"].get("open_vocab", {}) or {}
+            _ov_queries = list(_ov_cfg.get("text_queries") or [])
+            open_vocab_by_index: dict = {}
+            if bool(_ov_cfg.get("enabled", False)) and _ov_queries:
+                futures[self._locked_submit(
+                    executor, "open_vocab", self.detector.detect_open_vocab,
+                    logo_frames, _ov_queries, batch_size,
+                )] = "open_vocab"
+
             # Qwen3-VL central analysis is NOT submitted up-front. It is gated by
             # config layer1.central_vision_model.enable_qwen AND a frame-flagging
             # filter (Phase 3): it runs only on frames where logo detection or
@@ -953,8 +1391,14 @@ class Phase1Pipeline:
             )] = "embeddings"
 
             if audio is not None and len(audio) > 0:
+                # Prefer the timestamped transcription (real per-segment times
+                # for clip links); fall back to the plain-text path for STT
+                # backends that only expose transcribe_segment.
+                _transcribe = getattr(self.stt, "transcribe_segments", None)
+                if _transcribe is None:
+                    _transcribe = self.stt.transcribe_segment
                 futures[self._locked_submit(
-                    executor, "stt", self.stt.transcribe_segment, audio
+                    executor, "stt", _transcribe, audio
                 )] = "stt"
 
             if audio is not None and self.audio_events:
@@ -984,24 +1428,54 @@ class Phase1Pipeline:
                     all_logo_detections = [[] for _ in frames]
                     for idx, dets in zip(logo_indices, result):
                         all_logo_detections[idx] = dets
+                    if progress:
+                        progress(
+                            "Logo detection — {} candidate box(es) across {} keyframe(s)".format(
+                                sum(len(d) for d in all_logo_detections),
+                                sum(1 for d in all_logo_detections if d),
+                            )
+                        )
+                elif modality == "open_vocab":
+                    timings["open_vocab"] = time.monotonic() - _t_logo
+                    for idx, dets in zip(logo_indices, result):
+                        if dets:
+                            open_vocab_by_index[idx] = dets
                 elif modality == "embeddings":
                     embed_raw = result
                 elif modality == "stt":
-                    transcript = result
+                    if isinstance(result, list):
+                        _stt_segments = [
+                            s for s in result if s.get("text")
+                        ]
+                        transcript = " ".join(
+                            s["text"].strip() for s in _stt_segments
+                        )
+                    else:
+                        transcript = result or ""
+                        if transcript:
+                            _duration = (
+                                len(audio) / 16000.0
+                                if audio is not None and len(audio) > 0
+                                else 0.0
+                            )
+                            _stt_segments = [{
+                                "text": transcript,
+                                "start": 0.0,
+                                "end": _duration,
+                            }]
                 elif modality == "audio_events":
                     timings["audio_events"] = time.monotonic() - _t_beats
                     audio_events_list = result
                 elif modality == "detection":
                     timings["detection"] = time.monotonic() - _t_det
                     all_detections = result
-                    detection_done.set()
-                    # Submit OCR now that detection results are available.
-                    # NOTE: ocr_future is submitted inside the as_completed() loop,
-                    # but as_completed() snapshots its future set at call time, so
-                    # this future won't be yielded by the iterator.  We collect it
-                    # after the loop via the executor's shutdown(wait=True) in
-                    # __exit__, which guarantees completion before we call
-                    # ocr_future.result() below.
+                    # Defer OCR (PaddleOCR) until the concurrent pool drains: its
+                    # paddle predictor is NOT safe to run from a thread while
+                    # torch models run on the same process — under MPS that
+                    # intermittently raises Paddle's "Tensor holds no memory"
+                    # inside torchvision's NMS dispatch (PaddleOCR #11559/#16199).
+                    # All torch models stay fully parallel; only paddle OCR is
+                    # serialized to its own sequential pass after the executor.
                     has_detections = [len(d) > 0 for d in all_detections]
                     det_idx_map = [i for i, has in enumerate(has_detections) if has]
                     max_ocr = self.cfg['layer1']['ocr'].get('max_frames', 30)
@@ -1015,8 +1489,7 @@ class Phase1Pipeline:
                         )
                     frames_with_dets = [frames[i] for i in det_idx_map]
                     if frames_with_dets:
-                        ocr_future = self._locked_submit(
-                            executor, "ocr",
+                        ocr_pass = (
                             self._ocr_filtered, frames_with_dets, det_idx_map, len(frames),
                         )
 
@@ -1063,11 +1536,27 @@ class Phase1Pipeline:
                         "Object detection: %d frames with detections (%d total objects)",
                         len(det_idx_map), sum(len(d) for d in all_detections),
                     )
+                    if progress:
+                        progress(
+                            "Object detection — {} frame(s) with detections, {} objects".format(
+                                len(det_idx_map), sum(len(d) for d in all_detections)
+                            )
+                        )
 
-        # Wait for OCR (submitted as part of executor, resolved after close)
-        if ocr_future is not None:
+        # Run OCR SEQUENTIALLY after the executor drains: paddle inference must
+        # not overlap torch model runs in the same process (see detection wave).
+        # The per-model "ocr" lock also serializes paddle across concurrent jobs.
+        if ocr_pass is not None:
+            _fn, _args = ocr_pass[0], ocr_pass[1:]
+            lock = self._model_locks.setdefault("ocr", threading.Lock())
             try:
-                all_ocr_results = ocr_future.result()
+                with lock:
+                    all_ocr_results = _fn(*_args)
+                logger.info(
+                    "OCR: %d frame(s) processed (%d text region(s))",
+                    sum(1 for r in all_ocr_results if r),
+                    sum(len(r) for r in all_ocr_results),
+                )
             except Exception as e:
                 logger.error(f"OCR failed: {e}")
 
@@ -1092,6 +1581,27 @@ class Phase1Pipeline:
             all_detections = [[] for _ in frames]
         if all_ocr_results is None:
             all_ocr_results = [[] for _ in frames]
+        if progress:
+            progress(
+                "OCR — read text on {} frame(s), {} text region(s)".format(
+                    sum(1 for r in all_ocr_results if r),
+                    sum(len(r) for r in all_ocr_results),
+                )
+            )
+
+        # ── Open-vocabulary merge (Layer 1, Phase 1) ─────────────────────────
+        # Fold the zero-shot open-vocab detections (from the wave-1 pass above)
+        # into the COCO detections: curated label wins on real spatial overlap.
+        # Runs AFTER OCR frame selection so it never shifts OCR coverage; the
+        # merged list still feeds detection variance/frame weighting below.
+        if open_vocab_by_index:
+            from src.layer1.detector import merge_open_vocab_detections
+
+            all_detections = merge_open_vocab_detections(
+                all_detections,
+                open_vocab_by_index,
+                min_merge_iou=float(_ov_cfg.get("min_merge_iou", 0.4)),
+            )
 
         timings["layer1_visual"] = time.monotonic() - _t
 
@@ -1117,6 +1627,10 @@ class Phase1Pipeline:
         )
         resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
+        if progress:
+            resolved = sum(1 for fd in all_logo_detections for d in fd if d.get("brand"))
+            total = sum(len(fd) for fd in all_logo_detections)
+            progress(f"Brand resolution — {resolved} of {total} logo box(es) matched to names")
         timings["brand_resolution"] = time.monotonic() - _t_resolve
 
         # ── Temporal brand-resolution smoothing (Phase 1 stability fix) ─────────
@@ -1127,6 +1641,7 @@ class Phase1Pipeline:
         # region (>= min_votes overlapping frames within `window`) back-fills the
         # unresolved logo boxes in that region, so resolution stays stable instead
         # of flickering. Never weakens an already-resolved brand.
+        resolved_before_smoothing = _count_resolved_logos(all_logo_detections)
         _ts_cfg = _br_cfg.get("temporal_smoothing", {})
         if _ts_cfg.get("enabled", True):
             all_logo_detections = TemporalBrandSmoother(
@@ -1134,6 +1649,11 @@ class Phase1Pipeline:
                 min_iou=float(_ts_cfg.get("min_iou", 0.3)),
                 min_votes=int(_ts_cfg.get("min_votes", 2)),
             ).smooth(all_logo_detections)
+        # Instrumentation (metrics-only): how much of the final answer depended
+        # on multi-frame corroboration rather than single-frame resolution.
+        temporal_corroboration_metric = temporal_corroboration(
+            resolved_before_smoothing, _count_resolved_logos(all_logo_detections)
+        )
 
         # ── UNKNOWN-BRAND grouping (limitation #5) ─────────────────────────
         # A logo that still fails to resolve is dropped from the brand timeline,
@@ -1198,6 +1718,7 @@ class Phase1Pipeline:
         product_matches = self.product_index.query(
             embed_raw, embed_indices,
             video_fps=video_fps,
+            video_stride=video_stride,
             top_k=int(
                 self.cfg["layer1"].get("product_index", {}).get("top_k", 1)
             ),
@@ -1206,8 +1727,16 @@ class Phase1Pipeline:
                     "similarity_threshold", 0.80
                 )
             ),
+            # Pass the live embedding-model version so a stale/rebuilt index
+            # built under a different model (e.g. DINOv2) fails loudly instead
+            # of silently returning wrong nearest neighbors.
+            embedding_version=getattr(
+                self.embedding_extractor, "embedding_version", None
+            ),
         )
         timings["product_catalog_match"] = time.monotonic() - _t_prod
+        if progress:
+            progress(f"Product match — {len(product_matches)} DINO descriptor match(es)")
         if product_matches:
             logger.info(
                 "Product-catalog match: %d match(es) via DINOv2 similarity",
@@ -1230,12 +1759,92 @@ class Phase1Pipeline:
         # Latin + Devanagari aliases from the catalog; fuzzy phonetic matching
         # is opt-in via config and defaults OFF (see config.yaml).
         if transcript:
-            stt_cfg = self.cfg["layer1"]["speech_to_text"]
+            stt_cfg = self.cfg["layer1"].get("speech_to_text", {})
             brand_mentions = find_brand_mentions(
                 transcript,
                 fuzzy=bool(stt_cfg.get("mention_fuzzy", False)),
                 max_distance=int(stt_cfg.get("mention_max_distance", 1)),
             )
+            if progress:
+                progress(f"Transcript — {len(brand_mentions)} spoken brand mention(s)")
+            # Product-name speech resolution (Layer 2b): an ASR transcript may
+            # name a PRODUCT ("Z Fold 8 Ultra", "Mac Mini") without ever naming the
+            # brand. The tiered product resolver romanizes Devanagari, then
+            # resolves via Wikidata / learned memory / (optionally) Qwen, and its
+            # results merge into brand_mentions as additional evidence. Provenance
+            # (resolution_tier/resolution_source) is preserved per mention. The
+            # path is opt-in via config and fails closed when disabled/unresolved.
+            pr_cfg = self.cfg["layer1"].get("product_resolution", {})
+            if pr_cfg.get("enable_speech", True):
+                try:
+                    pre = self.product_resolver.resolve(transcript, frame=None)
+                    for r in pre:
+                        if r.get("brand") and r.get("brand") not in [
+                            m.get("brand") for m in brand_mentions
+                        ]:
+                            span = r.get("span") or ""
+                            span_pos = transcript.find(span) if span else -1
+                            brand_mentions.append({
+                                "brand": r["brand"],
+                                "position": span_pos if span_pos >= 0 else 0,
+                                "snippet": (span or transcript)[:80],
+                                "resolution_tier": r.get("resolution_tier"),
+                                "resolution_source": r.get("source"),
+                                "product_span": r.get("product_span"),
+                            })
+                            product_resolutions.append({
+                                **r, "mode": "speech", "frames": [],
+                            })
+                except Exception as exc:  # noqa: BLE001 — never crash the pipeline
+                    logger.warning("Product speech resolution failed: %s", exc)
+
+            # Attach REAL per-segment STT timestamps to every brand mention
+            # (direct catalog + product-resolved). Mentions without a timed
+            # segment stay untimestamped and fall back to the legacy estimate.
+            brand_mentions = _timestamp_mentions(brand_mentions, _stt_segments)
+
+            # Propagate those real speech timestamps onto the product
+            # resolutions that produced them (matched by brand + product span)
+            # so the dashboard can render PLAY-@-time clip chips. Failure-free:
+            # unmatched resolutions simply keep no timestamp.
+            product_resolutions = _timestamp_product_resolutions(
+                product_resolutions, brand_mentions,
+            )
+
+        # On-screen OCR product resolutions (Layer 2b, cache-only): product names
+        # printed/photographed on video ("Mac Mini" behind a creator) resolve the
+        # same way as speech but use ONLY Tier-1 catalog / Tier-4 learned memory /
+        # Wikidata cache — noisy incidental OCR boxes never trigger a live query
+        # or Qwen call. Each distinct resolution records the sampled frames it was
+        # read on; real timestamps are derived downstream from stride/fps. Runs
+        # regardless of transcript (a video may be silent but show product text).
+        pr_cfg = self.cfg["layer1"].get("product_resolution", {})
+        if pr_cfg.get("enable_ocr_evidence", True):
+            try:
+                ocr_res = _collect_ocr_product_resolutions(
+                    all_ocr_results or [],
+                    self.product_resolver,
+                    match_brand,
+                )
+                if ocr_res:
+                    product_resolutions.extend(ocr_res)
+                    seen = set()
+                    for r in ocr_res:
+                        key = (
+                            str(r.get("brand", "")).upper(),
+                            str(r.get("product_span") or r.get("span") or "").upper(),
+                        )
+                        if key in seen:
+                            continue
+                        seen.add(key)
+                        logger.info(
+                            "OCR product resolution: %s -> %s (tier=%s, source=%s, frame=%d)",
+                            r.get("span"), r.get("brand"),
+                            r.get("resolution_tier"), r.get("source"),
+                            r.get("frame_index"),
+                        )
+            except Exception as exc:  # noqa: BLE001 — never crash the pipeline
+                logger.warning("OCR product resolution failed: %s", exc)
 
         # === Layer 2a: Quality Estimation & Fusion ===
         _t = time.monotonic()
@@ -1356,6 +1965,7 @@ class Phase1Pipeline:
         evidence = self._aggregate_evidence(
             all_logo_detections, brand_mentions, all_ocr_results, audio_events_list,
             visual_product_matches=product_matches,
+            video_fps=video_fps,
         )
         audio_events = audio_events_list
 
@@ -1367,6 +1977,7 @@ class Phase1Pipeline:
         confidence_result = self.confidence_scorer.compute_evidence_score(
             evidence, modality_quality_weights=modality_weights
         )
+        confidence_result["fusion"] = evidence.get("fusion", {})
         timings["layer2b_confidence"] = time.monotonic() - _t
 
         # === Layer 3: Recommendation Engine (knowledge-graph ranked output) ===
@@ -1451,6 +2062,7 @@ class Phase1Pipeline:
             "num_frames": len(frames),
             "video_total_frames": video_total_frames,
             "video_fps": video_fps,
+            "video_stride": video_stride,
             "has_audio": audio is not None,
             "hardware_profile": self.hardware_profile,
             "concurrency_preset": self.concurrency_preset,
@@ -1462,6 +2074,7 @@ class Phase1Pipeline:
                 "ocr_results": all_ocr_results,
                 "transcript": transcript,
                 "brand_mentions": brand_mentions,
+                "product_resolutions": product_resolutions,
                 "audio_events": audio_events,
                 "qwen_enabled": self._qwen_enabled,
                 "qwen_frames_analyzed": len(self._qwen_frames or []),
@@ -1488,10 +2101,17 @@ class Phase1Pipeline:
                 "brand_timeline": timeline,
                 "brand_evidence": brand_evidence,
                 "unknown_brand_regions": unknown_brand_regions,
+                "resolver_acceptance": resolver_acceptance_canary(all_logo_detections),
+                "temporal_corroboration": temporal_corroboration_metric,
                 "product_catalog_matches": product_matches,
                 "memory_size": self._brand_memory.size(),
                 "memory_brands": self._brand_memory.brands(),
                 "indirect_resolutions": indirect_resolutions,
+                "product_resolution_tiers": (
+                    self.product_resolver.emit_provenance()
+                    if getattr(self, "_product_resolver", None) is not None
+                    else {}
+                ),
             },
             "layer3": {
                 "recommendations": recommendations,
@@ -1502,6 +2122,13 @@ class Phase1Pipeline:
                 ),
             },
         }
+
+        # Persist cross-video brand + Tier-4 product-resolution memory so learned
+        # associations are durable across runs (was previously never saved).
+        try:
+            self.save_brand_memory()
+        except Exception as exc:  # noqa: BLE001 — persistence must not fail the job
+            logger.warning("Could not persist brand memory: %s", exc)
 
         return output
 
@@ -1631,26 +2258,44 @@ class Phase1Pipeline:
         tells you ad-like content exists but not which brand. So the strength is
         deliberately capped low (0.0-0.4) and requires sustained events (>=2).
 
-        Event-class mapping is intentionally conservative: only classes that map
-        to product/advertising contexts count. Unknown classes (e.g. generic
-        'audio_activity') contribute zero unless they persist.
+        Event-class mapping is deliberately conservative: only classes that map
+        to product/advertising contexts count. Classified cues resolve against
+        the canonical AudioSet ontology names (which the Layer 1 detector emits
+        when a fine-tuned 527-class head is present). When the shipped BEATs
+        checkpoint is a feature extractor (no classification head), every chunk
+        degrades to a generic 'audio_activity' RMS-energy event — sustained
+        fallback events above a confidence floor count as a WEAKER cue, capped
+        at 0.2 (half the classified-cue ceiling), because they are unclassified
+        non-speech audio, never a fabricated brand attribution.
         """
         if not audio_events:
             return 0.0
+        from src.layer1.audioset_labels import BRAND_CUE_AUDIOSET_NAMES
         # Brand-relevant audio-event classes (BEATs AudioSet labels typically).
         BRAND_CUES = {
             "jingle", "advertisement", "ad", "music", "applause", "crowd",
             "whoosh", "ding", "product", "jingles",
-        }
+        } | {name.lower() for name in BRAND_CUE_AUDIOSET_NAMES}
         cues = [
             e for e in audio_events
             if str(e.get("event", "")).strip().lower() in BRAND_CUES
         ]
-        if len(cues) < 2:
-            return 0.0
-        mean_conf = float(np.mean([e.get("confidence", 0.0) for e in cues]))
-        # Cap: audio cues alone should never dominate direct visual/speech proof.
-        return round(min(0.4, mean_conf * 0.5), 3)
+        if len(cues) >= 2:
+            mean_conf = float(np.mean([e.get("confidence", 0.0) for e in cues]))
+            # Cap: audio cues alone should never dominate direct visual/speech proof.
+            return round(min(0.4, mean_conf * 0.5), 3)
+
+        # Degraded path: unclassified 'audio_activity' events (feature-extractor
+        # BEATs checkpoint, no fine-tuned head). Weak cue, never fabricated.
+        fallbacks = [
+            e for e in audio_events
+            if str(e.get("event", "")).strip().lower() == "audio_activity"
+            and e.get("mode") == "fallback"
+        ]
+        if len(fallbacks) >= 2:
+            mean_conf = float(np.mean([e.get("confidence", 0.0) for e in fallbacks]))
+            return round(min(0.2, mean_conf * 0.5), 3)
+        return 0.0
 
     def _aggregate_evidence(
         self,
@@ -1659,6 +2304,7 @@ class Phase1Pipeline:
         ocr_results: List[List[dict]],
         audio_events: List[dict],
         visual_product_matches: Optional[List[dict]] = None,
+        video_fps: float = 0.0,
     ) -> Dict[str, float]:
         """
         Aggregate evidence from all modalities into evidence strengths.
@@ -1715,10 +2361,47 @@ class Phase1Pipeline:
         #       (attached to each resolved detection as its `ocr_text`).
         ocr_strength = 0.0
         ocr_confidences = []
+        ocr_ev_cfg = self.cfg["layer1"].get("product_resolution", {})
+        ocr_evidence_enabled = bool(
+            ocr_ev_cfg.get("enable_ocr_evidence", True)
+        )
         for frame_ocr in ocr_results:
             for result in frame_ocr:
-                if match_brand(result.get("text", "")):
-                    ocr_confidences.append(result["confidence"])
+                text = result.get("text", "")
+                if match_brand(text):
+                    # Direct brand-alias OCR read. Raw OCR box confidence must
+                    # still be GATED by the documented OCR resolution quality
+                    # ceiling (0.90 — the same tier quality the resolver stamps
+                    # for OCR wordmark reads and the tiered product-name path
+                    # enforces below). A confident read of incidental ticker
+                    # text can never outrank the attribution-quality ceiling,
+                    # so ocr_hit can't be inflated by raw optical confidence.
+                    ocr_confidences.append(
+                        min(float(result["confidence"]), _OCR_RESOLUTION_QUALITY)
+                    )
+                elif ocr_evidence_enabled:
+                    # Product names (e.g. "Mac Mini") that don't directly name a
+                    # brand can still be evidence when the tiered resolver
+                    # accepts them (Tier 1/2/4 or corroborated Tier 3). The
+                    # strength is keyed on the RESOLUTION tier quality, not the
+                    # raw OCR confidence, so a low-trust lookup never inflates
+                    # ocr_hit beyond its resolution quality.
+                    #
+                    # This path is CACHE-ONLY (live=False): it consults Tier 1,
+                    # Tier 4 learned memory and the Wikidata cache, but never
+                    # spends a live Wikidata query or Qwen call. OCR boxes are
+                    # noisy and incidental, so they must not trigger network
+                    # activity or pollute the cache with junk lookups.
+                    resolutions = self.product_resolver.resolve(
+                        text, live=False,
+                    )
+                    if resolutions:
+                        strength = max(
+                            r["resolution_quality"] for r in resolutions
+                        )
+                        ocr_confidences.append(
+                            min(float(result["confidence"]), strength)
+                        )
         for frame_logos in logo_detections:
             for det in frame_logos:
                 ocr_text = det.get("ocr_text")
@@ -1750,14 +2433,22 @@ class Phase1Pipeline:
         # DINOv2 cosine-similarity against the reference product index. Counts
         # even when no logo or spoken name was present. Fails closed (0.0) when
         # the index is empty or nothing clears the similarity threshold.
+        #
+        # Strength is keyed on the STRONGEST confirmed match, not the mean
+        # across matched frames: every entry already cleared the strict
+        # similarity threshold, so the evidence question is "did a catalog
+        # product appear?", and a single clear sighting (e.g. sim 0.95) is more
+        # conclusive than many partially-visible frames. The mean would
+        # under-reward a long video where the product is only occasionally in
+        # full view, diluting a strong best match toward the weaker ones.
         product_strength = 0.0
         if visual_product_matches:
-            product_strength = float(np.mean(
+            product_strength = float(np.max(
                 [m.get("similarity", 0.0) for m in visual_product_matches]
             ))
             product_strength = min(1.0, product_strength)
 
-        return {
+        evidence = {
             "logo_detected": logo_strength,
             "speech_mention": speech_strength,
             "ocr_hit": ocr_strength,
@@ -1766,3 +2457,115 @@ class Phase1Pipeline:
             "visual_product_match": product_strength,
             "audio_event": audio_event,
         }
+
+        # ── Compiled multimodal fusion (candidate-centric) ─────────────────────
+        # Candidate-level verdict built from per-candidate, per-modality evidence
+        # with temporal grounding, dependency discount and conflict/abstain. The
+        # legacy strengths above stay for backwards compatibility.
+        fusion_cfg = self.cfg.get("layer2b", {}).get("fusion", {})
+        if fusion_cfg.get("enabled", True):
+            evidence["fusion"] = self._fuse_candidate_evidence(
+                logo_detections,
+                brand_mentions,
+                ocr_results,
+                visual_product_matches,
+                video_fps=video_fps,
+                fusion_cfg=fusion_cfg,
+            )
+        return evidence
+
+    def _fuse_candidate_evidence(
+        self,
+        logo_detections: List[List[dict]],
+        brand_mentions: List[dict],
+        ocr_results: List[List[dict]],
+        visual_product_matches: Optional[List[dict]],
+        *,
+        video_fps: float,
+        fusion_cfg: dict,
+    ) -> dict:
+        """Build the per-candidate evidence ledger and run learned-structure fusion."""
+        from src.layer2.evidence_fusion import BASE_WEIGHTS, fuse_candidates
+        from src.brand_catalog import match_brand
+
+        def _ts(frame_idx: int) -> Optional[float]:
+            return frame_idx / video_fps if video_fps and video_fps > 0 else None
+
+        ledger: Dict[str, List[dict]] = {}
+
+        def _add(brand: str, **item: float) -> None:
+            if not brand:
+                return
+            ledger.setdefault(brand, []).append(item)
+
+        for frame_idx, frame_logos in enumerate(logo_detections):
+            for det in frame_logos:
+                brand = det.get("brand")
+                if not brand:
+                    continue
+                q = float(det.get("resolution_quality") or det.get("confidence", 0.0))
+                _add(brand, family="logo", strength=float(det.get("confidence", 0.0) or 0.0),
+                     quality=q, timestamp=_ts(frame_idx), frame_index=frame_idx)
+                ocr_text = det.get("ocr_text")
+                if ocr_text and match_brand(ocr_text):
+                    _add(brand, family="ocr", strength=min(float(det.get("confidence", 0.5)), 0.90),
+                         quality=min(float(det.get("confidence", 0.5)), 0.90),
+                         timestamp=_ts(frame_idx), frame_index=frame_idx)
+        for frame_idx, frame_ocr in enumerate(ocr_results):
+            for result in frame_ocr:
+                brand = match_brand(result.get("text", ""))
+                if brand:
+                    conf = float(result.get("confidence", 0.5))
+                    _add(brand, family="ocr", strength=min(conf, 0.90), quality=min(conf, 0.90),
+                         timestamp=_ts(frame_idx), frame_index=frame_idx)
+        for mention in brand_mentions:
+            brand = mention.get("brand") if isinstance(mention, dict) else str(mention)
+            _add(brand, family="speech", strength=1.0, quality=1.0)
+        if visual_product_matches:
+            by_brand: Dict[str, List[float]] = {}
+            best_ts: Dict[str, Optional[float]] = {}
+            for m in visual_product_matches:
+                b, sim = m.get("brand"), float(m.get("similarity", 0.0))
+                by_brand.setdefault(b, []).append(sim)
+                if best_ts.get(b) is None and m.get("timestamp") is not None:
+                    best_ts[b] = m.get("timestamp")
+            for b, sims in by_brand.items():
+                sims = sorted(sims, reverse=True)
+                top, mean3 = sims[0], float(np.mean(sims[:3]))
+                # Brand-level aggregation (top-K consistency), not single max.
+                prod = 0.5 * top + 0.3 * mean3 + 0.2 * (mean3 / top if top > 0 else 0.0)
+                _add(b, family="product", strength=min(prod, 1.0), quality=1.0,
+                     timestamp=best_ts.get(b))
+
+        # Base weights stay single-source via the legacy evidence_sources config,
+        # mapped modality-name -> fusion family (implemented sources only).
+        src_cfg = (self.cfg.get("layer2b", {}) or {}).get("evidence_sources") or {}
+        _MAP = {"logo_detected": "logo", "speech_mention": "speech",
+                "ocr_hit": "ocr", "visual_product_match": "product",
+                "product_retrieval": "product", "audio_event": "audio"}
+        base_weights = {}
+        for name, spec in src_cfg.items():
+            if isinstance(spec, dict) and name in _MAP and spec.get("status") == "implemented":
+                base_weights[_MAP[name]] = float(spec.get("weight", BASE_WEIGHTS.get(_MAP[name], 0.0)))
+
+        disabled = set(fusion_cfg.get("disable_families", []) or [])
+        if disabled:
+            ledger = {
+                b: [it for it in items if it["family"] not in disabled]
+                for b, items in ledger.items()
+                if any(it["family"] not in disabled for it in items)
+            }
+
+        res = fuse_candidates(
+            ledger,
+            base_weights=base_weights or None,
+            temperature=float(fusion_cfg.get("temperature", 1.0)),
+            time_bucket=float(fusion_cfg.get("time_bucket_seconds", 2.0)),
+            accept=float(fusion_cfg.get("accept", 0.30)),
+            margin_min=float(fusion_cfg.get("margin_min", 0.15)),
+            agreement_bonus=float(fusion_cfg.get("agreement_bonus", 0.30)),
+        )
+        # Ledger stays available for the evaluation harness (ablation re-fuses
+        # without re-running detection); it is never part of the published fusion.
+        res["_ledger"] = ledger
+        return res

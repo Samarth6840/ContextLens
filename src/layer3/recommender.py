@@ -171,13 +171,24 @@ class BrandRecommender:
         for brand in self.graph.suggest_for(detected):
             info = self.graph.catalog.get(brand, {})
             cats = info.get("categories") or [info.get("category", "GENERAL")]
+            primary_cats = set(cats[:1])
             drivers: List[str] = []
-            driver_cats: set = set()
             for d in detected:
-                shared = self.graph.shared_categories(brand, d)
-                if shared:
+                if self.graph.shared_categories(brand, d):
                     drivers.append(d)
-                    driver_cats |= set(shared)
+            # Evidence (category co-occurrence) uses ALL shared categories, but
+            # the "SAME CATEGORY" REASON must only ever cite matches on the
+            # suggested brand's PRIMARY category. Citing a secondary
+            # category (e.g. TESLA sharing secondary "TECH" with SAMSUNG while
+            # its primary is AUTOMOTIVE) produced the misleading
+            # "SAME CATEGORY (TECH)" rows — the brand's displayed category and
+            # the stated reason disagreed.
+            shared_primary = {
+                c
+                for d in detected
+                for c in self.graph.shared_categories(brand, d)
+                if c in primary_cats
+            }
             ev = 0.0
             for d in drivers:
                 ev = max(ev, _evidence(d))
@@ -186,13 +197,13 @@ class BrandRecommender:
                 base = 0.15  # category-affinity baseline for cold start
 
             reasons = []
-            top_cat = driver_cats or set(cats[:1])
-            for c in sorted(top_cat)[:2]:
-                if drivers:
+            if shared_primary:
+                for c in sorted(shared_primary)[:2]:
                     reasons.append(
                         f"SAME CATEGORY ({c}) AS {', '.join(drivers[:3])}"
                     )
-                else:
+            else:
+                for c in sorted(cats[:1])[:2]:
                     reasons.append(f"CATEGORY ({c}) FITS THE CONTENT NICHE")
             # Complementary (related-category) relationship is worth surfacing.
             for d in detected:
