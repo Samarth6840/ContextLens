@@ -654,6 +654,38 @@ function sceneFilterCounts(d) {
 }
 
 const OBJECT_CHIP_CAP = 4;
+const LOGO_CHIP_CAP = 6;
+// Above this many logo boxes on one frame the detector is emitting a swarm, not
+// a scene. OpenLogo measures 0.9 boxes/frame; LogoDet measured 73. The UI says so
+// rather than letting a tidy chip row imply the frame is under control.
+const LOGO_OVERLOAD = 20;
+
+function groupLogos(logos) {
+  /* Collapse repeats of one label into a single chip carrying its count.
+
+    A frame the detector could not resolve shows the identical string
+    "UNKNOWN BRAND" once per box. Printing 131 of them buries the scene under
+    noise and answers nothing — the count is the information, not the repetition.
+    Confidence is kept at the strongest instance, so the chip never claims more
+    certainty than the best box on the frame supports.
+  */
+  const by = new Map();
+  logos.forEach((o) => {
+    const key = o.class_name || 'UNKNOWN BRAND';
+    const prev = by.get(key);
+    if (!prev) {
+      by.set(key, { label: key, count: 1, confidence: o.confidence, metric: o.confidence_metric });
+      return;
+    }
+    prev.count += 1;
+    if ((o.confidence ?? 0) > (prev.confidence ?? 0)) {
+      prev.confidence = o.confidence;
+      prev.metric = o.confidence_metric;
+    }
+  });
+  return Array.from(by.values()).sort((a, b) => b.count - a.count
+    || (b.confidence ?? 0) - (a.confidence ?? 0));
+}
 
 function sceneChips(s) {
   const parts = [];
@@ -669,11 +701,26 @@ function sceneChips(s) {
     )).join(''));
   }
   if (logos.length) {
-    parts.push(logos.map((o) => {
-      const unknown = o.class_name === 'UNKNOWN BRAND';
-      const metric = (o.confidence_metric || (unknown ? 'detector_box_confidence' : 'resolution_quality')).toUpperCase();
-      return metaChip(o.class_name, pct(o.confidence), metric, unknown ? 'chip--unknown' : 'chip--brand');
+    const grouped = groupLogos(logos);
+    if (logos.length > LOGO_OVERLOAD) {
+      parts.push(metaChip(
+        `${logos.length} logo boxes on this frame`,
+        null,
+        'The detector emitted far more boxes than a single frame should contain. '
+        + 'Treat this frame as detector noise until a labelled audit says otherwise.',
+        'chip--overload',
+      ));
+    }
+    const shownLogos = grouped.slice(0, LOGO_CHIP_CAP);
+    parts.push(shownLogos.map((g) => {
+      const unknown = g.label === 'UNKNOWN BRAND';
+      const metric = (g.metric || (unknown ? 'detector_box_confidence' : 'resolution_quality')).toUpperCase();
+      const text = g.count > 1 ? `${g.label} ×${g.count}` : g.label;
+      const tip = g.count > 1 ? `${metric} · ${g.count} BOXES OF THIS LABEL ON THIS FRAME` : metric;
+      return metaChip(text, pct(g.confidence), tip, unknown ? 'chip--unknown' : 'chip--brand');
     }).join(''));
+    const hiddenLogos = logos.length - shownLogos.reduce((n, g) => n + g.count, 0);
+    if (hiddenLogos > 0) parts.push(chip(`+${hiddenLogos} more`, 'chip-ghost'));
   }
   const hidden = objects.length - shown.length;
   if (hidden > 0) parts.push(chip(`+${hidden} more`, 'chip-ghost'));

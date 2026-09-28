@@ -430,6 +430,23 @@ select.input {
   background: var(--unknown-bg);
   color: var(--unknown);
 }
+/* Detector overload: more boxes on this frame than a frame should contain.
+   Deliberately the error colour, not a neutral chip — the scene is not fine. */
+.chip--overload {
+  border-color: var(--error);
+  background: var(--error-bg);
+  color: var(--error);
+  font-weight: 600;
+}
+.chip--overload::before {
+  content: '';
+  flex: none;
+  align-self: center;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+}
 .chip--audio-real { border-color: var(--rule-2); }
 .chip--audio-fallback { border-style: dashed; color: var(--ink-3); background: none; }
 .chip-ghost { background: none; border-style: dashed; color: var(--ink-2); font-weight: 400; }
