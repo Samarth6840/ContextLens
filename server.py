@@ -1263,6 +1263,49 @@ def analyse_status(job_id: str):
 # ── Routes: dashboard ────────────────────────────────────────
 
 
+def _sanitize_void_candidates(dash: dict) -> dict:
+    """Downgrade candidates whose derived name means "no identification".
+
+    `_derive_candidate_name` refuses void names, but a candidate verified
+    *before* that guard existed is still sitting in the persisted dashboard
+    (e.g. "NOT IDENTIFIABLE" sent to logo.dev, which matched identifiable.ca
+    and reported it verified). Correcting at serve time repairs every stored job
+    without re-running the paid reverse-image search. Returns a copy; the
+    persisted record is left alone.
+    """
+    from src.openset import _is_void_name
+
+    os_block = dash.get("open_set")
+    if not isinstance(os_block, dict):
+        return dash
+    candidates = os_block.get("candidates")
+    if not candidates:
+        return dash
+
+    repaired = 0
+    fixed = []
+    for cand in candidates:
+        if _is_void_name(cand.get("candidate_name") or ""):
+            fixed.append({**cand, "status": "candidate_void", "logo_dev_validation": None})
+            repaired += 1
+        else:
+            fixed.append(cand)
+    if not repaired:
+        return dash
+
+    app.logger.info(
+        "OPEN-SET REPAIR — %d void candidate(s) downgraded at serve time", repaired
+    )
+    return {
+        **dash,
+        "open_set": {
+            **os_block,
+            "candidates": fixed,
+            "resolved": len([c for c in fixed if c.get("status") == "candidate_verified"]),
+        },
+    }
+
+
 @app.get("/api/pipeline/<job_id>")
 @login_required
 def pipeline_dashboard(job_id: str):
@@ -1273,7 +1316,7 @@ def pipeline_dashboard(job_id: str):
         return jsonify({"error": job.get("error") or "PIPELINE FAILED"}), 500
     if job.get("status") != "done" or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT COMPLETE", "status": job.get("status")}), 409
-    return jsonify(job["dashboard"])
+    return jsonify(_sanitize_void_candidates(job["dashboard"]))
 
 
 @app.get("/api/insights/<job_id>")
