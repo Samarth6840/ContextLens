@@ -3,6 +3,10 @@
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
 
+const TOKEN_KEY = 'adscene_token';
+const getToken = () => localStorage.getItem(TOKEN_KEY) || null;
+const setToken = (t) => { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); };
+
 const el = {
   landing: $('#view-landing'),
   analyse: $('#view-analyse'),
@@ -11,12 +15,6 @@ const el = {
   insights: $('#view-insights'),
   login: $('#view-login'),
 };
-
-/* ── Auth token (localStorage-backed) ─────────────────────── */
-
-const TOKEN_KEY = 'adscene_token';
-const getToken = () => localStorage.getItem(TOKEN_KEY) || null;
-const setToken = (t) => { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); };
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
@@ -60,8 +58,22 @@ function pct(v) {
 
 function metaChip(label, pctVal, metric, variant) {
   const conf = pctVal != null ? `<span class="chip-confidence">${escapeHtml(pctVal)}</span>` : '';
-  const tip = metric ? ` title="${escapeHtml(metric)}" aria-label="${escapeHtml(label)} ${escapeHtml(pctVal || '')} ${escapeHtml(metric)}"` : '';
+  const tip = metric ? ` title="${escapeHtml(metric)}"` : '';
   return `<span class="chip${variant ? ' ' + variant : ''}"${tip}>${escapeHtml(label)}${conf ? ' ' + conf : ''}</span>`;
+}
+
+// Reason strings come from the server shouted in caps. De-shout those, but
+// leave normal prose alone so proper nouns survive ("NVIDIA GeForce"). Judged
+// by the ratio of upper-case letters rather than an equality test, which misses
+// mixed strings like "LOGO DETECTED — 1 appearance(s)".
+function sentence(text) {
+  const t = String(text == null ? '' : text).trim();
+  if (!t) return t;
+  const letters = t.replace(/[^a-z]/gi, '');
+  if (!letters || letters.length < 3) return t;
+  const upper = (t.match(/[A-Z]/g) || []).length;
+  if (upper / letters.length <= 0.6) return t;
+  return t.charAt(0) + t.slice(1).toLowerCase();
 }
 
 function fieldLabel(field) {
@@ -141,7 +153,6 @@ function showView(name) {
 
 function router() {
   const { page, id, params } = parseRoute();
-  refreshNavAuth();
   if (page === 'landing' || page === '') showView('landing');
   else if (page === 'analyse') showView('analyse');
   else if (page === 'pipeline') { showView('pipeline'); renderPipeline(id, params); }
@@ -149,6 +160,7 @@ function router() {
   else if (page === 'insights') { showView('insights'); renderInsights(id, params); }
   else if (page === 'login') { showView('login'); renderLogin(); }
   else { location.hash = '#/'; }
+  refreshNavAuth();
 }
 
 // Sidebar / back-button wiring
@@ -156,6 +168,7 @@ function router() {
   const btn = $(`#btn-back-${key === 'home' ? 'home' : key}`);
   if (btn) btn.addEventListener('click', () => { location.hash = key === 'home' ? '#/pipeline' : `#/${key}`; });
 });
+window.addEventListener('hashchange', router);
 if (!window.__navBound) {
   window.__navBound = true;
   document.addEventListener('click', (e) => {
@@ -177,13 +190,9 @@ async function refreshNavAuth() {
     link.textContent = authed ? 'Log out' : 'Log in';
     link.classList.toggle('is-authed', authed);
     link.setAttribute('href', authed ? '#/' : '#/login');
-    if (authed) {
-      link.setAttribute('data-user', me.user || '');
-    }
+    if (authed) link.setAttribute('data-user', me.user || '');
   } catch (e) { /* keep default label */ }
 }
-
-window.addEventListener('hashchange', router);
 
 /* ── Analyse page ─────────────────────────────────────────── */
 
@@ -405,88 +414,98 @@ function errorHtml(msg) {
   return `<div class="error-box"><div class="error-title">Something went wrong</div>${escapeHtml(msg)}</div>`;
 }
 
+function jobRow(j, i, hrefFor) {
+  return `
+      <a class="job-row" href="${hrefFor(j.job_id)}">
+        <span class="job-meta" style="min-width:28px;text-align:right;font-family:var(--font-mono)">${String(i + 1).padStart(2, '0')}</span>
+        <span class="job-title">${escapeHtml(j.title || 'Untitled video')}</span>
+        <span class="job-meta">${escapeHtml(j.creator || '')}</span>
+        <span class="job-meta">${escapeHtml(j.job_id)}</span>
+        <span class="job-meta">${escapeHtml(j.status || '')}${j.stage && j.status === 'running' ? ' &middot; ' + escapeHtml(j.stage) : ''}</span>
+      </a>`;
+}
+
+const JOB_LIST_HEADERS = `<div style="display:flex;gap:var(--space-3);margin-bottom:12px"><span class="k-label">Index</span><span class="k-label" style="flex:1">Title</span><span class="k-label">Creator</span><span class="k-label">Project</span><span class="k-label">Status</span></div>`;
+
 async function renderJobIndex(root) {
   root.innerHTML = loaderHtml('Loading your projects');
   try {
     const { jobs } = await api('/api/jobs');
     if (!jobs.length) {
       root.innerHTML =
-        `<h2 class="page-title" style="margin-bottom:24px">Your projects</h2>` +
         `<div class="empty">No projects yet — start by analysing a video to find your first opportunities.<br><br><a href="#/analyse">Analyse a video</a></div>`;
       return;
     }
-    const rows = jobs.map((j, i) => `
-      <a class="job-row" href="#/pipeline/${encodeURIComponent(j.job_id)}">
-        <span class="job-meta" style="min-width:28px;text-align:right;font-family:var(--font-mono)">${String(i + 1).padStart(2, '0')}</span>
-        <span class="job-title">${escapeHtml(j.title || 'Untitled video')}</span>
-        <span class="job-meta">${escapeHtml(j.creator || '')}</span>
-        <span class="job-meta">${escapeHtml(j.job_id)}</span>
-        <span class="job-meta">${escapeHtml(j.status || '')}${j.stage && j.status === 'running' ? ' &middot; ' + escapeHtml(j.stage) : ''}</span>
-      </a>`).join('');
-    root.innerHTML = `<h2 class="page-title" style="margin-bottom:24px">Your projects</h2><div style="display:flex;gap:var(--space-3);margin-bottom:12px"><span class="k-label">Index</span><span class="k-label" style="flex:1">Title</span><span class="k-label">Creator</span><span class="k-label">Project</span><span class="k-label">Status</span></div>` + rows;
+    const rows = jobs.map((j, i) => jobRow(j, i, (id) => `#/pipeline/${encodeURIComponent(id)}`)).join('');
+    root.innerHTML = JOB_LIST_HEADERS + rows;
   } catch (err) {
     root.innerHTML = errorHtml(err.message);
   }
 }
 
-function summaryStrip(d) {
-  // Real "small things" summary — actual counts from the completed analysis.
-  const scenes = (d.scenes || []).length;
-  const frames = d.num_frames != null ? d.num_frames : '—';
-
-  // Uniquely resolved brands (dedup across scene appearances + recommendations)
+function uniqueBrands(d) {
   const brands = new Set();
   (d.products || []).forEach((p) => brands.add(p.brand));
   (d.recommendations || []).forEach((r) => brands.add(r.brand));
   (d.brands || []).forEach((b) => brands.add(typeof b === 'string' ? b : b.name));
-  const brandCount = brands.size || (d.recommendations || []).length;
+  return brands;
+}
 
-  // Logo boxes across all scenes
-  let logos = 0;
-  (d.scenes || []).forEach((s) => { logos += (s.logos || []).length; });
-
-  const stat = (label, val, accent) => `
-    <div class="stat-box${accent ? ' is-accent' : ''}">
-      <div class="stat-box-val">${val}</div>
-      <div class="stat-box-label">${escapeHtml(label)}</div>
-    </div>`;
-
+function summaryStrip(d) {
+  // The figures, printed once. Everything else on this screen refers back to
+  // these numbers instead of repeating them.
+  const brands = uniqueBrands(d).size;
+  const opps = (d.recommendations || []).length;
+  const scenes = (d.scenes || []).length;
+  const logos = (d.scenes || []).reduce((a, s) => a + (s.logos || []).length, 0);
+  const cell = (val, label) => `<div class="figure"><span class="figure-val">${val}</span><span class="figure-label">${escapeHtml(label)}</span></div>`;
   return `
-    <div class="summary-strip">
-      ${stat('Scenes', scenes)}
-      ${stat('Frames', frames)}
-      ${stat('Logo boxes', logos)}
-      ${stat('Brands found', brandCount, true)}
+    <div class="figure-line">
+      ${cell(brands, brands === 1 ? 'brand' : 'brands')}
+      ${cell(opps, opps === 1 ? 'opportunity' : 'opportunities')}
+      ${cell(scenes, scenes === 1 ? 'scene' : 'scenes')}
+      <div class="figure figure-quiet">
+        <span class="figure-val">${d.num_frames != null ? d.num_frames : '—'}</span>
+        <span class="figure-label">frames at ${(d.video_fps || 0).toFixed(1)} fps, ${logos} logo ${logos === 1 ? 'box' : 'boxes'}</span>
+      </div>
     </div>`;
 }
 
-// Plain-language "what we found" summary shown at the top of the dashboard.
-function whatFoundPanel(d) {
-  const scenes = (d.scenes || []).length;
-  const brands = new Set();
-  (d.products || []).forEach((p) => brands.add(p.brand));
-  (d.recommendations || []).forEach((r) => brands.add(r.brand));
-  (d.brands || []).forEach((b) => brands.add(typeof b === 'string' ? b : b.name));
-  const brandCount = brands.size;
-  const opps = (d.recommendations || []).length;
-  const conf = d.confidence != null ? (d.confidence * 100).toFixed(0) : null;
+// Plain-language "what we found" summary. It states the verdict and the single
+// strongest signal — never a number, which lives once in the figure line above.
+const EVIDENCE_LABELS = {
+  audio_event: 'Audio events',
+  logo_detected: 'Logo detection',
+  ocr_hit: 'On-screen text',
+  product_retrieval: 'Product catalog',
+  scene_context: 'Scene context',
+  speech_mention: 'Spoken mentions',
+  visual_product_match: 'Visual product match',
+};
+const evidenceLabel = (k) => EVIDENCE_LABELS[k] || String(k).replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
-  const brandWord = brandCount === 1 ? '1 brand' : `${brandCount || 'no'} brands`;
-  const oppWord = opps === 1 ? '1 opportunity' : opps ? `${opps} opportunities` : 'no opportunities';
-  const confWord = conf != null
-    ? (d.is_confident ? `The read feels confident (${conf}%).` : `We're reasonably sure — overall confidence ${conf}%.`)
+// Sources that carry the read: a source with no strength or no weight is dead
+// weight in both the bar and the legend, so it is left out of both.
+function liveEvidence(d) {
+  return Object.entries(d.evidence_breakdown || {})
+    .filter(([, e]) => (e.strength || 0) > 0 && (e.weight || 0) > 0);
+}
+
+function whatFoundPanel(d) {
+  const evids = liveEvidence(d);
+  const strongest = evids.slice().sort((a, b) => b[1].strength - a[1].strength)[0];
+  const verdict = d.is_confident
+    ? 'This read is confident'
+    : 'Read this with care';
+  const because = strongest
+    ? `, carried mostly by ${evidenceLabel(strongest[0]).toLowerCase()}`
     : '';
-  const plural = scenes === 1 ? 'scene' : 'scenes';
   return `
     <div class="what-found">
       <div class="what-found-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l3 2"/></svg>
       </div>
-      <div>
-        <span class="k-label" style="display:block;margin-bottom:4px">Summary</span>
-        In <strong>${escapeHtml(d.title || 'this video')}</strong> we found <em>${brandWord}</em>,
-        ${oppWord} to act on, across ${scenes} ${plural}. ${confWord}
-      </div>
+      <p>${verdict}${because}. The breakdown below shows what each signal contributed.</p>
     </div>`;
 }
 
@@ -519,25 +538,25 @@ function renderDashboard(root, d, activeTab) {
   };
 
   root.innerHTML = `
-    <h2 class="page-title page-title-huge">${escapeHtml(d.title)}</h2>
-    <div class="meta-row">
-      <span class="tag"><span class="tag-label">Creator</span> ${escapeHtml(d.creator || '—')}</span>
-      ${d.creator_card && d.creator_card.handle ? `<span class="tag"><span class="tag-label">@</span>${escapeHtml(d.creator_card.handle)} ${d.creator_card.followers_label ? escapeHtml(d.creator_card.followers_label) : ''}</span>` : ''}
-      <span class="tag tag-accent"><span class="tag-label">Duration</span> ${escapeHtml(fmtDuration(d.duration_sec))}</span>
-      <span class="tag"><span class="tag-label">Project</span> ${escapeHtml(d.job_id)}</span>
-      ${d.confidence != null ? `<span class="tag"><span class="tag-label">Confidence</span> ${(d.confidence * 100).toFixed(0)}%</span>` : ''}
-    </div>
-    ${confidenceBar(d)}
+    <h1 class="page-title page-title-huge">${escapeHtml(d.title)}</h1>
+    <p class="project-line">
+      <span>${escapeHtml(d.job_id)}</span>
+      <span>${escapeHtml(fmtDuration(d.duration_sec))}</span>
+      ${d.creator && d.creator !== 'UNKNOWN' ? `<span>${escapeHtml(d.creator)}</span>` : ''}
+      ${d.creator_card && d.creator_card.handle ? `<span>@${escapeHtml(d.creator_card.handle)}</span>` : ''}
+    </p>
     ${whatFoundPanel(d)}
     ${summaryStrip(d)}
+    ${confidenceBar(d)}
     <div class="tabs">${tabs}</div>
-    <div class="tab-panel is-active" data-panel="scenes">${panels.scenes}</div>
-    <div class="tab-panel" data-panel="products">${panels.products}</div>
-    <div class="tab-panel" data-panel="openset">${panels.openset}</div>
-    <div class="tab-panel" data-panel="recommend">${panels.recommend}</div>
-    <div class="tab-panel" data-panel="ads">${panels.ads}</div>
-    <div class="tab-panel" data-panel="outreach">${panels.outreach}</div>
+    ${Object.keys(panels).map((key) => `<div class="tab-panel${key === activeTab ? ' is-active' : ''}" data-panel="${key}">${panels[key]}</div>`).join('')}
   `;
+
+  // Bound here, after innerHTML: a listener attached to a detached node is lost
+  // the moment its markup is serialised into the page.
+  $$('.btn-mini', root).forEach((b) => b.addEventListener('click', () => {
+    location.hash = `#/outreach/${encodeURIComponent(b.dataset.job)}?brand=${encodeURIComponent(b.dataset.brand)}`;
+  }));
 
   $$('#pipeline-root .tab').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -547,6 +566,7 @@ function renderDashboard(root, d, activeTab) {
       $('#pipeline-root [data-panel="' + btn.dataset.tab + '"]').classList.add('is-active');
       history.replaceState(null, '', `#/pipeline/${encodeURIComponent(d.job_id)}?tab=${btn.dataset.tab}`);
       if (btn.dataset.tab === 'scenes' && !window.__sceneFilterBox) wireScenePanel(root, d);
+      if (btn.dataset.tab === 'ads') wireAdsPanel(root);
     });
   });
 
@@ -554,6 +574,7 @@ function renderDashboard(root, d, activeTab) {
   // 404s gracefully (no clip-player when no <video> can load) and the scenes
   // list still jumps + highlights on clip links.
   if (activeTab === 'scenes') wireScenePanel(root, d);
+  wireAdsPanel(root);
 }
 
 function sceneThumbUrl(jobId, frameIndex) {
@@ -565,33 +586,32 @@ function sceneThumbUrl(jobId, frameIndex) {
 function confidenceBar(d) {
   const total = d.confidence;
   if (total == null) return '';
-  const evids = Object.entries(d.evidence_breakdown || {});
+  const evids = liveEvidence(d);
   if (!evids.length) return '';
   const band = (v) => (v >= 0.75 ? 'high' : (v >= 0.40 ? 'mid' : 'low'));
   const sumW = evids.reduce((a, [, e]) => a + (e.weight || 0), 0) || 0;
   const fills = evids.map(([src, e]) => {
-    const strength = e.strength || 0;
-    const w = e.weight || 0;
-    const width = sumW > 0 ? (w / sumW) * 100 : 0;
-    return `<span class="confidence-bar-fill" data-band="${band(strength)}" style="width:${width.toFixed(1)}%" title="${escapeHtml(src)} · ${(strength * 100).toFixed(0)}% strength · weight ${w.toFixed(3)}"></span>`;
+    const width = (e.weight / sumW) * 100;
+    return `<span class="confidence-bar-fill" data-band="${band(e.strength)}" style="width:${width.toFixed(1)}%" title="${escapeHtml(evidenceLabel(src))}, ${(e.strength * 100).toFixed(0)}% strength, weight ${e.weight.toFixed(3)}"></span>`;
   }).join('');
-  const remainder = sumW > 0 && sumW < 1
+  const remainder = sumW < 1
     ? `<span class="confidence-bar-unweighted" style="flex:1 1 0%" title="Unweighted — evidence weights sum to ${(sumW * 100).toFixed(0)}% of the score"></span>`
     : '';
   const status = d.is_confident ? 'confident' : (String(d.confidence_status || 'caution').toLowerCase());
-  const keys = evids.map(([src, e]) => {
-    const strength = e.strength || 0;
-    return `
-      <span class="confidence-key"><span class="confidence-key-dot" data-band="${band(strength)}"></span>${escapeHtml(src)} ${(strength * 100).toFixed(0)}%</span>`;
-  }).join('');
+  const keys = evids
+    .slice()
+    .sort((a, b) => b[1].strength - a[1].strength)
+    .map(([src, e]) => `
+      <span class="confidence-key"><span class="confidence-key-dot" data-band="${band(e.strength)}"></span>${escapeHtml(evidenceLabel(src))} <b>${(e.strength * 100).toFixed(0)}%</b></span>`)
+    .join('');
   return `
     <div class="confidence-block">
       <div class="confidence-block-head">
-        <span class="k-label">Confidence &middot; ${escapeHtml(status)}</span>
+        <span class="k-label">What the score is made of</span>
         <span class="mono">${(total * 100).toFixed(0)}%</span>
       </div>
       <div class="confidence-bar">${fills}${remainder}</div>
-      <div class="confidence-legend">${keys}</div>
+      <div class="confidence-legend" title="Bar width is each signal's weight in the score. The percentage is how strong that signal is.">${keys}</div>
     </div>`;
 }
 
@@ -633,25 +653,31 @@ function sceneFilterCounts(d) {
   };
 }
 
+const OBJECT_CHIP_CAP = 4;
+
 function sceneChips(s) {
   const parts = [];
-  if (s.objects && s.objects.length) {
-    parts.push(s.objects.slice(0, 12).map((o) => metaChip(
+  const objects = s.objects || [];
+  const logos = s.logos || [];
+  const shown = objects.slice(0, OBJECT_CHIP_CAP);
+  if (shown.length) {
+    parts.push(shown.map((o) => metaChip(
       o.class_name,
       pct(o.confidence),
       'DETECTOR BOX CONFIDENCE',
       'chip--object',
     )).join(''));
   }
-  if (s.logos && s.logos.length) {
-    parts.push(s.logos.map((o) => {
+  if (logos.length) {
+    parts.push(logos.map((o) => {
       const unknown = o.class_name === 'UNKNOWN BRAND';
       const metric = (o.confidence_metric || (unknown ? 'detector_box_confidence' : 'resolution_quality')).toUpperCase();
       return metaChip(o.class_name, pct(o.confidence), metric, unknown ? 'chip--unknown' : 'chip--brand');
     }).join(''));
   }
-  const joined = parts.join('');
-  return joined || chip('No objects detected', 'chip-ghost');
+  const hidden = objects.length - shown.length;
+  if (hidden > 0) parts.push(chip(`+${hidden} more`, 'chip-ghost'));
+  return parts.join('') || chip('No objects detected', 'chip-ghost');
 }
 
 function scenePassesFilter(s, v) {
@@ -724,7 +750,7 @@ function scenesPanel(d) {
   // per-frame detection instances, so they can legitimately sum higher than
   // this header. Labels are kept distinct so the two numbers aren't confused.
   const unknownNote = unknown.length
-    ? `<span class="tag" style="margin-left:8px"><span class="tag-label">Unidentified brands</span> ${unknown.length} unique spot${unknown.length === 1 ? '' : 's'}<span class="tag-label" style="margin-left:8px">across all frames</span></span>`
+    ? `, ${unknown.length} unidentified logo spot${unknown.length === 1 ? '' : 's'} across every frame`
     : '';
   const sortOpts = [
     ['time', 'Sort by time'],
@@ -747,18 +773,24 @@ function scenesPanel(d) {
       </div>
     </div>` : '';
   const head = `
-    <div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.scenes.length} scenes &middot; ${d.num_frames} frames &middot; ${(d.video_fps || 0).toFixed(1)} fps &mdash; click a frame to open the source image</span>${unknownNote}</div>
-    <div class="scene-toolbar">
-      <input id="scene-search" class="input scene-search" type="search" placeholder="Search scenes (brand, object, time)…" value="${escapeHtml(sceneView.q)}" autocomplete="off">
-      <button id="scene-filter-btn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">Filter${filterActive ? ' \u2713' : ''}</button>
-      ${sceneFilterDropdown(d, sceneView)}
-      <select id="scene-sort" class="input scene-select" aria-label="Sort scenes">${sortOpts}</select>
-      <button id="scene-filter-reset" class="btn" type="button">Reset</button>
-    </div>
-    ${audioBlock}
-    <video id="clip-player" class="clip-player" controls preload="metadata" src="/api/video/${encodeURIComponent(d.job_id)}"></video>
-    <div id="scene-meta" class="muted" style="margin:8px 0"></div>
-    <div id="scene-rows">${renderSceneRows(d)}</div>`;
+    <div class="scenes-bay">
+      <div class="scenes-source">
+        <video id="clip-player" class="clip-player" controls preload="metadata" src="/api/video/${encodeURIComponent(d.job_id)}"></video>
+        ${audioBlock}
+      </div>
+      <div class="scenes-bin">
+        <div class="card-head bin-head"><span class="card-sub">${d.scenes.length} scenes${unknownNote}. Click a frame to open the source image.</span></div>
+        <div class="scene-toolbar">
+          <input id="scene-search" class="input scene-search" type="search" placeholder="Search scenes (brand, object, time)…" value="${escapeHtml(sceneView.q)}" autocomplete="off">
+          <button id="scene-filter-btn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">Filter${filterActive ? ' \u2713' : ''}</button>
+          ${sceneFilterDropdown(d, sceneView)}
+          <select id="scene-sort" class="input scene-select" aria-label="Sort scenes">${sortOpts}</select>
+          <button id="scene-filter-reset" class="btn" type="button">Reset</button>
+        </div>
+        <div id="scene-meta" class="muted bin-count"></div>
+        <div id="scene-rows" class="bin-rows">${renderSceneRows(d)}</div>
+      </div>
+    </div>`;
   return head;
 }
 
@@ -782,9 +814,9 @@ function sceneFilterDropdown(d, state) {
   return `
     <div class="filter-dropdown" id="scene-filter" hidden>
       <input class="filter-search" id="scene-filter-search" type="search" placeholder="Filter brands and objects…" autocomplete="off" value="${escapeHtml(state.filterQ || '')}">
-      <div class="filter-group-label">Brands · <span class="filter-group-value">${brandSel}</span></div>
+      <div class="filter-group-label">Brands<span class="filter-group-value">${brandSel}</span></div>
       ${brandItems || `<div class="filter-item-empty">No brands match</div>`}
-      <div class="filter-group-label">Object types · <span class="filter-group-value">${objSel}</span></div>
+      <div class="filter-group-label">Object types<span class="filter-group-value">${objSel}</span></div>
       ${objectItems || `<div class="filter-item-empty">No objects match</div>`}
     </div>`;
 }
@@ -1022,14 +1054,32 @@ function productsPanel(d) {
       </table>
     </div>
     ${productResolutionsBlock(d)}`;
-  const wrap = document.createElement('div');
-  wrap.innerHTML = html;
-  $$('.btn-mini', wrap).forEach((b) =>
-    b.addEventListener('click', () => {
-      location.hash = `#/outreach/${encodeURIComponent(b.dataset.job)}?brand=${encodeURIComponent(b.dataset.brand)}`;
-    })
-  );
-  return wrap.innerHTML;
+  return html;
+}
+
+// "TSMC (TAIWAN SEMICONDUCTOR MANUFACTURING COMPANY LIMITED)" -> short + legal tail
+function splitCandidateName(name) {
+  const raw = String(name == null ? '' : name).trim();
+  const m = raw.match(/^([^(]+?)\s*\((.+)\)$/);
+  if (!m) return { short: raw, legal: '' };
+  const legal = m[2].trim();
+  // Registries return legal names in caps; sentence case reads better.
+  return { short: m[1].trim(), legal: legal === legal.toUpperCase() ? titleCase(legal) : legal };
+}
+
+// Grounding redirects are 200-char blobs; the title is already the readable host.
+function titleCase(text) {
+  return text.toLowerCase().replace(/(^|\s)([a-z])/g, (m, sp, ch) => sp + ch.toUpperCase());
+}
+
+function sourceLabel(result) {
+  const t = String(result.title == null ? '' : result.title).trim();
+  if (t && t.length <= 60) return t;
+  try {
+    return new URL(result.url).hostname.replace(/^www\./, '');
+  } catch (_) {
+    return t ? t.slice(0, 60) + '…' : 'source';
+  }
 }
 
 function openSetPanel(d) {
@@ -1037,80 +1087,99 @@ function openSetPanel(d) {
   const cands = os.candidates || [];
   const rejected = os.rejected || [];
   const skipped = os.skipped_counts || {};
-  const skipNote = (skipped.below_min_confidence || skipped.duplicate_hash)
-    ? `Skipped: ${skipped.below_min_confidence || 0} below the minimum confidence · ${skipped.duplicate_hash || 0} duplicate crops`
-    : '';
-  const gateInfo = `Minimum confidence ${Math.round((os.min_confidence || 0) * 100)}% · minimum crop ${escapeHtml(String(os.min_crop_area))} px² · max aspect ${escapeHtml(String(os.max_crop_aspect))}:1`;
+  const gate = `gate: ${Math.round((os.min_confidence || 0) * 100)}% confidence, ${escapeHtml(String(os.min_crop_area))} px&sup2;, ${escapeHtml(String(os.max_crop_aspect))}:1 max aspect`;
 
   if (!os.available) {
     return `
-      <div class="empty" style="text-align:left">
-        <div class="note-title">Unidentified brands aren't searchable here yet</div>
-        ${escapeHtml(os.reason || 'No reverse-image-search backend is available on this deployment.')}
-        <div class="muted" style="margin-top:4px">You can still review unidentified logos scene by scene in the Scenes tab.</div>
+      <div class="os-empty">
+        <div class="note-title">No reverse-image backend on this deployment</div>
+        <p>${escapeHtml(os.reason || 'Open-set identification is unavailable, so unidentified logos cannot be searched.')}</p>
+        <p class="muted">Unidentified logos are still listed crop by crop in the Scenes tab.</p>
       </div>`;
   }
 
-  const rejectedRows = rejected.length ? `
-    <div class="card">
-      <div class="card-head"><div class="card-title">Skipped areas (${rejected.length})</div><span class="card-sub" style="text-transform:none;letter-spacing:0.02em">${gateInfo}</span></div>
-      <div class="card-body">
-        ${rejected.map((r) => `
-          <div class="openset-state ${r.reason === 'too_small' ? 'openset-state--too-small' : 'openset-state--rejected-shape'}">
-            <span>Frame ${r.frame_index} — ${r.reason === 'too_small' ? 'too small to search' : 'banner-shaped, skipped'}</span>
-            <span class="openset-state-dims">${r.width}×${r.height} px · aspect ${r.aspect}:1 · confidence ${pct(r.confidence)}</span>
-          </div>`).join('')}
-      </div>
-    </div>` : '';
+  const skippedCount = (skipped.below_min_confidence || 0) + (skipped.duplicate_hash || 0);
+  const examined = cands.length + rejected.length + skippedCount;
 
-  const skipRow = skipNote ? `<div class="muted" style="margin-top:8px">${escapeHtml(skipNote)}</div>` : '';
+  // The funnel is the honest read of this stage: most crops are noise, and the
+  // UI should say so rather than presenting three cards as if three were found.
+  const funnel = `
+    <div class="figure-line figure-line--sm">
+      <div class="figure"><span class="figure-val">${examined}</span><span class="figure-label">logo boxes examined</span></div>
+      <div class="figure"><span class="figure-val">${skippedCount + rejected.length}</span><span class="figure-label">dropped by the gate</span></div>
+      <div class="figure"><span class="figure-val">${cands.length}</span><span class="figure-label">searched as candidates</span></div>
+      <div class="figure"><span class="figure-val">${escapeHtml(String(os.resolved == null ? 0 : os.resolved))}</span><span class="figure-label">matched a real brand</span></div>
+      <div class="figure figure-quiet"><span class="figure-label">${gate}</span></div>
+    </div>`;
+
+  const cards = cands.map((c) => {
+    const v = c.logo_dev_validation || {};
+    const verified = v.status === 'verified';
+    const { short, legal } = splitCandidateName(c.candidate_name);
+    const frameHref = `/api/scene/${encodeURIComponent(d.job_id)}/${encodeURIComponent(String(c.frame_index))}`;
+
+    // Only real citable pages get links. The model's own prose is not a source.
+    const sources = (c.search_results || [])
+      .filter((r) => r.url && !/gemini_grounded_desc/.test(r.source || ''))
+      .slice(0, 5)
+      .map((r) => `<li><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(sourceLabel(r))}</a></li>`)
+      .join('');
+
+    return `
+      <article class="cand${verified ? ' is-verified' : ''}">
+        <a class="cand-crop" href="${escapeHtml(c.crop_url || frameHref)}" target="_blank" rel="noopener">
+          ${c.crop_url ? `<img src="${escapeHtml(c.crop_url)}" alt="Logo crop from frame ${escapeHtml(String(c.frame_index))}" loading="lazy">` : '<span class="cand-crop-empty">no crop</span>'}
+        </a>
+        <div class="cand-body">
+          <div class="cand-head">
+            <span class="cand-name">${escapeHtml(short || 'Unidentified crop')}</span>
+            <span class="cand-state">${
+              verified ? 'matched a real brand'
+              : c.status === 'candidate_void' ? 'the search could not identify it'
+              : c.status === 'candidate_no_name' ? 'searched, no name found'
+              : 'unverified'
+            }</span>
+          </div>
+          ${legal ? `<p class="cand-legal">${escapeHtml(legal)}</p>` : ''}
+          ${verified && v.domain
+            ? `<p class="cand-match">Matched <b>${escapeHtml(v.brand || short)}</b> on <a href="https://${escapeHtml(v.domain)}" target="_blank" rel="noopener">${escapeHtml(v.domain)}</a></p>`
+            : ''}
+          <div class="cand-meta">
+            <span>${pct(c.confidence)} confidence</span>
+            <a href="${frameHref}" target="_blank" rel="noopener">frame ${escapeHtml(String(c.frame_index))}</a>
+          </div>
+          ${c.search_error ? `<p class="cand-error">${escapeHtml(c.search_error)}</p>` : ''}
+          ${sources ? `<ul class="cand-sources">${sources}</ul>` : ''}
+        </div>
+      </article>`;
+  }).join('');
+
+  const rejectRows = rejected.map((r) => `
+    <li>
+      <span class="mono">frame ${escapeHtml(String(r.frame_index))}</span>
+      <span>${escapeHtml(String(r.width))}&times;${escapeHtml(String(r.height))} px, ${escapeHtml(String(r.aspect))}:1</span>
+      <span class="muted">${r.reason === 'too_small' ? 'too small to search' : 'banner-shaped, skipped'}</span>
+    </li>`).join('');
+
+  const rejects = rejectRows ? `
+    <details class="os-rejects">
+      <summary>${rejected.length} areas skipped on shape</summary>
+      <ul>${rejectRows}</ul>
+    </details>` : '';
 
   if (!cands.length) {
-    return `
-      <div class="empty" style="text-align:left">
-        <div class="note-title">No unidentified brands matched a known logo</div>
-        The search ran and nothing cleared the gate (${gateInfo}). Any unresolved logos are still listed scene by scene.
+    return `${funnel}
+      <div class="os-empty">
+        <div class="note-title">Nothing cleared the gate</div>
+        <p>${examined} logo boxes were examined and none were distinctive enough to search. Unresolved logos stay listed crop by crop in the Scenes tab.</p>
       </div>
-      ${skipRow}
-      ${rejectedRows}`;
+      ${rejects}`;
   }
 
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">Unidentified brand candidates — matched with a real reverse-image search (${escapeHtml(String(os.backend))}) plus logo.dev validation · ${os.resolved} verified. Candidates are lower-trust evidence, never confirmed appearances.</span></div>`;
-  const rows = cands.map((c) => {
-    const results = c.search_results || [];
-    const trail = results
-      .filter((r) => r.url)
-      .slice(0, 6)
-      .map((r) => `<div class="chip chip-ghost"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.url)}</a></div>`)
-      .join('');
-    const tags = results
-      .filter((r) => !r.url)
-      .slice(0, 8)
-      .map((r) => chip(r.title, 'chip--object'))
-      .join('');
-    const validation = c.logo_dev_validation || {};
-    const named = !!c.candidate_name;
-    return `
-      <div class="card">
-        <div class="card-head">
-          <div class="card-title">${named ? escapeHtml(c.candidate_name) : '<span class="openset-state openset-state--unresolved" style="padding:2px 10px">Unidentified crop</span>'}</div>
-          <div class="tag ${c.status === 'candidate_verified' ? 'tag-accent' : ''}"><span class="tag-label">Status</span> ${escapeHtml(c.status)}</div>
-        </div>
-        <div class="card-body">
-          <div class="scene-chips">
-            <span class="chip chip-ghost">Frame ${c.frame_index}</span>
-            ${metaChip('Detection confidence', pct(c.confidence), 'DETECTOR BOX CONFIDENCE', 'chip-ghost')}
-            <span class="chip chip-ghost">logo.dev ${escapeHtml(String(validation.status || 'n/a'))}</span>
-            ${validation.domain ? `<span class="chip chip-ghost">${escapeHtml(validation.domain)}</span>` : ''}
-          </div>
-          ${c.search_error ? `<div class="openset-state openset-state--too-small" style="margin-top:8px">${escapeHtml(c.search_error)}</div>` : ''}
-          ${tags ? `<div class="scene-objects">Engine tags: ${tags}</div>` : ''}
-          ${trail ? `<div class="scene-objects">Source links: ${trail}</div>` : ''}
-          ${c.crop_url ? `<div class="scene-objects"><a class="chip chip-ghost" href="${escapeHtml(c.crop_url)}" target="_blank" rel="noopener">View crop</a></div>` : ''}
-        </div>
-      </div>`;
-  }).join('');
-  return head + rows + rejectedRows + skipRow;
+  return `${funnel}
+    <div class="cand-grid">${cards}</div>
+    <p class="os-note">Candidates are lower-trust than on-screen detections. A match here is a lead, not an appearance — confirm against the crop before you count it.</p>
+    ${rejects}`;
 }
 
 function recommendPanel(d) {
@@ -1118,7 +1187,7 @@ function recommendPanel(d) {
   if (!recs.length) {
     return `<div class="empty">No opportunities yet.<br><br>Try analysing a video with on-screen brand evidence.<br><a href="#/analyse">Analyse a video</a></div>`;
   }
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">Ranked collaboration opportunities &middot; ${recs.length} brands &middot; direct matches (on-screen evidence) first, then suggested matches (brand knowledge)</span></div>`;
+  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${recs.length} brands, ranked. Direct matches (on-screen evidence) come first, then suggested matches from brand knowledge</span></div>`;
   const cards = recs.map((r, i) => `
     <div class="card rec-card">
       <div class="rec-rank">${String(i + 1).padStart(2, '0')}</div>
@@ -1130,11 +1199,11 @@ function recommendPanel(d) {
             ${metaChip('Fit', pct(r.score), 'RECOMMENDATION CONFIDENCE', 'chip-ghost')}
           </div>
         </div>
-        <div class="card-body" style="font-size:var(--text-sm)">
-          ${escapeHtml(r.product || r.brand)} — ${escapeHtml(r.category || 'General')}${r.appearances ? ' · ' + r.appearances + ' appearances' : ' · never on screen'}
+        <div class="card-body" style="font-size:var(--t-sm)">
+          ${escapeHtml(r.product || r.brand)}, ${escapeHtml(r.category || 'General')}${r.appearances ? ', seen ' + r.appearances + ' times' : ', never on screen'}
         </div>
         <div class="rec-reasons">
-          ${r.reasons.map((reason) => chip(reason)).join('')}
+          ${r.reasons.map((reason) => chip(sentence(reason))).join('')}
         </div>
         <div class="rec-contact" style="margin-top:var(--space-2)">
           ${r.hr_emails && r.hr_emails.length
@@ -1147,32 +1216,58 @@ function recommendPanel(d) {
         </div>
       </div>
     </div>`).join('');
-  const wrap = document.createElement('div');
-  wrap.innerHTML = head + cards;
-  return wrap.innerHTML;
+  return head + cards;
 }
 
 function adsPanel(d) {
   if (!d.ads || !d.ads.length) {
     return `<div class="empty">No spoken brand mentions were found in the audio.</div>`;
   }
-  const head = `<div class="card-head" style="margin-bottom:16px"><span class="card-sub">${d.ads.length} spoken brand mentions, transcribed from the audio</span></div>`;
   const rows = d.ads.map((a) => `
-    <div class="card">
-      <div class="card-head">
-        <div class="card-title">${escapeHtml(a.brand)} × ${escapeHtml(d.creator || 'this channel')}</div>
-        <span class="chip chip-accent">${escapeHtml(a.type)}</span>
+    <div class="ads-row">
+      <div class="ads-row-head">
+        <div class="card-title">${escapeHtml(a.brand)} <span class="ads-channel">${escapeHtml(d.creator || 'this channel')}</span></div>
+        <span class="chip chip-ghost">${escapeHtml(a.product || a.brand)}</span>
       </div>
-      <div class="card-body" style="font-size:var(--text-sm)">
-        ${escapeHtml(a.product || a.brand)} — ${escapeHtml(a.category || 'General')}
-      </div>
-      <div class="scene-objects">
-        ${a.start_time != null ? chip(`Mentioned at ${fmtTime(a.start_time)}`, 'chip-ghost') : ''}
-        ${a.start_time != null ? `<a class="chip chip-accent clip-chip" data-ts="${Number(a.start_time).toFixed(2)}" href="#/pipeline/${encodeURIComponent(d.job_id)}?tab=scenes&clip=${Number(a.start_time).toFixed(2)}">&blacktriangleright; Jump to clip</a>` : ''}
-        ${a.scenes.slice(0, 12).map((sc) => chip(sc)).join('')}
+      <p class="ads-where">${a.start_time != null ? `Mentioned at ${fmtTime(a.start_time)}` : 'No timestamp for this mention'}</p>
+      <div class="ads-row-actions">
+        ${a.start_time != null ? `<button type="button" class="btn btn-sm ads-play" data-ts="${Number(a.start_time).toFixed(2)}">&blacktriangleright; Play @ ${fmtTime(a.start_time)}</button>` : ''}
+        ${a.start_time != null ? `<a class="ads-scene-link" href="#/pipeline/${encodeURIComponent(d.job_id)}?tab=scenes&clip=${Number(a.start_time).toFixed(2)}">See it in the scene &rarr;</a>` : ''}
       </div>
     </div>`).join('');
-  return head + rows;
+
+  return `
+    <p class="card-sub" style="max-width:66ch;margin-bottom:var(--space-4)">${d.ads.length} brand${d.ads.length === 1 ? '' : 's'} named out loud in the audio. Play the moment, or open the scene it landed in.</p>
+    <div class="ads-grid">
+      <div class="ads-player">
+        <video id="ads-player" class="clip-player" controls preload="metadata" src="/api/video/${encodeURIComponent(d.job_id)}"></video>
+        <span class="ads-player-hint" id="ads-hint">Pick a mention to play the moment it was said.</span>
+      </div>
+      <div class="ads-list">${rows}</div>
+    </div>`;
+}
+
+// The ads tab used to have no player at all: "jump to clip" navigated to the
+// scenes tab, so the only way to hear a mention was to leave the page you were
+// reading. This binds a player that lives on the tab.
+function wireAdsPanel(root) {
+  const player = $('#ads-player', root);
+  const hint = $('#ads-hint', root);
+  if (!player || player.dataset.adsWired) return;
+  player.dataset.adsWired = '1';
+  $$('.ads-play', root).forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = Math.max(0, parseFloat(btn.dataset.ts) - 1.5);
+      const play = () => {
+        player.currentTime = target;
+        player.play().catch(() => { /* needs a gesture the browser gave us */ });
+      };
+      if (player.readyState >= 2) play();
+      else player.addEventListener('loadedmetadata', play, { once: true });
+      $$('.ads-play', root).forEach((b) => b.classList.toggle('is-on', b === btn));
+      if (hint) hint.textContent = `Playing from ${btn.textContent.replace(/^▸\s*/, '')}`;
+    });
+  });
 }
 
 function outreachPanel(d) {
@@ -1192,13 +1287,35 @@ const outreachBrands = (d) => (d.recommendations || []);
 
 /* ── Outreach page ────────────────────────────────────────── */
 
-let outreachState = { id: null, data: null, brand: null };
+let outreachState = { id: null, data: null, brand: null, facts: null };
 let outreachEnabled = false;
 let outreachDisabledReason = 'Draft email is off — the outreach data path hasn\u2019t passed its integrity review yet.';
 
+// Outreach only exists per project, so the bare route asks which one rather
+// than erroring. It is also where the editor's "back to projects" button lands.
+async function renderOutreachPicker(root) {
+  root.innerHTML = loaderHtml('Loading your projects');
+  try {
+    const { jobs } = await api('/api/jobs');
+    if (!jobs.length) {
+      root.innerHTML =
+        `<h2 class="page-title" style="margin-bottom:24px">Write to a brand</h2>` +
+        `<div class="empty">No projects yet \u2014 analyse a video to find brands worth writing to.<br><br><a href="#/analyse">Analyse a video</a></div>`;
+      return;
+    }
+    root.innerHTML =
+      `<h2 class="page-title" style="margin-bottom:24px">Write to a brand</h2>` +
+      `<p class="muted" style="max-width:60ch;margin-bottom:20px">Pick the project whose brands you want to draft to.</p>` +
+      JOB_LIST_HEADERS +
+      jobs.map((j, i) => jobRow(j, i, (jobId) => `#/outreach/${encodeURIComponent(jobId)}`)).join('');
+  } catch (err) {
+    root.innerHTML = errorHtml(err.message);
+  }
+}
+
 async function renderOutreach(id, params) {
   const root = $('#outreach-root');
-  if (!id) { root.innerHTML = errorHtml('No project was referenced'); return; }
+  if (!id) return renderOutreachPicker(root);
 
   root.innerHTML = loaderHtml('Loading your brands');
   outreachState.id = id;
@@ -1219,28 +1336,52 @@ async function renderOutreach(id, params) {
   }
 }
 
+function brandDetailHtml(p) {
+  if (!p) return '';
+  const type = friendlyRecType(p.type || '');
+  const reasons = (p.reasons || []).map((r) => `<li>${escapeHtml(sentence(r))}</li>`).join('');
+  const hr = (p.hr_emails || []).filter(Boolean);
+  return `
+    <div class="brand-detail">
+      <h2 class="page-title">${escapeHtml(p.brand)}</h2>
+      <p class="project-line">
+        <span>${escapeHtml(p.product || p.brand)}</span>
+        <span>${escapeHtml(p.category || 'General')}</span>
+        <span>${p.appearances ? p.appearances + (p.appearances === 1 ? ' appearance' : ' appearances') : 'never on screen'}</span>
+        <span>${type}</span>
+      </p>
+    </div>`;
+}
+
+function evidenceHtml(p, facts) {
+  if (!p) return '';
+  const items = (facts && facts.length ? facts : (p.reasons || [])).map((f) => `<li>${escapeHtml(sentence(f))}</li>`).join('');
+  if (!items) return '';
+  return `
+    <div class="why">
+      <span class="editor-label">Why this brand</span>
+      <ul class="why-list">${items}</ul>
+    </div>`;
+}
+
 function renderOutreachEditor(root, d) {
   const products = outreachBrands(d);
   const active = outreachState.brand || (products[0] && products[0].brand);
 
+  // The list is for choosing, not for reading: one brand per row, its detail
+  // lives in the editor. Twelve rows of four lines each was a wall of prose.
   const brandsList = products.length
     ? products.map((p) => `
-        <div class="brand-row${p.brand === active ? ' is-active' : ''}" data-brand="${escapeHtml(p.brand)}">
-          <div class="brand-name">${escapeHtml(p.brand)}<span class="brand-type"> ${escapeHtml(friendlyRecType(p.type || ''))}</span></div>
-          <div class="brand-product">${escapeHtml(p.product || p.brand)} · ${escapeHtml(p.category || 'General')} · ${p.appearances ? p.appearances + ' appearances' : 'never on screen'}</div>
-          <div class="brand-contact">${p.contact_email
-            ? escapeHtml(p.contact_email) + (p.contact_email_source === 'gemini_grounding'
-              ? ' <span class="chip chip-ghost">Found via Gemini · unverified</span>' : '')
-            : 'No known contact — add one manually'}</div>
-          ${(p.hr_emails || []).length
-            ? `<div class="brand-product">HR: ${p.hr_emails.map((e) => escapeHtml(e)).join(' · ')}</div>`
-            : ''}
-        </div>`).join('')
-    : `<div class="empty">No recommended brands</div>`;
+        <button type="button" class="brand-row${p.brand === active ? ' is-active' : ''}" data-brand="${escapeHtml(p.brand)}">
+          <span class="brand-name">${escapeHtml(p.brand)}</span>
+          <span class="brand-meta">${escapeHtml(friendlyRecType(p.type || ''))}${p.appearances ? ` · ${p.appearances} on screen` : ' · never on screen'}</span>
+        </button>`).join('')
+    : `<div class="empty">No recommended brands yet</div>`;
 
   root.innerHTML = `
-    <div class="outreach-brands">${brandsList}</div>
+    <div class="outreach-brands" role="group" aria-label="Brands to contact">${brandsList}</div>
     <div class="outreach-editor">
+      <div id="brand-detail"></div>
       <div class="editor-toolbar">
         <div class="editor-target">
           <span class="editor-label">Target email</span>
@@ -1252,6 +1393,7 @@ function renderOutreachEditor(root, d) {
           <button class="btn btn-sm" id="btn-forward">Forward</button>
         </div>
       </div>
+      <div id="brand-evidence"></div>
       <div class="editor-subject">
         <span class="editor-label">Subject</span>
         <div class="editor-subject-text" id="editor-subject"></div>
@@ -1261,21 +1403,46 @@ function renderOutreachEditor(root, d) {
     </div>
   `;
 
+  const subject = $('#editor-subject', root);
+  const body = $('#editor-body', root);
+  const foot = $('#editor-foot', root);
+  const targetInput = $('#target-name', root);
+  const detail = $('#brand-detail', root);
+  const evidence = $('#brand-evidence', root);
+
   const selectBrand = (brand) => {
     outreachState.brand = brand;
+    outreachState.facts = null;
     $$('.brand-row', root).forEach((r) =>
       r.classList.toggle('is-active', r.dataset.brand === brand)
     );
     const p = products.find((x) => x.brand === brand);
-    const hint = $('#target-hint');
+    detail.innerHTML = brandDetailHtml(p);
+    evidence.innerHTML = evidenceHtml(p, null);
+    subject.textContent = '';
+    body.textContent = '';
+    foot.textContent = '';
+    foot.classList.remove('forwarded');
+    const hint = $('#target-hint', root);
     if (p && p.contact_email) {
-      $('#target-name').value = p.contact_email;
+      targetInput.value = p.contact_email;
       hint.textContent = p.contact_email_source === 'gemini_grounding'
-        ? `Found via Gemini search — not verified, confirm before sending${p.contact_website ? ' · ' + p.contact_website : ''}`
-        : `Auto-filled from the brand catalog${p.contact_verified ? '' : ' · unverified, confirm before sending'}${p.contact_website ? ' · ' + p.contact_website : ''}`;
+        ? `Found via Gemini search, not verified. Confirm before sending.${p.contact_website ? ' ' + p.contact_website : ''}`
+        : `Auto-filled from the brand catalog${p.contact_verified ? '' : ' Unverified, confirm before sending.'}${p.contact_website ? ' ' + p.contact_website : ''}`;
     } else {
-      $('#target-name').value = '';
+      targetInput.value = '';
       hint.textContent = 'No known contact — enter the brand email manually';
+    }
+    const hr = (p && p.hr_emails || []).filter(Boolean);
+    if (hr.length) {
+      const wrap = document.createElement('div');
+      wrap.className = 'hr-chips';
+      wrap.innerHTML = hr.map((e) => `<button type="button" class="chip chip-ghost" data-email="${escapeHtml(e)}">${escapeHtml(e)}</button>`).join('');
+      $$('.chip', wrap).forEach((c) => c.addEventListener('click', () => {
+        targetInput.value = c.dataset.email;
+        hint.textContent = 'Copied from the brand record. Confirm before sending.';
+      }));
+      hint.after(wrap);
     }
     history.replaceState(null, '', `#/outreach/${encodeURIComponent(d.job_id)}?brand=${encodeURIComponent(brand)}`);
   };
@@ -1284,144 +1451,66 @@ function renderOutreachEditor(root, d) {
     r.addEventListener('click', () => { selectBrand(r.dataset.brand); })
   );
 
-  const subject = $('#editor-subject');
-  const body = $('#editor-body');
-  const foot = $('#editor-foot');
-  const targetInput = $('#target-name');
-  const generateBtn = $('#btn-generate');
-  const forwardBtn = $('#btn-forward');
-
-  // Prefill the active brand's contact on load
   selectBrand(active);
 
-  generateBtn.addEventListener('click', async () => {
+  $('#btn-generate', root).addEventListener('click', async () => {
     if (!outreachState.brand) return;
     const target = targetInput.value.trim();
     if (!target) {
       foot.textContent = 'Enter a target email before generating';
       return;
     }
-    generateBtn.disabled = true;
-    generateBtn.textContent = 'Generating…';
+    const btn = $('#btn-generate', root);
+    btn.disabled = true;
+    btn.textContent = 'Generating…';
     foot.textContent = '';
+    foot.classList.remove('forwarded');
     try {
       const res = await api('/api/outreach/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          job_id: d.job_id,
-          brand: outreachState.brand,
-          target,
-        }),
+        body: JSON.stringify({ job_id: d.job_id, brand: outreachState.brand, target }),
       });
       subject.textContent = res.subject;
       body.textContent = res.body;
-      foot.textContent = `Draft generated · to ${escapeHtml(res.target)} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      // The server already worked out why it wrote those claims; show them
+      // rather than making the operator take the letter on faith.
+      const facts = (res.rationale && res.rationale.evidence_facts) || [];
+      outreachState.facts = facts;
+      evidence.innerHTML = evidenceHtml(products.find((x) => x.brand === outreachState.brand), facts);
+      foot.textContent = `Draft generated · to ${res.target} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
     } catch (err) {
       foot.textContent = `Generate failed — ${err.message}`;
     } finally {
-      generateBtn.disabled = false;
-      generateBtn.textContent = 'Generate draft';
+      btn.disabled = false;
+      btn.textContent = 'Generate draft';
     }
   });
 
-  forwardBtn.addEventListener('click', async () => {
+  $('#btn-forward', root).addEventListener('click', async () => {
     if (!outreachState.brand) return;
     if (!body.textContent.trim()) {
       foot.textContent = 'Generate a draft before forwarding';
       return;
     }
-    forwardBtn.disabled = true;
-    forwardBtn.textContent = 'Forwarding…';
+    const btn = $('#btn-forward', root);
+    btn.disabled = true;
+    btn.textContent = 'Forwarding…';
     try {
       const res = await api('/api/outreach/forward', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: d.job_id, brand: outreachState.brand }),
       });
-      foot.textContent = `Forwarded to ${escapeHtml(res.target)} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      foot.textContent = `Forwarded to ${res.target} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       foot.classList.add('forwarded');
     } catch (err) {
       foot.textContent = `Forward failed — ${err.message}`;
     } finally {
-      forwardBtn.disabled = false;
-      forwardBtn.textContent = 'Forward';
+      btn.disabled = false;
+      btn.textContent = 'Forward';
     }
   });
-}
-
-/* ── Login page ───────────────────────────────────────────── */
-
-async function renderLogin() {
-  const root = $('#login-root');
-  try {
-    const me = await api('/api/me');
-    if (me.authenticated === true) {
-      root.innerHTML = `
-        <div class="auth-card" style="max-width:480px">
-          <h2 class="page-title">Signed in</h2>
-          <p class="page-copy">You're signed in as <strong>${escapeHtml(me.user)}</strong>.</p>
-          <div class="auth-actions">
-            <a class="btn btn-primary" href="#/pipeline">Open your projects</a>
-            <a class="btn" id="btn-logout" href="#/">Log out</a>
-          </div>
-        </div>`;
-      $('#btn-logout').addEventListener('click', async (e) => {
-        e.preventDefault();
-        try { await api('/api/logout', { method: 'POST' }); } catch (err) { /* noop */ }
-        setToken(null);
-        location.hash = '#/login';
-      });
-      return;
-    }
-    if (me.auth_enabled !== true) {
-      root.innerHTML = `<div class="auth-card" style="max-width:480px">
-        <h2 class="page-title">Open access</h2>
-        <p class="page-copy">No login is required in this deployment.<br><a href="#/pipeline">Open your projects</a></p>
-      </div>`;
-      return;
-    }
-    root.innerHTML = `
-      <div class="auth-card" style="max-width:480px">
-        <h2 class="page-title">Sign in</h2>
-        <p class="page-copy">Admin-only access for this deployment.</p>
-        <form id="login-form" class="analyse-form">
-          <div class="field">
-            <label class="field-label" for="login-user">Username</label>
-            <input id="login-user" class="input" type="text" autocomplete="username" spellcheck="false">
-          </div>
-          <div class="field">
-            <label class="field-label" for="login-pass">Password</label>
-            <input id="login-pass" class="input" type="password" autocomplete="current-password">
-          </div>
-          <button class="btn btn-primary btn-block" type="submit">Sign in</button>
-        </form>
-        <div id="login-status" class="status-line" hidden></div>
-      </div>`;
-    $('#login-form').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const status = $('#login-status');
-      status.hidden = false;
-      status.textContent = 'Signing you in…';
-      try {
-        const res = await api('/api/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            username: $('#login-user').value.trim(),
-            password: $('#login-pass').value,
-          }),
-        });
-        setToken(res.token);
-        location.hash = '#/pipeline';
-      } catch (err) {
-        status.textContent = `Sign-in failed — ${escapeHtml(err.message)}`;
-        status.className = 'status-line error';
-      }
-    });
-  } catch (err) {
-    root.innerHTML = errorHtml(err.message);
-  }
 }
 
 /* ── Insights page ────────────────────────────────────────── */
@@ -1509,7 +1598,7 @@ function renderInsightsDetail(root, d) {
             ${metaChip('Fit', pct(r.score), 'RECOMMENDATION CONFIDENCE', 'chip-ghost')}
           </div>
         </div>
-        <div class="rec-reasons">${(r.reasons || []).map((reason) => chip(escapeHtml(reason))).join('')}</div>
+        <div class="rec-reasons">${(r.reasons || []).map((reason) => chip(sentence(reason))).join('')}</div>
       </div>
     </div>`).join('') || '<div class="empty">No recommendations</div>';
 
@@ -1550,6 +1639,81 @@ function renderInsightsDetail(root, d) {
     <div class="meta-row" style="margin-top:24px">
       <a class="btn" href="#/pipeline/${encodeURIComponent(d.job_id)}">Open the full dashboard</a>
     </div>`;
+}
+
+/* ── Login ────────────────────────────────────────────────── */
+
+async function renderLogin() {
+  const root = $('#login-root');
+  try {
+    const me = await api('/api/me');
+    if (me.authenticated === true) {
+      root.innerHTML = `
+        <div class="auth-card">
+          <h2 class="page-title">Signed in</h2>
+          <p class="page-copy">You're signed in as <strong>${escapeHtml(me.user)}</strong>.</p>
+          <div class="auth-actions">
+            <a class="btn btn-primary" href="#/pipeline">Open your projects</a>
+            <a class="btn" id="btn-logout" href="#/">Log out</a>
+          </div>
+        </div>`;
+      $('#btn-logout').addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await api('/api/logout', { method: 'POST' }); } catch (err) { /* noop */ }
+        setToken(null);
+        location.hash = '#/login';
+      });
+      return;
+    }
+    if (me.auth_enabled !== true) {
+      root.innerHTML = `
+        <div class="auth-card">
+          <h2 class="page-title">Open access</h2>
+          <p class="page-copy">No login is required in this deployment.<br><a href="#/pipeline">Open your projects</a></p>
+        </div>`;
+      return;
+    }
+    root.innerHTML = `
+      <div class="auth-card">
+        <h2 class="page-title">Sign in</h2>
+        <p class="page-copy">Admin-only access for this deployment.</p>
+        <form id="login-form" class="analyse-form">
+          <div class="field">
+            <label class="field-label" for="login-user">Username</label>
+            <input id="login-user" class="input" type="text" autocomplete="username" spellcheck="false">
+          </div>
+          <div class="field">
+            <label class="field-label" for="login-pass">Password</label>
+            <input id="login-pass" class="input" type="password" autocomplete="current-password">
+          </div>
+          <button class="btn btn-primary btn-block" type="submit">Sign in</button>
+        </form>
+        <div id="login-status" class="status-line" hidden></div>
+      </div>`;
+    $('#login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const status = $('#login-status');
+      status.hidden = false;
+      status.textContent = 'Signing you in…';
+      try {
+        const res = await api('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: $('#login-user').value.trim(),
+            password: $('#login-pass').value,
+          }),
+        });
+        setToken(res.token);
+        location.hash = '#/pipeline';
+      } catch (err) {
+        status.textContent = `Sign-in failed — ${escapeHtml(err.message)}`;
+        status.className = 'status-line error';
+      }
+    });
+  } catch (err) {
+    root.innerHTML = errorHtml(err.message);
+  }
 }
 
 /* ── Boot ─────────────────────────────────────────────────── */

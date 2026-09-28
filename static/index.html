@@ -6,8 +6,8 @@
   <title>Contextlens — Video brand intelligence</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=8">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=14">
 </head>
 <body>
 
@@ -24,7 +24,6 @@
       </a>
       <a class="nav-item" id="nav-analyse" href="#/analyse">
         <span>Analyse</span>
-        <span class="ai-badge nav-ai-badge">AI</span>
       </a>
       <a class="nav-item" id="nav-pipeline" href="#/pipeline">
         <span>Projects</span>
@@ -44,19 +43,45 @@
     <!-- Landing -->
     <section id="view-landing" class="view view-landing">
       <div class="landing-inner">
-        <p class="landing-kicker">Video brand intelligence</p>
-        <h1 class="landing-title">Uncover brand sponsorship opportunities from your video archives.</h1>
-        <p class="landing-sub">
-          Contextlens parses your video's audio, visuals and on-screen text to surface
-          the scenes, objects and brands that appear — so you can spot sponsorship
-          matches fast.
-        </p>
-        <div class="landing-actions">
-          <a class="btn-primary landing-cta" href="#/analyse">
-            Analyse a video
-          </a>
-          <a class="btn-secondary" href="#/pipeline">View my projects</a>
+        <div class="landing-grid">
+          <div>
+            <h1 class="landing-title">Every brand in your video, with the timestamp that proves it.</h1>
+            <p class="landing-sub">
+              Contextlens reads the audio, every frame and the on-screen text, then shows
+              you which brands appeared and what evidence stands behind each one.
+            </p>
+            <div class="landing-actions">
+              <a class="btn-primary" href="#/analyse">Analyse a video</a>
+              <a class="btn-secondary" href="#/pipeline">Open a project</a>
+            </div>
+          </div>
+
+          <div class="reel">
+            <div class="reel-plate">
+              <div class="reel-slate">
+                <span class="reel-tc">00:00:42:11</span>
+                <span>Frame 01043</span>
+              </div>
+              <div class="reel-frame">
+                <div class="reel-box">
+                  <span class="reel-box-label">Logo <span>87%</span></span>
+                </div>
+              </div>
+              <div class="reel-foot">
+                <span>1280&times;720</span>
+                <span>30.0 fps</span>
+              </div>
+            </div>
+            <div class="reel-ruler">
+              <div class="reel-track"><span class="reel-playhead"></span></div>
+              <div class="reel-ticks">
+                <span>00:00</span><span>00:10</span><span>00:20</span>
+                <span>00:30</span><span>00:40</span><span>00:50</span>
+              </div>
+            </div>
+          </div>
         </div>
+
         <div class="landing-signals">
           <div class="landing-signal">
             <span class="landing-signal-name">Audio</span>
@@ -79,7 +104,7 @@
       <div class="analyse-layout">
 
         <div class="analyse-lede">
-          <h2 class="page-title">Analyse a video</h2>
+          <h1 class="page-title">Analyse a video</h1>
           <p class="page-copy">
             Drop in a video and Contextlens will find the brands that appear on screen,
             read text and speech mentions, and surface sponsorship opportunities —
@@ -109,15 +134,15 @@
         <div class="analyse-card">
           <div class="analyse-card-head">
             <div class="card-title">Upload a video</div>
-            <span class="tag tag-muted"><span class="tag-label">Format</span> MP4 &middot; MOV &middot; WebM</span>
+            <span class="tag tag-muted"><span class="tag-label">Format</span> MP4 / MOV / WebM</span>
           </div>
 
           <form id="analyse-form" class="analyse-form">
             <div class="field">
-              <label class="field-label" for="video-file">Video file <span>— up to 200 MB</span></label>
+              <label class="field-label" for="video-file">Video file</label>
               <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="Select video file">
-                <span>Choose a video / drag it here</span>
-                <span class="dropzone-hint">MP4, MOV, or WebM up to 200 MB</span>
+                <span>Choose a video</span>
+                <span class="dropzone-hint">Drop it here, or browse. 200 MB max</span>
                 <input id="video-file" type="file" accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm" hidden>
               </div>
               <div id="file-status" class="file-status"></div>
@@ -135,8 +160,8 @@
             </div>
 
             <div class="field">
-              <label class="field-label" for="video-duration">Duration <span>optional — we detect this automatically</span></label>
-              <input id="video-duration" class="input" type="text" placeholder="Duration in seconds" autocomplete="off">
+              <label class="field-label" for="video-duration">Duration <span class="muted">optional</span></label>
+              <input id="video-duration" class="input" type="text" placeholder="Leave blank, we detect it" autocomplete="off">
             </div>
 
             <button id="btn-extract" class="primary-button btn-block" type="submit">Analyse video</button>
@@ -173,10 +198,10 @@
     <section id="view-pipeline" class="view">
       <div class="page-wrap">
         <div class="view-head">
-          <button class="icon-button" id="btn-back-home" hidden>
+          <button class="icon-button" id="btn-back-home" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h2 class="page-title page-title-md">Projects</h2>
+          <h1 class="page-title page-title-md">Projects</h1>
         </div>
         <div id="pipeline-root"></div>
       </div>
@@ -186,10 +211,10 @@
     <section id="view-outreach" class="view">
       <div class="page-wrap">
         <div class="view-head">
-          <button class="icon-button" id="btn-back-outreach" hidden>
+          <button class="icon-button" id="btn-back-outreach" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h2 class="page-title page-title-md">Outreach</h2>
+          <h1 class="page-title page-title-md">Outreach</h1>
         </div>
         <div id="outreach-root" class="outreach-grid"></div>
       </div>
@@ -199,10 +224,10 @@
     <section id="view-insights" class="view">
       <div class="page-wrap">
         <div class="view-head">
-          <button class="icon-button" id="btn-back-insights" hidden>
+          <button class="icon-button" id="btn-back-insights" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h2 class="page-title page-title-md">Insights</h2>
+          <h1 class="page-title page-title-md">Insights</h1>
         </div>
         <div id="insights-root"></div>
       </div>
@@ -216,6 +241,6 @@
   </main>
 </div>
 
-  <script src="/app.js?v=5"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
