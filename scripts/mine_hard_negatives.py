@@ -81,6 +81,11 @@ def main() -> int:
     ap.add_argument("--out", default="benchmark/hard_negatives")
     ap.add_argument("--target", type=int, default=390, help="negatives to keep (3:1 vs 129)")
     ap.add_argument("--conf", type=float, default=0.05, help="the audit's best-F1 point")
+    ap.add_argument("--videos", default="",
+                    help="comma-separated video md5s to mine. Defaults to every "
+                         "video under --frames. Must EXCLUDE any video used as "
+                         "VAL: mining a VAL video's false positives puts that "
+                         "video's failures into TRAIN, which is leakage.")
     ap.add_argument("--pad", type=float, default=0.5, help="context pad, fraction of box size")
     ap.add_argument("--imgsz", type=int, default=640)
     ap.add_argument("--device", default=None)
@@ -101,7 +106,13 @@ def main() -> int:
     leaked = [p for p in train_files if frozen in p.parents]
     if leaked:
         sys.exit(f"FATAL: {len(leaked)} frozen-TEST frames inside {frames_root}")
-    print(f"TRAIN pool: {len(train_files)} frames, frozen TEST excluded")
+    if args.videos:
+        keep = set(args.videos.split(","))
+        train_files = [p for p in train_files if p.name.split("_")[0] in keep]
+        if not train_files:
+            sys.exit(f"FATAL: no frames match --videos {args.videos}")
+    print(f"TRAIN pool: {len(train_files)} frames, frozen TEST excluded"
+          + (f", restricted to {args.videos}" if args.videos else ""))
 
     from ultralytics import YOLO
     model = YOLO(args.model)
