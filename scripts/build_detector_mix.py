@@ -49,6 +49,12 @@ def main() -> int:
     ap.add_argument("--stress-max-frac", type=float, default=0.01,
                     help="a VAL box under this share of frame area is a stress "
                          "case. 0.01 = tiny only; widen to 0.05 to sweep small in too")
+    ap.add_argument("--neg-per-positive", type=float, default=1.5,
+                    help="cap on empty-label negatives per positive box in TRAIN. "
+                         "The cap falls on the mined crops; human full-frame "
+                         "negatives are never dropped, so the achieved ratio can "
+                         "exceed this. 0 = humans only, no mined crops. The "
+                         "uncapped build measured 3.66 and trained to nothing.")
     ap.add_argument("--seed", type=int, default=20260928)
     args = ap.parse_args()
 
@@ -133,9 +139,25 @@ def main() -> int:
         if s:
             st_stats.append(s)
 
-    # ── hard negatives join TRAIN as empty-label crops
-    hn = 0
-    for img in sorted(Path(args.hard_negatives).glob("images/*.jpg")):
+    # ── hard negatives join TRAIN as empty-label crops, CAPPED against the
+    #    positives. Uncapped this mix shipped 390 crops and 64 human negative
+    #    frames against 124 boxes (3.66:1), and the fine-tune that consumed it
+    #    ended below its own pretrained init: val mAP50 fell 0.0015 -> 0.00006
+    #    and val cls_loss climbed 5.07 -> 17.9 by epoch 5. At that ratio the
+    #    cheapest prediction is "emit nothing", which is what it learned.
+    #    The cap falls on the mined crops because they are the droppable part:
+    #    the human full-frame negatives are 64 frames of reviewed ground truth
+    #    and the crops are 390 machine crops of a single 10-minute video.
+    pos_boxes = sum(s["boxes"] for s in tr_stats)
+    neg_frames = sum(1 for s in tr_stats if not s["boxes"])
+    budget = max(int(round(args.neg_per_positive * pos_boxes)) - neg_frames, 0)
+    crops = sorted(Path(args.hard_negatives).glob("images/*.jpg"))
+    rng.shuffle(crops)
+    hn, dropped = 0, 0
+    for img in crops:
+        if hn >= budget:
+            dropped += 1
+            continue
         shutil.copy2(img, out / "images/train" / img.name)
         lab = Path(args.hard_negatives) / "labels" / f"{img.stem}.txt"
         (out / "labels/train" / f"{img.stem}.txt").write_text(
@@ -183,6 +205,14 @@ def main() -> int:
     tp = manifest["train"]["positive_boxes"]
     manifest["ratio_negative_to_positive"] = round(
         (manifest["train"]["negative_frames_empty_label"] + hn) / max(tp, 1), 2)
+    manifest["neg_per_positive_cap"] = args.neg_per_positive
+    manifest["hard_negative_crops_dropped"] = dropped
+    # The cap fixes the ratio. It cannot fix single-source positives, and that is
+    # the residual risk: no ratio makes 124 boxes from one video a generalizable
+    # logo detector. Recorded here so no downstream report can quietly omit it.
+    pos_vids = sorted({s["video"] for s in tr_stats if s["boxes"]})
+    manifest["train"]["videos_carrying_positives"] = pos_vids
+    manifest["train"]["positives_from_one_video"] = len(pos_vids) < 2
 
     # stress.yaml exists so the stress set is runnable, and is deliberately NOT
     # referenced by data.yaml.
@@ -234,6 +264,10 @@ def main() -> int:
 
     print(json.dumps(manifest, indent=2))
     print(f"\n-> {out}   (no training performed)")
+    if manifest["train"]["positives_from_one_video"]:
+        print(f"\nWARNING: every TRAIN positive box comes from {pos_vids} "
+              f"({tp} boxes). The negative cap cannot fix that; label another "
+              f"video's logos or do not read VAL as generalization.")
     return 0
 
 

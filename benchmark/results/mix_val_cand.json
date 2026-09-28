@@ -1,0 +1,195 @@
+{
+  "model": "runs/detect/benchmark/train_mix/train_1p5/weights/best.pt",
+  "split": "val",
+  "root": "benchmark/train_mix",
+  "map50": 0.0,
+  "map50_95": 0.0,
+  "precision": 0.0001,
+  "recall": 0.0882,
+  "auroc_logo_vs_nonlogo_maxconf": 0.4601,
+  "pr_auc_box_level": 0.0023,
+  "logo_maxconf_mean": 0.0197,
+  "nonlogo_maxconf_mean": 0.0194,
+  "median_gt_bbox_area_frac": 0.05561,
+  "sweep": [
+    {
+      "conf": 0.05,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.07,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.07
+    },
+    {
+      "conf": 0.1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.01
+    },
+    {
+      "conf": 0.15,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.2,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.25,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.3,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.4,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.6,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.7,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.0,
+      "fn_per_image": 0.08,
+      "fp_per_nonlogo_image": 0.0
+    }
+  ],
+  "best_f1": {
+    "conf": 0.25,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "tp_per_image": 0.0,
+    "fp_per_image": 0.0,
+    "fn_per_image": 0.08,
+    "fp_per_nonlogo_image": 0.0
+  },
+  "fired_matrix": {
+    "conf": 0.25,
+    "logo_frames": 26,
+    "logo_free_frames": 393,
+    "fired_on_logo": 0,
+    "silent_on_logo": 26,
+    "fired_on_free": 0,
+    "silent_on_free": 393,
+    "logo_frame_recall": 0.0,
+    "fp_per_logo_free_frame": 0.0,
+    "box_recall": 0.0,
+    "boxes": 34,
+    "tp": 0
+  },
+  "gt_area_frac": {
+    "boxes": 34,
+    "p10": 0.01577,
+    "p50": 0.05561,
+    "p90": 0.15755,
+    "frac_under_1pct_frame": 0.0
+  },
+  "per_size": {
+    "tiny": {
+      "gt": 0,
+      "tp": 0,
+      "fn": 0,
+      "recall": 0.0,
+      "median_px2": 0.0,
+      "median_area_frac": 0.0
+    },
+    "small": {
+      "gt": 12,
+      "tp": 0,
+      "fn": 12,
+      "recall": 0.0,
+      "median_px2": 3848.005440000001,
+      "median_area_frac": 0.016701412500000005
+    },
+    "medium": {
+      "gt": 22,
+      "tp": 0,
+      "fn": 22,
+      "recall": 0.0,
+      "median_px2": 20834.0218400256,
+      "median_area_frac": 0.09042544201400002
+    },
+    "large": {
+      "gt": 0,
+      "tp": 0,
+      "fn": 0,
+      "recall": 0.0,
+      "median_px2": 0.0,
+      "median_area_frac": 0.0
+    }
+  },
+  "per_group": [
+    {
+      "group": "df01d5a843",
+      "images": 419,
+      "gt": 34,
+      "tp": 0,
+      "fp": 0,
+      "fn": 34,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "map50_star": 0.0
+    }
+  ]
+}

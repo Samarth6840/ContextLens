@@ -274,11 +274,19 @@ def main() -> int:
     print(f"  {'detector SILENT':<22}{fired['silent_on_logo']:>18}{fired['silent_on_free']:>18}")
     print(f"\n  logo-frame recall  {fired['logo_frame_recall']:.4f}"
           f"   ({fired['fired_on_logo']}/{fired['logo_frames']} logo frames got >=1 box)")
-    print(f"  FP / logo-free frame  {fired['fp_per_logo_free_frame']:.4f}"
-          f"   ({fired['fired_on_free']}/{fired['logo_free_frames']} empty frames got a box)")
+    # A split with no logo-free frames has no FP rate, it is not a zero FP rate.
+    # The stress set is positive-only by construction (it is carved out of VAL
+    # frames that HAVE a box), so this is the normal case there, not an edge
+    # case - and an unguarded format of None aborts the run before --out is
+    # written, which silently means the stress set has never been graded.
+    fplf = fired['fp_per_logo_free_frame']
+    print(f"  FP / logo-free frame  "
+          f"{'undefined (no logo-free frames in this split)' if fplf is None else f'{fplf:.4f}'}"
+          + (f"   ({fired['fired_on_free']}/{fired['logo_free_frames']} empty frames got a box)"
+             if fplf is not None else ""))
     print(f"  logo-BOX recall (best-F1 conf)  {fired['box_recall']:.4f}")
-    print("  A) 328 empty frames were mostly NO LOGO -> fired_on_free is low")
-    print("  B) they were missed logos        -> silent_on_logo is high")
+    print("  A) empty frames are truly logo-free -> fired_on_free is low")
+    print("  B) they were missed logos          -> silent_on_logo is high")
 
     sizes = size_breakdown(rows, best["conf"])
     print("\n=== per object size (GT area in px, best-F1 conf) ===")

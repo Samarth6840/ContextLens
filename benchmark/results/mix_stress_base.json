@@ -1,0 +1,195 @@
+{
+  "model": "runs/detect/weights/logo_corpus/train/weights/best.pt",
+  "split": "stress",
+  "root": "benchmark/train_mix",
+  "map50": 0.1157,
+  "map50_95": 0.0365,
+  "precision": 0.1894,
+  "recall": 0.1858,
+  "auroc_logo_vs_nonlogo_maxconf": null,
+  "pr_auc_box_level": 0.1961,
+  "logo_maxconf_mean": 0.3096,
+  "nonlogo_maxconf_mean": null,
+  "median_gt_bbox_area_frac": 0.00869,
+  "sweep": [
+    {
+      "conf": 0.05,
+      "precision": 0.1408,
+      "recall": 0.2326,
+      "f1": 0.1754,
+      "tp_per_image": 0.53,
+      "fp_per_image": 3.21,
+      "fn_per_image": 1.74,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.1,
+      "precision": 0.1915,
+      "recall": 0.2093,
+      "f1": 0.2,
+      "tp_per_image": 0.47,
+      "fp_per_image": 2.0,
+      "fn_per_image": 1.79,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.15,
+      "precision": 0.1389,
+      "recall": 0.1163,
+      "f1": 0.1266,
+      "tp_per_image": 0.26,
+      "fp_per_image": 1.63,
+      "fn_per_image": 2.0,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.2,
+      "precision": 0.1538,
+      "recall": 0.093,
+      "f1": 0.1159,
+      "tp_per_image": 0.21,
+      "fp_per_image": 1.16,
+      "fn_per_image": 2.05,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.25,
+      "precision": 0.1739,
+      "recall": 0.093,
+      "f1": 0.1212,
+      "tp_per_image": 0.21,
+      "fp_per_image": 1.0,
+      "fn_per_image": 2.05,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.3,
+      "precision": 0.2222,
+      "recall": 0.093,
+      "f1": 0.1311,
+      "tp_per_image": 0.21,
+      "fp_per_image": 0.74,
+      "fn_per_image": 2.05,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.4,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.47,
+      "fn_per_image": 2.26,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.5,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.26,
+      "fn_per_image": 2.26,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.6,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.11,
+      "fn_per_image": 2.26,
+      "fp_per_nonlogo_image": 0.0
+    },
+    {
+      "conf": 0.7,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "tp_per_image": 0.0,
+      "fp_per_image": 0.05,
+      "fn_per_image": 2.26,
+      "fp_per_nonlogo_image": 0.0
+    }
+  ],
+  "best_f1": {
+    "conf": 0.1,
+    "precision": 0.1915,
+    "recall": 0.2093,
+    "f1": 0.2,
+    "tp_per_image": 0.47,
+    "fp_per_image": 2.0,
+    "fn_per_image": 1.79,
+    "fp_per_nonlogo_image": 0.0
+  },
+  "fired_matrix": {
+    "conf": 0.1,
+    "logo_frames": 19,
+    "logo_free_frames": 0,
+    "fired_on_logo": 15,
+    "silent_on_logo": 4,
+    "fired_on_free": 0,
+    "silent_on_free": 0,
+    "logo_frame_recall": 0.7894736842105263,
+    "fp_per_logo_free_frame": null,
+    "box_recall": 0.20930232558139536,
+    "boxes": 43,
+    "tp": 9
+  },
+  "gt_area_frac": {
+    "boxes": 43,
+    "p10": 0.00382,
+    "p50": 0.00869,
+    "p90": 0.07555,
+    "frac_under_1pct_frame": 0.6047
+  },
+  "per_size": {
+    "tiny": {
+      "gt": 7,
+      "tp": 0,
+      "fn": 7,
+      "recall": 0.0,
+      "median_px2": 837.0088399872009,
+      "median_area_frac": 0.003632850868000004
+    },
+    "small": {
+      "gt": 29,
+      "tp": 6,
+      "fn": 23,
+      "recall": 0.20689655172413793,
+      "median_px2": 2002.0021599743984,
+      "median_area_frac": 0.008689245485999994
+    },
+    "medium": {
+      "gt": 7,
+      "tp": 3,
+      "fn": 4,
+      "recall": 0.42857142857142855,
+      "median_px2": 18227.976479999994,
+      "median_area_frac": 0.07911448124999998
+    },
+    "large": {
+      "gt": 0,
+      "tp": 0,
+      "fn": 0,
+      "recall": 0.0,
+      "median_px2": 0.0,
+      "median_area_frac": 0.0
+    }
+  },
+  "per_group": [
+    {
+      "group": "df01d5a843",
+      "images": 19,
+      "gt": 43,
+      "tp": 9,
+      "fp": 38,
+      "fn": 34,
+      "precision": 0.1915,
+      "recall": 0.2093,
+      "f1": 0.2,
+      "map50_star": 0.2416
+    }
+  ]
+}
