@@ -415,3 +415,41 @@ class TestMacMiniResolutionEndToEnd:
             assert out and out[0]["brand"] == "APPLE"
         counts = res.emit_provenance()["tier_counts"]
         assert counts["4"] == 3
+
+class TestTransliterationMapIsReachable:
+    """The map is only useful if its keys are what romanize_devanagari emits.
+
+    Every key is matched after _tidy_roman() lowercases and _ROM_TOKEN_RE
+    splits on [a-z]+, so an uppercase key ("alTr") or a guessed spelling
+    ("gaileksi" where the romanizer says "gailaksi") is dead. That is how the
+    table lost 9 of 14 entries and "Z Fold" spoken in Hindi stopped resolving.
+    """
+
+    def test_every_key_matches_the_romanizer(self):
+        from src.layer2.product_resolver import _TRANSLITERATION_MAP
+
+        dead = [k for k in _TRANSLITERATION_MAP if not k.islower() and not k.isalpha()]
+        assert not dead, f"keys unreachable by _ROM_TOKEN_RE: {dead}"
+
+    def test_devanagari_actually_canonicalizes(self):
+        from src.layer2.product_resolver import (
+            canonicalize_transliteration,
+            romanize_devanagari,
+        )
+
+        cases = [
+            ("ज़ेफ़ोल्ड 5", "z fold"),
+            ("फ़ोल्ड", "fold"),
+            ("अल्ट्रा", "ultra"),
+            ("गैलक्सी", "galaxy"),
+            ("पिक्सेर", "pixel"),
+            ("आइफ़ोन", "iphone"),
+            ("मैक्रा", "mac"),
+            ("स्नैपड्रैगन", "snapdragon"),
+        ]
+        for hindi, expected in cases:
+            got = canonicalize_transliteration(romanize_devanagari(hindi))
+            assert expected in got.lower(), (
+                f"{hindi!r} romanized to {romanize_devanagari(hindi)!r} -> {got!r}, "
+                f"expected to contain {expected!r}"
+            )

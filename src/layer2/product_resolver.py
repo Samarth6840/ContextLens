@@ -167,15 +167,29 @@ def _tidy_roman(res: str) -> str:
 # it binds ONLY words to their common Latin spelling, NEVER a product to a brand.
 # Brand attribution for these nouns still flows through the standard tiers
 # (Wikidata / learned memory), so no product→brand pair is hardcoded here.
+#
+# Keys are the EXACT output of romanize_devanagari() — verified against it, not
+# guessed. The previous version was hand-written and mostly unreachable: the
+# tokens are lowercased by _tidy_roman and matched by _ROM_TOKEN_RE ([a-z]+), so
+# every key containing an uppercase letter ("zefolDa", "alTr", "snapDragan") could
+# never fire, and several lowercase ones ("gaileksi", "pholDa", "makra") were
+# simply not what the romanizer emits ("gailaksi", "folda", "maikra"). Only 5 of
+# 14 entries were live, which is why "Z Fold" spoken in Hindi never resolved.
 _TRANSLITERATION_MAP = {
-    "piksera": "pixel", "piksela": "pixel", "pixelsera": "pixel",
-    "zefolDa": "z fold", "zefa": "z fold", "pholDa": "fold",
-    "gaileksi": "galaxy", "gaileksa": "galaxy",
-    "es": "s", "esa": "s", "esera": "s",
-    "pro": "pro", "pra": "pro", "alTr": "ultra", "alTra": "ultra",
-    "air": "air", "aira": "air", "makra": "mac", "maka": "mac",
-    "snapDragan": "snapdragon", "aifana": "iphone", "eipona": "iphone",
-    "aipadsa": "ipad", "ekebada": "ecobee",
+    "piksera": "pixel", "piksela": "pixel", "piksesara": "pixel",
+    "pixelsera": "pixel",
+    "zefolda": "z fold", "zefa": "z fold",
+    "folda": "fold",
+    "gailaksi": "galaxy", "gailaksa": "galaxy",
+    "es": "s", "esa": "s", "esara": "s", "esera": "s",
+    "pro": "pro", "pra": "pro",
+    "altra": "ultra",
+    "eyara": "air",
+    "maikra": "mac", "maika": "mac",
+    "snaipadraigana": "snapdragon",
+    "aifona": "iphone", "aifna": "iphone",
+    "aipaida": "ipad",
+    "ikobi": "ecobee",
 }
 _ROM_TOKEN_RE = re.compile(r"[a-z]+|[0-9]+|[^a-z0-9]")
 

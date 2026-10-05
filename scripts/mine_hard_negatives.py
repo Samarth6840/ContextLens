@@ -119,10 +119,19 @@ def main() -> int:
 
     cands: list[dict] = []
     seen = Counter()
+    unlabelled = 0
     for p in train_files:
         r = rows.get(p.name)
+        if r is None:
+            # No label row means we do NOT know this frame is logo-free — it may
+            # simply be unreviewed, or a human may have marked it "skip", which
+            # is explicitly "don't use this", not "there is no logo here".
+            # Treating its empty ground truth as real made every detection in it
+            # a hard negative and poisoned TRAIN.
+            unlabelled += 1
+            continue
         gts = np.array([[b["x"], b["y"], b["x"] + b["w"], b["y"] + b["h"]]
-                        for b in (r["boxes"] if r else [])], dtype=float).reshape(-1, 4)
+                        for b in r["boxes"]], dtype=float).reshape(-1, 4)
         res = model.predict(str(p), imgsz=args.imgsz, conf=args.conf,
                             device=args.device, verbose=False)[0]
         b = res.boxes
@@ -142,20 +151,25 @@ def main() -> int:
             x1, y1, x2, y2, cf_ = dets[di]
             bw, bh = x2 - x1, y2 - y1
             cands.append({
-                "file": p.name, "path": str(p), "video": r["video"] if r else p.name.split("_")[0],
-                "frame_index": r["frame_index"] if r else -1,
+                "file": p.name, "path": str(p), "video": r["video"],
+                "frame_index": r["frame_index"],
                 "conf": round(float(cf_), 3),
                 "box": [float(x1), float(y1), float(x2), float(y2)],
                 "size": size_bucket(bw, bh, w * h),
                 "aspect": aspect_bucket(bw, bh),
                 "pos": pos_bucket((x1 + x2) / 2 / w, (y1 + y2) / 2 / h),
-                "scene": scene_of(p.name.split("_")[0], r["frame_index"] if r else 0),
+                "scene": scene_of(p.name.split("_")[0], r["frame_index"]),
                 "frame_wh": [w, h],
             })
         if len(cands) and len(seen) % 50 == 0:
             print(f"  {len(seen)} frames, {len(cands)} false positives", flush=True)
 
     print(f"\n{len(cands)} false positives mined from TRAIN")
+    if unlabelled:
+        # Not a silent skip: the number of frames that could not be mined
+        # decides how much of the pool actually contributed negatives.
+        print(f"  ({unlabelled} frame(s) skipped — no label row, so not "
+              f"known to be logo-free)")
     if not cands:
         sys.exit("FATAL: no false positives found; nothing to mine")
 
@@ -168,6 +182,7 @@ def main() -> int:
     for f in (out / "labels").glob("*.txt"):
         f.unlink()
 
+    skipped_swallowing_logo = 0
     for i, c in enumerate(keep):
         img = cv2.imread(c["path"])
         h, w = img.shape[:2]
@@ -178,22 +193,36 @@ def main() -> int:
         px, py = bw * args.pad, bh * args.pad
         cx1, cy1 = max(0, int(x1 - px)), max(0, int(y1 - py))
         cx2, cy2 = min(w, int(x2 + px)), min(h, int(y2 + py))
-        crop = img[cy1:cy2, cx1:cx2]
-        if crop.size == 0:
-            continue
-        name = f"{c['video']}_{c['frame_index']:06d}_{i:04d}.jpg"
-        cv2.imwrite(str(out / "images" / name), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-        (out / "labels" / f"{Path(name).stem}.txt").write_text("")   # empty == negative
-        c["crop"] = name
-        c["crop_box"] = [cx1, cy1, cx2, cy2]
-        c["orig_box_rel"] = [(x1 - cx1) / (cx2 - cx1), (y1 - cy1) / (cy2 - cy1),
-                             bw / (cx2 - cx1), bh / (cy2 - cy1)]
+        # A 50% pad can swallow a NEIGHBOURING real logo, and the crop is then
+        # written with an empty label — i.e. "no logo here" — teaching the
+        # detector to suppress a correct detection. Drop those crops. This
+        # detection is a false positive, so it matched no GT at args.iou, which
+        # means any GT intersecting the crop is a different, real logo.
+        gts = np.array([[b["x"], b["y"], b["x"] + b["w"], b["y"] + b["h"]]
+                        for b in rows[c["file"]]["boxes"]], dtype=float).reshape(-1, 4)
+        for gx1, gy1, gx2, gy2 in gts:
+            if gx1 < cx2 and gx2 > cx1 and gy1 < cy2 and gy2 > cy1:
+                skipped_swallowing_logo += 1
+                break
+        else:
+            crop = img[cy1:cy2, cx1:cx2]
+            if crop.size == 0:
+                continue
+            name = f"{c['video']}_{c['frame_index']:06d}_{i:04d}.jpg"
+            cv2.imwrite(str(out / "images" / name), crop, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+            (out / "labels" / f"{Path(name).stem}.txt").write_text("")   # empty == negative
+            c["crop"] = name
+            c["crop_box"] = [cx1, cy1, cx2, cy2]
+            c["orig_box_rel"] = [(x1 - cx1) / (cx2 - cx1), (y1 - cy1) / (cy2 - cy1),
+                                 bw / (cx2 - cx1), bh / (cy2 - cy1)]
 
     manifest = {
         "model": args.model, "conf": args.conf, "iou": args.iou,
         "pad": args.pad, "target": args.target,
         "source_frames": len(train_files), "mined_false_positives": len(cands),
-        "kept": len(keep),
+        "kept": sum(1 for c in keep if c.get("crop")),
+        "skipped_pad_swallowed_logo": skipped_swallowing_logo,
+        "skipped_unlabelled_frames": unlabelled,
         "balance_by_video": dict(Counter(c["video"] for c in keep)),
         "balance_by_size": dict(Counter(c["size"] for c in keep)),
         "balance_by_aspect": dict(Counter(c["aspect"] for c in keep)),
@@ -204,7 +233,11 @@ def main() -> int:
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2))
     (out / "negatives.json").write_text(json.dumps(keep, indent=1))
     print(json.dumps(manifest, indent=2))
-    print(f"\n-> {out}   ({len(keep)} empty-label crops)")
+    n_kept = sum(1 for c in keep if c.get("crop"))
+    print(f"\n-> {out}   ({n_kept} empty-label crops)")
+    if skipped_swallowing_logo:
+        print(f"  ({skipped_swallowing_logo} crop(s) dropped: the pad covered a "
+              f"real labelled logo, so the crop was not logo-free)")
     print("positives come from the human export, not from here: "
           "benchmark/video_labelled has the 129 real logo boxes.")
     return 0

@@ -369,8 +369,12 @@ def _ordered_aliases(info: dict) -> list:
 def _alias_pattern(alias_norm: str) -> re.Pattern:
     pattern = _ALIAS_PATTERNS.get(alias_norm)
     if pattern is None:
+        # The guard must cover Devanagari too. `[A-Z0-9]` only blocks ASCII
+        # letters/digits, so सोनी (SONY) matched inside सोनीपत (a different
+        # word) — an alias has to be bounded by *any* letter or digit, not
+        # just a Latin one.
         pattern = re.compile(
-            rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])"
+            rf"(?<![A-Z0-9ऀ-ॿ]){re.escape(alias_norm)}(?![A-Z0-9ऀ-ॿ])"
         )
         _ALIAS_PATTERNS[alias_norm] = pattern
     return pattern
@@ -384,18 +388,29 @@ def match_brand(text: str) -> Optional[str]:
     (e.g. "lg" won't match inside "BLOG"), so a 2-char alias is a deliberate
     real brand (LG) rather than a false-positive risk. Single characters are
     still too ambiguous to ever match.
+
+    When several brands match, the LONGEST matched alias wins and ties break
+    toward the leftmost occurrence. Returning the first brand in catalog order
+    (as this used to) made the answer depend on dict insertion order: "Samsung
+    vs Apple" returned APPLE purely because APPLE is cataloged first, which is
+    not a property of the text.
     """
     norm = normalize_text(text)
     if not norm:
         return None
+    best: Optional[tuple] = None  # (alias_len, -start, brand)
     for brand, info in BRAND_CATALOG.items():
         for alias in _ordered_aliases(info):
             alias_norm = normalize_text(alias)
             if len(alias_norm) < 2:
                 continue
-            if _alias_pattern(alias_norm).search(norm):
-                return brand
-    return None
+            m = _alias_pattern(alias_norm).search(norm)
+            if m is None:
+                continue
+            cand = (len(alias_norm), -m.start(), brand)
+            if best is None or cand > best:
+                best = cand
+    return best[2] if best else None
 
 
 def _levenshtein_bounded(a: str, b: str, max_dist: int) -> int:

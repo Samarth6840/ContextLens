@@ -950,3 +950,31 @@ class TestLogoRetrievalValidation:
         assert out[1]["brand"] == "NIKE"
         # Only the compact box was sent; the editorial one never reached OCR.
         assert seen == [1], seen
+
+
+class TestDevanagariAliasBoundaries:
+    """An alias must be bounded by any letter, not just a Latin one.
+
+    The guard was `(?<![A-Z0-9])`, which does not consider Devanagari a word
+    character, so the SONY alias सोनी matched inside सोनीपत.
+    """
+
+    def test_sony_does_not_match_inside_a_longer_devanagari_word(self):
+        assert match_brand("सोनी") == "SONY"
+        assert match_brand("सोनीपत") is None
+
+    def test_devanagari_alias_still_matches_on_both_sides(self):
+        assert match_brand("सैमसंग") == "SAMSUNG"
+
+
+class TestMatchBrandPicksBestNotFirstCatalogued:
+    """Result must depend on the text, not on BRAND_CATALOG insertion order."""
+
+    def test_longest_alias_wins_over_catalog_order(self):
+        # APPLE is catalogued before SAMSUNG, so first-hit returned APPLE here.
+        assert match_brand("Samsung vs Apple") == "SAMSUNG"
+
+    def test_single_brand_unaffected(self):
+        assert match_brand("Samsung Galaxy S24") == "SAMSUNG"
+        assert match_brand("LG") == "LG"
+        assert match_brand("BLOG") is None
