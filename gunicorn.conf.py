@@ -1,9 +1,13 @@
 """Production gunicorn configuration (gunicorn wsgi:application -c gunicorn.conf.py).
 
-Every knob is driven by environment so the same config serves dev and prod.
+Most knobs are environment-driven so the same config serves dev and prod. The
+one exception is `workers`, which is hard-pinned to 1 because the job registry
+is process-local — see the comment at its definition.
+
 The Flask app is thread-safe (per-model threading locks in the pipeline), so the
 `gthread` worker class lets one worker host several concurrent analyse jobs —
 appropriate given the heavy single-worker memory footprint of the ML models.
+Concurrency comes from ADSCENE_THREADS, not from workers.
 """
 
 import os
@@ -20,7 +24,23 @@ bind = f"0.0.0.0:{os.environ.get('ADSCENE_PORT', '5000')}"
 
 # The ML models (YOLO, DINOv2, Whisper, BEATs) are large; keep worker count low
 # to bound RAM, but allow threads to serve interleaved requests.
-workers = _env_int("ADSCENE_WORKERS", 1)
+#
+# HARD-PINNED at 1, not configurable. server.JOBS is a process-local dict and
+# the pipeline is started as a daemon thread inside the worker that received
+# the request, so a second worker cannot see jobs submitted to the first:
+# /api/analyse returns an id the other worker 404s on, and the job's progress
+# and results are simply gone. Scaling out needs a shared job store (Redis or a
+# DB table) first, not a worker count.
+_requested_workers = _env_int("ADSCENE_WORKERS", 1)
+if _requested_workers != 1:
+    raise RuntimeError(
+        f"ADSCENE_WORKERS={_requested_workers} is not supported: server.JOBS is "
+        f"process-local and daemon analysis threads are invisible to other "
+        f"workers, so submitted jobs 404 and their results are lost. Fixing "
+        f"this requires a shared job store (Redis/DB), not more workers. "
+        f"Run with ADSCENE_WORKERS=1 and raise ADSCENE_THREADS for concurrency."
+    )
+workers = 1
 threads = _env_int("ADSCENE_THREADS", 4)
 worker_class = "gthread"
 

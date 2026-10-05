@@ -189,3 +189,53 @@ def test_success_path(monkeypatch):
     }
     assert "hr.bangalore@samsung.com" in out["hr_emails"]
     assert any(e["url"].startswith("https://www.samsung.com") for e in out["evidence"])
+
+# ============================================================================
+# Item 5 — a brand's contact must be on the brand's own domain
+# ============================================================================
+
+class TestEmailDomainCheck:
+    """A grounded search often surfaces a contact's personal address (or an
+    agency's) as if it were the brand's. Every consumer webmail address passes
+    the RFC-shaped regex, so without this an outreach draft goes to
+    recruiter@gmail.com and cites a real URL as provenance."""
+
+    @staticmethod
+    def _ok(addr, brand="Nike"):
+        from src.email_lookup import _is_valid_email, _brand_domain
+        return _is_valid_email(addr, _brand_domain(brand))
+
+    def test_rejects_personal_webmail(self):
+        for addr in ("recruiter@gmail.com", "info@yahoo.com", "press@hotmail.com",
+                     "a@outlook.com", "x@icloud.com", "y@gmail.co.uk"):
+            assert self._ok(addr) is False, addr
+
+    def test_rejects_personal_provider_subdomain(self):
+        assert self._ok("press@mail.gmail.com") is False
+
+    def test_accepts_official_brand_addresses(self):
+        assert self._ok("press@nike.com") is True
+        assert self._ok("press@sony.co.uk", "Sony") is True   # sibling ccTLD
+        assert self._ok("hr@mail.nike.com") is True           # subdomain
+
+    def test_rejects_a_different_brand_domain(self):
+        assert self._ok("pr@adidas.com") is False
+        assert self._ok("press@notsony.com", "Sony") is False
+        assert self._ok("press@sony.com.evil.net", "Sony") is False
+
+    def test_non_catalog_brand_keeps_the_provider_check_only(self):
+        # We never curated a domain, so we must not reject a legitimate
+        # address on that basis — but a gmail address is still wrong.
+        assert self._ok("press@acme-industrial.io", "Totally Unknown Co") is True
+        assert self._ok("recruiter@gmail.com", "Totally Unknown Co") is False
+
+    def test_parse_drops_off_domain_and_webmail_addresses(self):
+        from src.email_lookup import parse_brand_emails, _brand_domain
+        urls = ["https://nike.com/press", "https://news.ycombinator.com/x"]
+        payload = ('{"emails": ['
+                   '{"email": "press@nike.com", "type": "press", "source": "https://nike.com/press"},'
+                   '{"email": "recruiter@gmail.com", "type": "pr", "source": "https://nike.com/press"},'
+                   '{"email": "pr@adidas.com", "type": "pr", "source": "https://news.ycombinator.com/x"}'
+                   ']}')
+        out = parse_brand_emails(payload, urls, [], brand_domain=_brand_domain("Nike"))
+        assert [e["email"] for e in out] == ["press@nike.com"]

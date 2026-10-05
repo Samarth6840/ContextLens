@@ -85,7 +85,32 @@ def _api_key() -> Optional[str]:
     return key
 
 
-def _is_valid_email(address: str) -> bool:
+# Consumer webmail and mail providers. A brand's official contact is published
+# on the brand's own domain, so an address at one of these cannot be one — yet
+# every one of them passes _EMAIL_RE, and a grounded search surfaces them often
+# (agency/aggregator pages list a contact's personal gmail as if it were the
+# brand's). Rejecting them here is what stops a plausible-looking but wrong
+# address reaching an outreach draft.
+_PERSONAL_DOMAINS = frozenset({
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "ymail.com",
+    "hotmail.com", "hotmail.co.uk", "outlook.com", "live.com", "msn.com",
+    "aol.com", "icloud.com", "me.com", "mac.com", "gmx.com", "gmx.de",
+    "mail.com", "zoho.com", "protonmail.com", "proton.me", "pm.me",
+    "tutanota.com", "fastmail.com", "yandex.com", "qq.com", "163.com",
+    "126.com", "rediffmail.com", "sify.com", "inbox.com", "hey.com",
+})
+
+# Subdomain of a personal provider ("mail.yahoo.com") is still that provider.
+_PERSONAL_DOMAIN_SUFFIX = (".gmail.com", ".googlemail.com", ".yahoo.com",
+                           ".hotmail.com", ".outlook.com", ".live.com")
+
+
+def _is_personal_domain(domain: str) -> bool:
+    d = (domain or "").strip().lower().rstrip(".")
+    return d in _PERSONAL_DOMAINS or d.endswith(_PERSONAL_DOMAIN_SUFFIX)
+
+
+def _is_valid_email(address: str, brand_domain: str = "") -> bool:
     address = (address or "").strip()
     if not address or not _EMAIL_RE.match(address):
         return False
@@ -93,7 +118,51 @@ def _is_valid_email(address: str) -> bool:
         return False
     if any(pat.search(address) for pat in _PLACEHOLDER_PATTERNS):
         return False
+    if _is_personal_domain(address.rsplit("@", 1)[-1]):
+        return False
+    # When we know the brand's official domain, require a matching registrable
+    # label. This is deliberately label-based rather than exact-domain: mail
+    # often lives on a sibling TLD or host (sony.co.jp, sony.net, mail.sony.com),
+    # and there is no shipped public-suffix list to tell a real ccTLD from a
+    # crafted one. So the guarantee is "same second-level label", which rejects
+    # notsony.com and sony.com.evil.net while accepting any sony.* TLD. It is a
+    # brake, not proof of ownership.
+    if brand_domain:
+        want = _registrable_label(brand_domain)
+        got = _registrable_label(address.rsplit("@", 1)[-1])
+        if want and got and want != got:
+            return False
     return True
+
+
+def _brand_domain(brand: str) -> str:
+    """Official domain for a catalog brand, or '' when unknown.
+
+    A non-catalog brand has no curated domain, so the brand-domain check is
+    skipped and only the personal-provider check applies. That is the right
+    direction to fail: we still refuse recruiter@gmail.com, but we do not
+    reject a legitimate address just because we never curated a domain.
+    """
+    try:
+        from src.brand_catalog import contact_for
+        site = (contact_for(brand) or {}).get("website") or ""
+    except Exception:
+        return ""
+    m = re.search(r"https?://([^/]+)", site)
+    return m.group(1) if m else ""
+
+
+def _registrable_label(host: str) -> str:
+    """Rough eTLD+1: 'mail.nike.co.uk' -> 'nike'."""
+    parts = [p for p in (host or "").strip().lower().replace("www.", "").split(".")
+             if p and p != "www"]
+    if len(parts) < 2:
+        return (parts[0] if parts else "")
+    # Two-part public suffixes we care about; anything else takes the last two.
+    two_part = {"co.uk", "com.au", "co.in", "co.jp", "com.br", "co.nz"}
+    if len(parts) >= 3 and ".".join(parts[-2:]) in two_part:
+        return parts[-3]
+    return parts[-2]
 
 
 def _classify_type(label: str, address: str) -> str:
@@ -144,7 +213,8 @@ def _grounding(urls: List[str], supports: List[dict]) -> Set[str]:
     return {u for u in found if u.startswith("http")}
 
 
-def parse_brand_emails(text: str, urls: List[str], supports: List[dict]) -> List[dict]:
+def parse_brand_emails(text: str, urls: List[str], supports: List[dict],
+                       brand_domain: str = "") -> List[dict]:
     """Deterministic, offline-testable parser for a Gemini grounded answer.
 
     Keeps only validated addresses that cite a real grounding URI. An answer
@@ -166,7 +236,7 @@ def parse_brand_emails(text: str, urls: List[str], supports: List[dict]) -> List
         if not isinstance(item, dict):
             continue
         address = (item.get("email") or "").strip()
-        if not _is_valid_email(address) or address in seen:
+        if not _is_valid_email(address, brand_domain) or address in seen:
             continue
         # `source` comes from the model's own JSON, so it is untrusted input.
         # It is honoured only when it is a URI the API actually returned in
@@ -254,7 +324,8 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
         ]
         supports = metadata.get("groundingSupports") or []
 
-        emails = parse_brand_emails(text, urls, supports)
+        emails = parse_brand_emails(text, urls, supports,
+                                    brand_domain=_brand_domain(key))
         evidence_urls = {
             u for u in urls if u.startswith("http")
         } | {e["source"] for e in emails}
