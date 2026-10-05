@@ -489,6 +489,19 @@ open_set:
   # Every tunable lives here — the code reads config and fails closed if any
   # key is missing. There are no hardcoded fallback values in src/openset.py.
   enabled: true
+  # Whether creator frames may be UPLOADED to a third-party reverse-image
+  # search API. Separate from `enabled`, which only controls whether the
+  # open-set block runs at all.
+  #
+  # This is the same consent decision as freeai below: a crop is the
+  # creator's own image leaving the machine. Detection, the local crop cache
+  # and the whole evidence trail still run with this false — only the outbound
+  # call is withheld, so nothing about a creator's video is disclosed unless an
+  # operator explicitly chooses to disclose it.
+  #
+  # Shipped default is OFF. Set true only after deciding that uploading
+  # customer video frames to Google/Bing/SerpAPI is acceptable.
+  consent_upload: false
   # backend: google_vision_web | bing_visual | serpapi | browser_grounded | gemini_grounded
   # browser_grounded drives a real reverse-image search through the agent-browser
   # CLI (no paid API key required). gemini_grounded uses Google Gemini's free

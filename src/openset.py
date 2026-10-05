@@ -893,6 +893,7 @@ class OpenSetBrandIdentifier:
     def __init__(
         self,
         backend: Optional[ReverseImageSearchBackend],
+        consent_upload: bool,
         min_logo_confidence: float,
         min_crop_area: float,
         max_crop_aspect: float,
@@ -912,6 +913,12 @@ class OpenSetBrandIdentifier:
         """
         if backend is None:
             raise ValueError("OpenSetBrandIdentifier requires a backend")
+        # A crop is the creator's own image. Uploading it to a third-party
+        # search API is an explicit consent decision, so it is required as a
+        # real bool rather than defaulted — a caller that forgets to pass it
+        # must fail loudly here, not silently start leaking frames.
+        if not isinstance(consent_upload, bool):
+            raise ValueError("OpenSetBrandIdentifier requires a bool consent_upload")
         if not min_logo_confidence or float(min_logo_confidence) <= 0.0:
             raise ValueError("OpenSetBrandIdentifier requires min_logo_confidence > 0")
         if min_crop_area is None or float(min_crop_area) <= 0.0:
@@ -926,6 +933,7 @@ class OpenSetBrandIdentifier:
             raise ValueError("OpenSetBrandIdentifier requires logodev_timeout > 0")
 
         self.backend = backend
+        self.consent_upload = consent_upload
         self.min_logo_confidence = float(min_logo_confidence)
         self.min_crop_area = float(min_crop_area)
         self.max_crop_aspect = float(max_crop_aspect)
@@ -1136,6 +1144,14 @@ class OpenSetBrandIdentifier:
         skipped_counts: Dict[str, int] = {}
         backend_available = self.backend.available
         reason = ""
+        if not self.consent_upload:
+            # Local work still ran: detection, crops, the cache and every
+            # diagnostic are all below. Only the outbound call is withheld.
+            reason = (
+                "OPEN-SET UPLOAD DISABLED — crops were identified locally but "
+                "NOT sent to a third-party search API. Set "
+                "open_set.consent_upload: true to allow it."
+            )
         if not backend_available:
             reason = (
                 "OPEN-SET IDENTIFICATION UNAVAILABLE — NO RUNNABLE "
@@ -1170,7 +1186,7 @@ class OpenSetBrandIdentifier:
                 )
             entry["crop_url"] = f"/api/crop/{cand['crop_hash']}"
 
-            if backend_available:
+            if backend_available and self.consent_upload:
                 try:
                     if cand["crop_hash"] in self._result_cache:
                         results = self._result_cache[cand["crop_hash"]]
@@ -1201,13 +1217,19 @@ class OpenSetBrandIdentifier:
                 else:
                     entry["status"] = "unresolved"
             else:
-                entry["status"] = "unavailable"
+                # "unavailable" means no backend; "consent_withheld" means we
+                # had one and chose not to send. Collapsing them would hide a
+                # consent decision behind a missing-dependency message.
+                entry["status"] = (
+                    "consent_withheld" if backend_available else "unavailable"
+                )
 
             candidates.append(entry)
 
         resolved = len([c for c in candidates if c["status"] == "candidate_verified"])
         return {
             "available": backend_available,
+            "consent_upload": self.consent_upload,
             "backend": self.backend.name,
             "min_confidence": self.min_logo_confidence,
             "min_crop_area": self.min_crop_area,

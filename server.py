@@ -447,6 +447,7 @@ def _build_open_set(result: dict, video_path: str) -> dict:
 
         identifier = OpenSetBrandIdentifier(
             backend=create_backend(str(_OPEN_SET_CFG["backend"])),
+            consent_upload=bool(_OPEN_SET_CFG["consent_upload"]),
             min_logo_confidence=float(_OPEN_SET_CFG["min_logo_confidence"]),
             min_crop_area=float(_OPEN_SET_CFG["min_crop_area"]),
             max_crop_aspect=float(_OPEN_SET_CFG["max_crop_aspect"]),

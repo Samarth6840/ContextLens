@@ -36,6 +36,7 @@ class _DeadBackend:
 def _identifier(saturated_at: int = 30) -> OpenSetBrandIdentifier:
     return OpenSetBrandIdentifier(
         backend=_DeadBackend(),
+        consent_upload=True,
         min_logo_confidence=0.30,
         min_crop_area=3000.0,
         max_crop_aspect=3.0,

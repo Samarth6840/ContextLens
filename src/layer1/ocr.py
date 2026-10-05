@@ -15,9 +15,11 @@ import base64
 import json
 import logging
 import os
+import select
 import subprocess
 import sys
 import threading
+from pathlib import Path
 from typing import List
 
 import cv2
@@ -26,6 +28,16 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 _CONFIG_LANG = "en"
+
+# Seconds to wait for one worker reply. OCR on a large batch can genuinely take
+# minutes on CPU, so this is generous — it exists to turn a wedged worker into a
+# clean retry instead of an indefinite block.
+_WORKER_READ_TIMEOUT_SEC = float(
+    os.environ.get("ADSCENE_OCR_WORKER_TIMEOUT", "600")
+)
+# The worker sends its stdout chatter here rather than to DEVNULL, so a crash
+# or a Paddle warning is actually diagnosable after the fact.
+_WORKER_LOG_DIR = Path(__file__).resolve().parents[2] / "var" / "logs"
 
 
 def _encode_rgb_jpeg(image: np.ndarray) -> bytes:
@@ -70,6 +82,11 @@ class OCRExtractor:
         if self._proc is not None and self._proc.poll() is None:
             return
         os.environ.setdefault("PYTHONUNBUFFERED", "1")
+        # A file, not a PIPE: nobody ever drains a stderr pipe here, so it would
+        # fill and block the worker mid-OCR.
+        _WORKER_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        err_log = open(_WORKER_LOG_DIR / f"ocr_worker-{self.lang}.log", "a",
+                       encoding="utf-8")
         self._proc = subprocess.Popen(
             [
                 sys.executable, "-u",
@@ -77,11 +94,15 @@ class OCRExtractor:
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=err_log,
             text=True,
             encoding="utf-8",
+            # `-m src.layer1.ocr_worker` is resolved against the cwd, so pin it
+            # to the repo root or the worker dies with ModuleNotFoundError.
+            cwd=str(Path(__file__).resolve().parents[2]),
         )
-        logger.info("Started PaddleOCR worker pid=%s", self._proc.pid)
+        logger.info("Started PaddleOCR worker pid=%s (stderr -> %s)",
+                    self._proc.pid, err_log.name)
 
     def _worker_exec(self, images: List[np.ndarray]) -> List[List[dict]]:
         """Send one batch of RGB frames to the worker and return parsed results.
@@ -125,6 +146,16 @@ class OCRExtractor:
                 raise RuntimeError("OCR worker pipe unavailable")
             self._proc.stdin.write(payload + "\n")
             self._proc.stdin.flush()
+            # A bare readline() blocks forever if the worker wedges. select()
+            # turns that into a clean retry against a fresh worker.
+            ready, _, _ = select.select([self._proc.stdout], [], [],
+                                        _WORKER_READ_TIMEOUT_SEC)
+            if not ready:
+                logger.error("OCR worker pid=%s produced no reply within %ss",
+                             self._proc.pid, _WORKER_READ_TIMEOUT_SEC)
+                self._proc.kill()
+                self._proc = None
+                return None
             resp_line = self._proc.stdout.readline()
         except (BrokenPipeError, ValueError, OSError):
             self._proc = None
@@ -132,7 +163,16 @@ class OCRExtractor:
         if not resp_line:
             self._proc = None
             return None
-        resp = json.loads(resp_line)
+        try:
+            resp = json.loads(resp_line)
+        except json.JSONDecodeError:
+            # Non-JSON on the protocol pipe. The worker now sends its own
+            # library chatter to stderr, so this means a real protocol break:
+            # log it and recycle rather than taking the whole stage down.
+            logger.error("OCR worker returned non-JSON protocol line: %.200r",
+                         resp_line)
+            self._proc = None
+            return None
         if resp.get("error"):
             raise RuntimeError(f"OCR worker error: {resp['error']}")
         return resp.get("results", [])

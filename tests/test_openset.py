@@ -39,9 +39,11 @@ def _identifier(
     min_conf: float = 0.01,
     min_crop_area: float = 100.0,
     max_crop_aspect: float = 5.0,
+    consent_upload: bool = True,
 ) -> OpenSetBrandIdentifier:
     return OpenSetBrandIdentifier(
         backend=backend,
+        consent_upload=consent_upload,
         min_logo_confidence=min_conf,
         min_crop_area=min_crop_area,
         max_crop_aspect=max_crop_aspect,
@@ -133,6 +135,7 @@ def test_identify_fails_closed_without_configured_gate():
     with pytest.raises(ValueError):
         OpenSetBrandIdentifier(
             backend=_UnavailableBackend(),
+            consent_upload=True,
             min_logo_confidence=0.0,
             min_crop_area=0.0,
             max_crop_aspect=0.0,
@@ -142,6 +145,62 @@ def test_identify_fails_closed_without_configured_gate():
             generic_domain_filter=_GENERIC_DOMAINS,
             logodev_timeout=2.0,
         )
+
+
+def test_consent_false_never_uploads_crop():
+    """consent_upload=False must keep every crop off the wire.
+
+    The backend raises if touched, so any call fails the test outright. Local
+    work still happens: the crop is cached and the reason is surfaced.
+    """
+    class _TripwireBackend:
+        name = "tripwire"
+        available = True
+
+        def search_crop(self, crop):
+            raise AssertionError("crop was uploaded without consent")
+
+    identifier = _identifier(backend=_TripwireBackend(), consent_upload=False)
+    identifier._logodev_client = _FakeLogodev()
+    result = {"layer1": {"logo_detections": [[
+        {"bbox": [0, 0, 20, 20], "confidence": 0.99},
+    ]]}}
+    video = _tiny_video()
+    try:
+        out = identifier.identify(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert out["consent_upload"] is False
+    # A backend WAS available — so this must not read as a missing dependency.
+    assert out["available"] is True
+    assert "consent_upload" in out["reason"]
+    assert len(out["candidates"]) == 1
+    cand = out["candidates"][0]
+    assert cand["status"] == "consent_withheld"
+    assert cand["search_results"] == []
+    assert cand["candidate_name"] is None
+    # Local evidence trail survives the withheld upload.
+    assert cand["crop_id"]
+
+
+def test_consent_must_be_a_real_bool():
+    """Omitting consent must fail loudly rather than default to leaking."""
+    import pytest
+
+    for bad in (None, "true", 1, 0):
+        with pytest.raises(ValueError):
+            OpenSetBrandIdentifier(
+                backend=_UnavailableBackend(),
+                consent_upload=bad,
+                min_logo_confidence=0.3,
+                min_crop_area=3000.0,
+                max_crop_aspect=3.0,
+                max_candidates_per_video=5,
+                crop_cache_dir=_CROP_DIR,
+                generic_tag_filter=_GENERIC_WORDS,
+                generic_domain_filter=_GENERIC_DOMAINS,
+                logodev_timeout=2.0,
+            )
 
 
 def test_identify_surfaces_candidate_without_verification():

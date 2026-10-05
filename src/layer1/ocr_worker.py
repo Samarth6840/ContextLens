@@ -15,6 +15,7 @@ Protocol: newline-delimited JSON on stdin/stdout.
 
 import base64
 import json
+import os
 import sys
 
 import cv2
@@ -57,6 +58,15 @@ def _parse_result(result) -> list:
 
 
 def main(lang: str = "en") -> None:
+    # Claim a private duplicate of the real stdout for the protocol, then point
+    # fd 1 at stderr. Paddle, cv2 and friends print progress bars and warnings to
+    # stdout, and the parent reads this pipe line-by-line and json.loads it — one
+    # stray line desynchronises the whole stream and raises. After this, any
+    # library print goes to stderr and is logged instead of corrupting replies.
+    proto = os.fdopen(os.dup(sys.stdout.fileno()), "w", encoding="utf-8")
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = sys.stderr
+
     ocr = _init_ocr(lang)
     for line in sys.stdin:
         line = line.strip()
@@ -76,11 +86,11 @@ def main(lang: str = "en") -> None:
                     continue
                 predicted = ocr.predict(bgr)
                 results.append(_parse_result(predicted[0]) if predicted else [])
-            sys.stdout.write(json.dumps({"id": rid, "results": results}) + "\n")
-            sys.stdout.flush()
+            proto.write(json.dumps({"id": rid, "results": results}) + "\n")
+            proto.flush()
         except Exception as exc:  # noqa: BLE001 — report back to parent per request
-            sys.stdout.write(json.dumps({"id": rid, "error": str(exc)}) + "\n")
-            sys.stdout.flush()
+            proto.write(json.dumps({"id": rid, "error": str(exc)}) + "\n")
+            proto.flush()
 
 
 if __name__ == "__main__":

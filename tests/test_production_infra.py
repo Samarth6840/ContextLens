@@ -24,7 +24,11 @@ def test_gunicorn_config_loads_and_binds():
     assert ns["threads"] >= 1
     assert ns["timeout"] >= 30
     assert "0.0.0.0" in ns["bind"]
-    assert ns["max_requests"] >= 1
+    # No worker recycling. The dashboard polls ~1.5s, so any request budget is
+    # exhausted in minutes and recycling kills the analysis thread plus the
+    # in-memory JOBS dict — taking every running job with it.
+    assert "max_requests" not in ns
+    assert "max_requests_jitter" not in ns
 
 
 def test_docker_and_procfile_present():
