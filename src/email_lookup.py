@@ -57,12 +57,6 @@ _PROMPT = (
 
 # Validator + placeholder blacklist.
 _EMAIL_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,63}$")
-_EMAIL_SCAN_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,63}")
-
-# Google's grounded-search citations come back as these redirect URLs when the
-# model attributes an answer to a real retrieved page (groundingChunks is often
-# empty in that mode — the redirect IS the grounding evidence).
-_GROUNDING_REDIRECT_PREFIX = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/"
 _PLACEHOLDER_PATTERNS = (
     re.compile(r"^(email|your|sender|name|user)@", re.I),
     re.compile(r"@(example|domain|email|yourbrand|yourcompany|brand)\.", re.I),
@@ -153,21 +147,18 @@ def _grounding(urls: List[str], supports: List[dict]) -> Set[str]:
 def parse_brand_emails(text: str, urls: List[str], supports: List[dict]) -> List[dict]:
     """Deterministic, offline-testable parser for a Gemini grounded answer.
 
-    Keeps only validated addresses; routes each to an evidence URL (model's own
-    ``source`` when it is a real grounding URL, else the first grounding URL).
-    An answer with zero grounding URLs yields no addresses (ungrounded).
+    Keeps only validated addresses that cite a real grounding URI. An answer
+    with zero grounding URLs yields no addresses (ungrounded).
+
+    No raw-text fallback: a scanned address has no per-address source, and
+    attributing it to whichever page sorted first fabricates provenance for an
+    address that may not appear on that page at all.
     """
     grounded = _grounding(urls, supports)
 
     items = _extract_json_emails(text)
     if items is None:
-        # Fallback: scan raw text for addresses. These carry no per-address
-        # source, so they are only kept when real chunk grounding exists and
-        # each is attributed to the top retrieved page.
-        items = [
-            {"email": e, "type": "contact", "source": ""}
-            for e in _EMAIL_SCAN_RE.findall(text)
-        ]
+        return []
 
     seen: Set[str] = set()
     out: List[dict] = []
@@ -177,20 +168,16 @@ def parse_brand_emails(text: str, urls: List[str], supports: List[dict]) -> List
         address = (item.get("email") or "").strip()
         if not _is_valid_email(address) or address in seen:
             continue
+        # `source` comes from the model's own JSON, so it is untrusted input.
+        # It is honoured only when it is a URI the API actually returned in
+        # groundingMetadata. Matching a *prefix* is not enough: a fabricated
+        # "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz"
+        # would otherwise pass and give a fabricated address a plausible-looking
+        # provenance. Real redirect URLs are present in `urls` when Google emits
+        # them, so exact membership still covers that citation format.
         source = (item.get("source") or "").strip()
-        if source:
-            # Explicit citation: the API's own grounding-redirect URL (the
-            # common citation format) or a real grounding chunk page.
-            grounded_page = (
-                source.startswith(_GROUNDING_REDIRECT_PREFIX) or source in grounded
-            )
-            if not grounded_page:
-                continue
-        else:
-            # Raw-text scan: attribute to top node ground truth only.
-            if not grounded:
-                continue
-            source = next(iter(sorted(grounded)))
+        if not source or source not in grounded:
+            continue
         seen.add(address)
         out.append({
             "email": address,

@@ -271,9 +271,13 @@ def main() -> int:
     gold = {}
     t0 = time.monotonic()
     for i, r in enumerate(rows):
-        img = cv2.imread(str(root / "images" / args.split / r["image"]))
-        if img is None:
+        img_bgr = cv2.imread(str(root / "images" / args.split / r["image"]))
+        if img_bgr is None:
             continue
+        # detect() and BrandResolver both take RGB frames (the pipeline feeds
+        # them RGB and each converts internally). imread returns BGR, so every
+        # score from this script was computed on colour-swapped input.
+        img = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
         gold[r["image"]] = r["boxes"]
         dets = pipeline.logo_detector.detect(img) or []
         if args.min_conf:

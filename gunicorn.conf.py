@@ -28,9 +28,11 @@ worker_class = "gthread"
 timeout = _env_int("ADSCENE_TIMEOUT", 300)
 graceful_timeout = _env_int("ADSCENE_GRACEFUL_TIMEOUT", 60)
 
-# Recycle workers periodically to reclaim memory drifts from model inference.
-max_requests = 200
-max_requests_jitter = 30
+# NOTE: deliberately NO max_requests/max_requests_jitter. The dashboard polls
+# /api/analyse/<id> every ~1.5s, so one open tab exhausts a 200-request budget in
+# ~5 minutes. Recycling the worker kills the daemon analysis thread and discards
+# the in-memory JOBS dict, taking every running job with it. Memory is bounded by
+# workers=1 plus the model working set instead.
 
 accesslog = "-"
 errorlog = "-"

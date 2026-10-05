@@ -17,8 +17,10 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # System libs required by OpenCV, audio (librosa/torchaudio) and ultralytics.
+# git is required by requirements.txt's `clip@git+https://github.com/openai/CLIP.git`;
+# python:3.13-slim ships without it, so the build fails without this.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libgl1 libglib2.0-0 libgomp1 \
+        git ffmpeg libgl1 libglib2.0-0 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./

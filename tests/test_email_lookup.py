@@ -52,16 +52,25 @@ def test_ungrounded_answer_yields_no_emails():
     assert out == []
 
 
-def test_grounding_redirect_source_accepted_without_chunks():
-    # Google returns causes as grounding-api-redirect URLs even when
-    # groundingChunks is empty — that IS the citation evidence.
+def test_grounding_redirect_source_requires_api_returned_url():
+    # `source` is untrusted model output. A grounding-redirect URL is only
+    # evidence when the API actually returned it in groundingMetadata.
+    redirect = (
+        "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123"
+    )
     text = (
         '{"emails": [{"email": "seuk.pr@samsung.com", "type": "press", '
-        '"source": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AbC123"}]}'
+        f'"source": "{redirect}"}}]}}'
     )
-    out = email_lookup.parse_brand_emails(text, urls=[], supports=[])
+    # Returned by the API -> accepted, even with no groundingChunks.
+    out = email_lookup.parse_brand_emails(text, urls=[redirect], supports=[])
     assert out[0]["email"] == "seuk.pr@samsung.com"
-    assert out[0]["source"].startswith("https://vertexaisearch.cloud.google.com/grounding-api-redirect/")
+    assert out[0]["source"] == redirect
+
+    # Fabricated by the model, never returned -> dropped. Matching the redirect
+    # *prefix* must not be enough.
+    out2 = email_lookup.parse_brand_emails(text, urls=[], supports=[])
+    assert out2 == []
 
 
 def test_grounded_json_parses_and_types():
@@ -103,22 +112,15 @@ def test_source_forced_to_grounding_uri():
     assert out2 == []
 
 
-def test_raw_text_scan_needs_grounding():
-    # Raw-text fallback still requires grounding evidence to exist.
+def test_raw_text_scan_dropped_even_with_grounding():
+    # No per-address source means any provenance we attach would be invented,
+    # so raw-text scanning yields nothing regardless of grounding.
     out = email_lookup.parse_brand_emails(
         "no json here just press@samsung.com and hr@samsung.com",
         urls=["https://www.samsung.com/"],
         supports=[],
     )
-    emails = {e["email"] for e in out}
-    assert emails == {"press@samsung.com", "hr@samsung.com"}
-    # Without chunks AND without redirect sources the scan yields nothing.
-    out2 = email_lookup.parse_brand_emails(
-        "no json here just press@samsung.com",
-        urls=[],
-        supports=[],
-    )
-    assert out2 == []
+    assert out == []
 
 
 def test_placeholder_validation():

@@ -146,10 +146,13 @@ def main():
     print(f"[seed] store: {store.db_path}")
 
     if args.clear:
-        ids = [job["job_id"] for job in store.list()]
+        # Only ever remove DEMO-* rows. A blanket wipe here destroys real jobs:
+        # the default store is server._DB_PATH, i.e. the production database.
+        ids = [job["job_id"] for job in store.list()
+               if str(job.get("job_id", "")).startswith("DEMO-")]
         for jid in ids:
             store.delete(jid)
-        print(f"[seed] cleared {len(ids)} existing job(s)")
+        print(f"[seed] cleared {len(ids)} demo job(s)")
 
     existing = {job["job_id"] for job in store.list()}
     created = 0

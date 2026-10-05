@@ -84,7 +84,12 @@ class LogoRetrievalIndex:
             source = self.checkpoint_path or "open_clip:ViT-B-32"
         else:
             source = "clip:ViT-B/32"
-        return f"logo_clip:{source}"
+        # :rgb1 suffix pins the channel convention. Index rows and query crops
+        # must agree: the pipeline hands us RGB crops, and a mismatch here
+        # silently flips every embedding (nearest-neighbour results stay
+        # plausible but are meaningless). Bumping the tag invalidates any
+        # index cached under the old BGR convention.
+        return f"logo_clip:{source}:rgb1"
 
     # ── CLIP lifecycle (lazy; mirrors RegionProposalCLIPBackend) ─────────
     def _load(self, device: str = "cpu"):
@@ -106,17 +111,23 @@ class LogoRetrievalIndex:
             self._clip, self._preprocess, self._use_open_clip = model, preprocess, False
 
     def _embed_image_batch(self, crops: Sequence[np.ndarray]) -> np.ndarray:
-        """L2-normalized CLIP image embeddings for an array of BGR crops."""
+        """L2-normalized CLIP image embeddings for an array of RGB crops.
+
+        Callers pass RGB: the pipeline's crops come straight from RGB frames,
+        and build_from_dir converts on load. Everything entering this method
+        must use the same channel order or the index is compared against
+        itself in the wrong space.
+        """
         import torch
         from PIL import Image
 
         if not crops:
             return np.zeros((0, 512), dtype=np.float32)
         self._load(self._device)
-        imgs = []
-        for c in crops:
-            rgb = np.ascontiguousarray(c[:, :, ::-1])
-            imgs.append(self._preprocess(Image.fromarray(rgb)))
+        imgs = [
+            self._preprocess(Image.fromarray(np.ascontiguousarray(c)))
+            for c in crops
+        ]
         batch = torch.stack(imgs).to(self._device)
         with torch.no_grad():
             feats = self._clip.encode_image(batch).cpu().numpy()
@@ -237,7 +248,9 @@ class LogoRetrievalIndex:
                 img = cv2.imread(str(imgf))
                 if img is None:
                     continue
-                crops.append(img)
+                # imread yields BGR; convert to the RGB convention that
+                # _embed_image_batch and the pipeline's crops both use.
+                crops.append(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
             if crops:
                 index.add_brand(brand, crops)
         return index

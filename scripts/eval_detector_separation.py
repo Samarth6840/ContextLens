@@ -24,6 +24,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
+import tempfile
 
 import numpy as np
 from sklearn.metrics import average_precision_score
@@ -148,13 +149,28 @@ def main() -> int:
     root = Path(args.root)
     model = YOLO(args.model)
 
-    v = model.val(data=str(root / "data.yaml"), imgsz=960, device=args.device,
-                  verbose=False)
+    # model.val() reads the 'val:' key from data.yaml, which is always
+    # images/val — so --split test silently reported val numbers. Generate a
+    # throwaway yaml pointing val: at the requested split instead. It must sit
+    # next to data.yaml because ultralytics resolves relative paths against the
+    # yaml's own directory.
+    base_yaml = (root / "data.yaml").read_text()
+    val_key = f"images/{args.split}" if args.split != "all" else "images"
+    val_yaml = re.sub(r"^val:.*$", f"val: {val_key}", base_yaml, count=1,
+                      flags=re.MULTILINE)
+    if val_yaml == base_yaml:
+        val_yaml = base_yaml.rstrip() + f"\nval: {val_key}\n"
+    tmp_yaml = root / f".data_{args.split}.yaml"
+    tmp_yaml.write_text(val_yaml)
+    try:
+        v = model.val(data=str(tmp_yaml), imgsz=960, device=args.device,
+                      verbose=False)
+    finally:
+        tmp_yaml.unlink(missing_ok=True)
     box = v.box
     if args.split == "all":
         print("\nNOTE: --split all grades every split as one pooled set. That is an")
-        print("      AUDIT of a 2-video pool, not a held-out score. mAP below still")
-        print("      comes from the data.yaml 'val:' key only.")
+        print("      AUDIT of a 2-video pool, not a held-out score.")
     print(f"\n=== detection quality ({args.split}) ===")
     print(f"  mAP50    {box.map50:.4f}")
     print(f"  mAP50-95 {box.map:.4f}")
@@ -421,8 +437,11 @@ def fired_matrix(rows: list[dict], thr: float) -> dict:
 def _matched(box: np.ndarray, gts: np.ndarray) -> bool:
     if not len(gts):
         return False
+    # Per-GT IoU. Summing the intersections across all GTs first collapsed
+    # them into one scalar, so a box overlapping two dense GTs by 0.3 each
+    # scored 0.6 against the summed union and matched falsely.
     inter = (np.maximum(0.0, np.minimum(box[2], gts[:, 2]) - np.maximum(box[0], gts[:, 0]))
-             * np.maximum(0.0, np.minimum(box[3], gts[:, 3]) - np.maximum(box[1], gts[:, 1]))).sum()
+             * np.maximum(0.0, np.minimum(box[3], gts[:, 3]) - np.maximum(box[1], gts[:, 1])))
     a = (box[2] - box[0]) * (box[3] - box[1])
     g = (gts[:, 2] - gts[:, 0]) * (gts[:, 3] - gts[:, 1])
     return bool(((inter / (a + g - inter)) >= 0.5).any())
