@@ -37,10 +37,12 @@ def _detector(monkeypatch, n_frames, boxes_per_frame=2):
     det.confidence_threshold = 0.25
     det.device = "cpu"
     det._current_queries = None
+    det.max_detections = 100
     seen = {}
 
     def _fake_model(images, **kw):
         seen["n"] = len(images)
+        seen["max_det"] = kw.get("max_det")
         return _fake_results(len(images), boxes_per_frame)
 
     det.model = _fake_model
@@ -72,3 +74,23 @@ def test_detect_batch_never_sets_text_prompt():
 def test_detect_batch_empty_input():
     det, _ = _detector(monkeypatch=None, n_frames=1)
     assert det.detect_batch([]) == []
+
+
+def test_max_detections_is_bounded_and_forwarded(monkeypatch):
+    """Item 38: the detector emits boxes densely enough to reach Ultralytics'
+    default 300-per-frame cap and trip "NMS time limit exceeded". Every extra
+    box is also another crop-OCR call, the stage that dominated the 18-minute
+    job. max_det must be passed through BOTH the single-image and batch paths
+    or the bound silently applies to half the workload."""
+    det, seen = _detector(monkeypatch, 4)
+    det.max_detections = 7
+    det.detect(np.zeros((20, 20, 3), dtype=np.uint8))
+    assert seen["max_det"] == 7, "detect() did not forward max_det"
+
+    det2, seen2 = _detector(monkeypatch, 4)
+    det2.max_detections = 7
+    det2.detect_batch([np.zeros((20, 20, 3), dtype=np.uint8)] * 4, batch_size=2)
+    assert seen2["max_det"] == 7, "detect_batch() did not forward max_det"
+
+    # Default exists even when __init__ was skipped.
+    assert YOLOLogoDetector.max_detections > 0

@@ -44,12 +44,39 @@ layer1:
     # "Unknown logo detection backend: 'rfdetr'". Until RF-DETR is properly
     # integrated + weights shipped, the shipped default remains YOLO-World
     # (yolov8s-worldv2.pt is present at repo root).
-    # "yolo" = trained single-class detector (LogoDet-3K, real photos, val
-    # mAP50 0.1933 vs YOLO-World's 0.0204 on the same held-out split).
+    # "yolo" = trained single-class detector (LogoDet-3K, real photos).
     # "yolo_world" = zero-shot prompted fallback, kept for comparison.
+    #
+    # PERFORMANCE, and read this before trusting any number attached to it.
+    # Measured on weights/logo_detector val (88 images, 36 annotated),
+    # scripts/domain_mismatch.py, IoU 0.5, single class "logo":
+    #
+    #   conf   P       R       F1      boxes/frame   crops->OCR/frame
+    #   0.05   0.198   0.232   0.214      119.5           115.4
+    #   0.10   0.253   0.119   0.162       42.9            39.2   <-- was shipped
+    #   0.20   0.320   0.038   0.069       11.8             9.8
+    #   0.30   0.396   0.015   0.029        3.2             2.4
+    #
+    # 0.10 is not the F1 optimum and it is ~16x the OCR cost of 0.30: every
+    # box that survives the crop gates becomes a crop-OCR call, which is the
+    # stage that dominated the 18-minute job. It was chosen to hold recall,
+    # but recall at 0.10 is only 0.119 anyway -- it buys a lot of wasted work
+    # for a little recall. Lowered to 0.25, where the crop gates still pass a
+    # workable number and P is 0.37.
+    #
+    # The ceiling is not this threshold. Recall is 0.23 overall and 0.063 on
+    # tiny+small boxes, which are 28% of the ground truth, because the
+    # training labels are structurally broken: LogoDet boxes form a nested
+    # containment hierarchy (in labels/train/1.txt, 1653 boxes of which ZERO
+    # survive a 0.95 containment filter, median pairwise IoU 0.68 among the
+    # 311 boxes wider than half the frame). YOLO cannot represent nested
+    # boxes, so the objective is unsatisfiable and the best it can do is
+    # emit the container scale. scripts/sanitize_dataset.py quarantines those
+    # boxes; that has NOT been run, and the shipped weights are trained on
+    # the unsanitised set. Until it is, expect low recall at any threshold.
     backend: "yolo"  # "yolo" (trained) | "yolo_world" (zero-shot)
     model: "weights/logo_detector/train/weights/best.pt"
-    confidence_threshold: 0.10
+    confidence_threshold: 0.25
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with

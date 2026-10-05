@@ -183,17 +183,30 @@ class YOLOLogoDetector(LogoDetectionBackend):
     A trained class name is a category ("logo"), never a brand verdict.
     """
 
+    # Class-level default so the attribute exists on any instance, including
+    # one built via __new__ in tests that skip the model load.
+    max_detections: int = 100
+
     def __init__(
         self,
         model_name: str = "weights/logo_detector/train/weights/best.pt",
         confidence_threshold: float = 0.25,
         device: Optional[str] = None,
         text_queries: Optional[List[str]] = None,
+        max_detections: int = 100,
     ):
         import torch
         from ultralytics import YOLO
 
         self.confidence_threshold = confidence_threshold
+        # Bound the candidate set per frame. Ultralytics defaults to 300, and
+        # the nested-label pathology in the training data makes this detector
+        # emit boxes densely enough that the count reaches the NMS clock and
+        # trips "NMS time limit ... exceeded". Every extra box is also another
+        # crop-OCR call downstream, so the cap is a cost control as much as a
+        # stability one. 100 is ~2.5x what a healthy frame produces here, so it
+        # only discards the pathological tail.
+        self.max_detections = max_detections
         self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
         self._current_queries = None  # fixed classes, nothing to re-prompt
 
@@ -213,6 +226,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
             image[:, :, ::-1],  # pipeline frames are RGB; Ultralytics wants BGR
             conf=self.confidence_threshold,
             device=self.device,
+            max_det=self.max_detections,
             verbose=False,
         )
         # ultralytics >=8.4 returns a LIST even for a single image; older
@@ -238,6 +252,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
                 [f[:, :, ::-1] for f in frames[i : i + batch_size]],  # RGB in -> BGR for YOLO
                 conf=self.confidence_threshold,
                 device=self.device,
+                max_det=self.max_detections,
                 verbose=False,
             )
             for result in results:
