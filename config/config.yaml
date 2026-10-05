@@ -48,32 +48,61 @@ layer1:
     # "yolo_world" = zero-shot prompted fallback, kept for comparison.
     #
     # PERFORMANCE, and read this before trusting any number attached to it.
-    # Measured on weights/logo_detector val (88 images, 36 annotated),
-    # scripts/domain_mismatch.py, IoU 0.5, single class "logo":
+    # P/R/F1 from benchmark/results/detector_val.json (weights/logo_detector
+    # val, IoU 0.5, single class "logo"). boxes/frame and crops->OCR/frame are
+    # measured separately over the 36 annotated val frames, with the shipped
+    # crop gates applied (max_logo_area_fraction 0.50, max_crop_aspect 3.0,
+    # min_crop_area 3000) -- those two columns count what actually reaches OCR.
     #
-    #   conf   P       R       F1      boxes/frame   crops->OCR/frame
-    #   0.05   0.198   0.232   0.214      119.5           115.4
-    #   0.10   0.253   0.119   0.162       42.9            39.2   <-- was shipped
-    #   0.20   0.320   0.038   0.069       11.8             9.8
-    #   0.30   0.396   0.015   0.029        3.2             2.4
+    #   conf   P       R       F1     boxes/frame   crops->OCR/frame
+    #   0.05   0.198   0.232   0.214        82.9            40.3
+    #   0.10   0.253   0.119   0.162        42.6            19.7   <- was shipped
+    #   0.20   0.320   0.038   0.069        11.8             ~5
+    #   0.25   0.374   0.026   0.049         5.9             2.1   <- now
+    #   0.30   0.396   0.015   0.029         3.2             1.2
     #
-    # 0.10 is not the F1 optimum and it is ~16x the OCR cost of 0.30: every
-    # box that survives the crop gates becomes a crop-OCR call, which is the
-    # stage that dominated the 18-minute job. It was chosen to hold recall,
-    # but recall at 0.10 is only 0.119 anyway -- it buys a lot of wasted work
-    # for a little recall. Lowered to 0.25, where the crop gates still pass a
-    # workable number and P is 0.37.
+    # COST, honestly. Every box surviving the crop gates becomes a crop-OCR
+    # call, and crop-OCR is what pinned a worker at ~107% CPU on the 18-minute
+    # job. 0.10 -> 0.25 cuts that work 9.2x, and 0.10 -> 0.30 cuts it 16.5x.
     #
-    # The ceiling is not this threshold. Recall is 0.23 overall and 0.063 on
-    # tiny+small boxes, which are 28% of the ground truth, because the
-    # training labels are structurally broken: LogoDet boxes form a nested
-    # containment hierarchy (in labels/train/1.txt, 1653 boxes of which ZERO
-    # survive a 0.95 containment filter, median pairwise IoU 0.68 among the
-    # 311 boxes wider than half the frame). YOLO cannot represent nested
-    # boxes, so the objective is unsatisfiable and the best it can do is
-    # emit the container scale. scripts/sanitize_dataset.py quarantines those
-    # boxes; that has NOT been run, and the shipped weights are trained on
-    # the unsanitised set. Until it is, expect low recall at any threshold.
+    # WHAT THAT COSTS. Recall drops 0.119 -> 0.026 at 0.25, i.e. ~4.5x less,
+    # so the detector now sees about 2.6% of labelled logo boxes instead of
+    # 12%. That is the real trade, not a free speedup: fewer logos reach
+    # crop-OCR at all, so there is proportionally less for it to find. Since
+    # every downstream gate is fail-closed, the practical effect is fewer
+    # logo-sourced brands overall, not more false ones.
+    #
+    # 0.10 is not the F1 optimum either -- 0.05 beats it (0.214 vs 0.162) --
+    # so 0.10 was not chosen on merit; it looks like recall bought at any
+    # price, and at 0.10 it buys 0.119 for 9x the work. 0.25 is a deliberate
+    # cost decision on a detector that is not good enough to be worth that
+    # work yet. If logo recall starts to matter more than job latency, move
+    # this back toward 0.10 and accept the runtime.
+    #
+    # THE REAL CEILING IS THE TRAINING DATA, not this threshold. Overall recall
+    # is 0.23 at the F1-optimal 0.05, and 0.063 on tiny+small boxes, which are
+    # 28% of the ground truth. Cause: LogoDet boxes form a nested containment
+    # hierarchy flattened into a flat list. In labels/train/1.txt, 1653 boxes of
+    # which ZERO survive a 0.95 containment filter, and the 311 boxes wider
+    # than half the frame have median pairwise IoU 0.68. YOLO cannot represent
+    # nested boxes -- those are mutually contradictory assignment targets -- so
+    # the objective is unsatisfiable and the best the model can do is emit the
+    # container scale, which is what it does.
+    #
+    # DO NOT RETRAIN ON SANITISED LogoDet. Measured 2026-10-05 by running
+    # scripts/sanitize_dataset.py report-only over all three splits:
+    # 157,056 boxes in -> 520 kept (0.3%) across 162 images, verdict
+    # "UNUSABLE ... do not retrain on this". Retraining on ~500 boxes would be
+    # worse than the current weights. The earlier OpenLogo fine-tune attempt
+    # already collapsed for the same reason: benchmark/results/mix_val_cand.json
+    # shows mAP50 0.0 and AUROC 0.46 against 0.116 / 0.816 for the base
+    # (mix_val_base.json) -- below chance on separation.
+    #
+    # The fix is real human-labelled VIDEO data, not more compute:
+    # scripts/label_frames.py --frames <dir> --out <labels.jsonl>, then --export.
+    # Only retrain once that pool carries positive boxes from more than one
+    # video; a single-video pool cannot separate logo presence from that video's
+    # lighting and framing.
     backend: "yolo"  # "yolo" (trained) | "yolo_world" (zero-shot)
     model: "weights/logo_detector/train/weights/best.pt"
     confidence_threshold: 0.25
