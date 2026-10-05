@@ -22,6 +22,14 @@ function escapeHtml(s) {
   }[c]));
 }
 
+// A number that is already numeric needs no escaping; this is here so the
+// diagnostics renderer can call it on any field without a type check at
+// every use site. escapeHtml() alone is correct for strings; this only
+// decides whether a value is worth the round trip.
+function escapeHtmlNum(n) {
+  return Number.isFinite(Number(n)) ? String(n) : escapeHtml(n);
+}
+
 function fmtDuration(sec) {
   if (!sec || sec <= 0) return '—';
   sec = Math.round(sec);
@@ -338,41 +346,109 @@ $('#analyse-form').addEventListener('submit', async (e) => {
 });
 
 function pollJob(jobId, btn) {
-  let attempts = 0;
+  // Long videos legitimately take 30-90+ minutes (uncapped Whisper + BEATs on
+  // MPS), and the server keeps working after the tab gives up — but a page
+  // that freezes at a fixed ceiling reads as a hang. So: poll indefinitely
+  // while the job runs; give up only after a STREAK of consecutive network
+  // failures (server down/restarted), never on elapsed time. A single 502 or
+  // laptop sleep no longer kills the wait.
+  const POLL_MS = 1500;
+  const MAX_CONSECUTIVE_FAILURES = 12; // ~18s of unreachable server before bailing
+  const startedAt = Date.now();
+  let timerId = null;
+  let consecutiveFailures = 0;
+
+  const fmtElapsed = (ms) => {
+    const total = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h > 0 ? `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`
+      : m > 0 ? `${m}m ${String(s).padStart(2, '0')}s`
+      : `${s}s`;
+  };
+
+  // Elapsed-time line between the progress bar and the live feed. Injected so
+  // the markup stays server-rendered and other pages are untouched.
+  let elapsedEl = document.getElementById('proc-elapsed');
+  if (!elapsedEl && procFeedEl && procFeedEl.parentElement) {
+    elapsedEl = document.createElement('div');
+    elapsedEl.id = 'proc-elapsed';
+    elapsedEl.className = 'processing-stage';
+    elapsedEl.style.marginTop = '4px';
+    procFeedEl.parentElement.insertBefore(elapsedEl, procFeedEl);
+  }
+
+  const stopPolling = () => { if (timerId !== null) { clearInterval(timerId); timerId = null; } };
+  const finish = () => {
+    stopPolling();
+    btn.disabled = false;
+    btn.textContent = 'Analyse video';
+  };
+
+  const renderStage = (stageText, pct) => {
+    if (procStageEl) procStageEl.textContent = stageText;
+    procStep(stageText);
+    procProgress(pct);
+    if (elapsedEl) elapsedEl.textContent = `Elapsed: ${fmtElapsed(Date.now() - startedAt)} — long videos can take a while`;
+  };
+
+  const fail = (message) => {
+    finish();
+    if (elapsedEl) elapsedEl.remove();
+    procError(message);
+  };
+
   const tick = async () => {
-    attempts += 1;
+    // A throw inside tick must never leave the interval spinning forever with
+    // an unhandled rejection — every exit path either reschedules implicitly
+    // (interval) or tears the poll down deliberately.
+    try {
+      await tickInner();
+    } catch (err) {
+      stopPolling();
+      fail(`Status poll failed — ${escapeHtml(err && err.message || 'unknown error')}`);
+    }
+  };
+
+  const tickInner = async () => {
     let job;
-    try { job = await api(`/api/analyse/${encodeURIComponent(jobId)}`); }
-    catch (err) {
-      btn.disabled = false; btn.textContent = 'Analyse video';
-      procError(`Status check failed — ${escapeHtml(err.message)}`);
+    try {
+      job = await api(`/api/analyse/${encodeURIComponent(jobId)}`);
+      consecutiveFailures = 0;
+    } catch (err) {
+      // Transient errors (laptop sleep, server busy mid-GPU-work, brief 502)
+      // must not abandon a job that is still running server-side. Only a
+      // sustained streak ends the poll — and then we say why.
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+        fail(`Lost contact with the server (${err.message}). The analysis may still be running — reload the page to check.`);
+      }
       return;
     }
     if (job.status === 'done') {
-      btn.disabled = false;
-      btn.textContent = 'Analyse video';
-      procStageEl && (procStageEl.textContent = 'Complete — loading your results');
+      finish();
+      renderStage('Complete — loading your results', 100);
       procStep('COMPLETE');
-      procProgress(100);
+      if (elapsedEl) elapsedEl.textContent = `Done in ${fmtElapsed(Date.now() - startedAt)}`;
       location.hash = `#/pipeline/${encodeURIComponent(jobId)}`;
       return;
     }
     if (job.status === 'error') {
-      btn.disabled = false;
-      btn.textContent = 'Analyse video';
-      procError(`Analysis failed — ${escapeHtml(job.error || 'something went wrong')}`);
+      fail(`Analysis failed — ${escapeHtml(job.error || 'something went wrong')}`);
       return;
     }
-    // Animate progress bar toward a perceived ceiling while running
-    const base = attempts;
-    procProgress(base >= 3 ? 92 + Math.min(6, Math.floor((attempts - 3) / 2)) : 15 + attempts * 22);
-    procStageEl && (procStageEl.textContent = String(job.stage || 'Working…'));
-    procStep(job.stage || 'PROCESSING');
+    // Animate the bar toward a perceived ceiling while running; the stage
+    // name + feed + elapsed line carry the real progress signal.
+    const mins = (Date.now() - startedAt) / 60000;
+    const pct = mins < 1 ? 15 + mins * 60 : Math.min(95, 75 + Math.log2(1 + mins));
+    renderStage(String(job.stage || 'Working…'), pct);
     procFeed(job.feed);
-    setStatus(`<span class="dot blink">▮</span> ${escapeHtml(job.stage || 'Working…')}…`);
-    if (attempts < 600) setTimeout(tick, 1500);
+    setStatus(`<span class="dot blink">▮</span> ${escapeHtml(job.stage || 'Working…')}… (${fmtElapsed(Date.now() - startedAt)})`);
   };
+
   tick();
+  timerId = setInterval(tick, POLL_MS);
 }
 
 /* ── Pipeline page ────────────────────────────────────────── */
@@ -1148,6 +1224,21 @@ function openSetPanel(d) {
   const skippedCount = (skipped.below_min_confidence || 0) + (skipped.duplicate_hash || 0);
   const examined = cands.length + rejected.length + skippedCount;
 
+  // Saturation is upstream of every gate, so it decides how the funnel above
+  // should be read. Without it, a detector proposing 112 boxes per frame looks
+  // identical to a resolver failing to find 57 brands.
+  const dd = os.detector_diagnostics || null;
+  const saturatedFrames = (dd && dd.saturated_frames) || [];
+  const saturation = dd && dd.saturated_frame_count
+    ? `<div class="os-warn">
+         <div class="note-title">⚠ Detector saturated on ${escapeHtmlNum(dd.saturated_frame_count)} frame${dd.saturated_frame_count === 1 ? '' : 's'}</div>
+         <p>${escapeHtmlNum(dd.max_proposals_in_a_frame)} logo proposals in the busiest frame (median ${escapeHtmlNum(dd.median_proposals_in_a_frame)}, ${escapeHtmlNum(dd.proposals_total)} total).
+         High proposal density means the detector is not separating marks from background, so identity work on those frames is unreliable —
+         the funnel above is a detector reading, not a verdict on the brands in this video.</p>
+         <p class="muted">${saturatedFrames.length ? `First saturated frames: ${saturatedFrames.slice(0, 12).map(escapeHtml).join(', ')}${dd.saturated_frame_count > saturatedFrames.length ? ' …' : ''}` : ''}</p>
+       </div>`
+    : '';
+
   // The funnel is the honest read of this stage: most crops are noise, and the
   // UI should say so rather than presenting three cards as if three were found.
   const funnel = `
@@ -1216,14 +1307,17 @@ function openSetPanel(d) {
 
   if (!cands.length) {
     return `${funnel}
+      ${saturation}
       <div class="os-empty">
         <div class="note-title">Nothing cleared the gate</div>
         <p>${examined} logo boxes were examined and none were distinctive enough to search. Unresolved logos stay listed crop by crop in the Scenes tab.</p>
+        ${saturatedFrames.length ? '<p class="muted">The detector was saturated on this video, so a zero here is a detector reading, not a statement about the brands in it.</p>' : ''}
       </div>
       ${rejects}`;
   }
 
   return `${funnel}
+    ${saturation}
     <div class="cand-grid">${cards}</div>
     <p class="os-note">Candidates are lower-trust than on-screen detections. A match here is a lead, not an appearance — confirm against the crop before you count it.</p>
     ${rejects}`;
@@ -1437,7 +1531,7 @@ function renderOutreachEditor(root, d) {
         </div>
         <div class="editor-actions">
           <button class="btn btn-sm" id="btn-generate">Generate draft</button>
-          <button class="btn btn-sm" id="btn-forward">Forward</button>
+          <button class="btn btn-sm" id="btn-forward">Mark reviewed</button>
         </div>
       </div>
       <div id="brand-evidence"></div>
@@ -1537,25 +1631,26 @@ function renderOutreachEditor(root, d) {
   $('#btn-forward', root).addEventListener('click', async () => {
     if (!outreachState.brand) return;
     if (!body.textContent.trim()) {
-      foot.textContent = 'Generate a draft before forwarding';
+      foot.textContent = 'Generate a draft before marking it reviewed';
       return;
     }
     const btn = $('#btn-forward', root);
     btn.disabled = true;
-    btn.textContent = 'Forwarding…';
+    btn.textContent = 'Saving…';
     try {
-      const res = await api('/api/outreach/forward', {
+      const res = await api('/api/outreach/approve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ job_id: d.job_id, brand: outreachState.brand }),
       });
-      foot.textContent = `Forwarded to ${res.target} · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+      // Never say "Forwarded" — nothing was sent. The server says so too.
+      foot.textContent = `Marked reviewed · nothing was sent · ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
       foot.classList.add('forwarded');
     } catch (err) {
-      foot.textContent = `Forward failed — ${err.message}`;
+      foot.textContent = `Could not save — ${err.message}`;
     } finally {
       btn.disabled = false;
-      btn.textContent = 'Forward';
+      btn.textContent = 'Mark reviewed';
     }
   });
 }

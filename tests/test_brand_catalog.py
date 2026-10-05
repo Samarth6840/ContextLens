@@ -50,7 +50,22 @@ class TestBrandCatalog:
             assert info.get("category")
             assert info.get("categories")
             assert info.get("aliases")
-            assert info.get("contact_email")
+            assert info.get("contact_website")
+
+    def test_catalog_carries_no_invented_emails(self):
+        """Every address this file used to hold was a guess (pr@brand.com,
+        partnerships@brand.com, brand@brand.com) — never sourced. The same
+        fabrication class as a hallucinated logo brand, and one that reaches
+        a creator's real outreach list."""
+        offenders = [
+            brand
+            for brand, info in BRAND_CATALOG.items()
+            if "contact_email" in info or "contact_verified" in info
+        ]
+        assert offenders == [], (
+            f"catalog reintroduced contact fields for {offenders}; the catalog "
+            "must not carry contact addresses at all"
+        )
 
     def test_canonical_name_exact(self):
         assert canonical_name("NIKE") == "NIKE"
@@ -69,9 +84,12 @@ class TestBrandCatalog:
         assert match_brand("check out this swoosh") == "NIKE"
         assert match_brand("grab a coke") == "COCA-COLA"
 
-    def test_match_brand_short_alias_not_match(self):
-        # Aliases shorter than 3 chars are ignored (avoid false positives)
-        assert match_brand("lg") is None
+    def test_match_brand_short_alias(self):
+        # 2-char aliases with enforced letter boundaries are real brands (LG);
+        # only single characters are too ambiguous to ever match.
+        assert match_brand("lg") == "LG"
+        assert match_brand("check out the new LG") == "LG"
+        assert match_brand("some blog post") is None  # "lg" must not match inside "blog"
 
     def test_match_brand_z_fold_family(self):
         # The foldable phone video names the device "Z Fold 8 Ultra" (spoken in
@@ -134,9 +152,12 @@ class TestBrandCatalog:
 
     def test_contact_for(self):
         contact = contact_for("NIKE")
-        assert contact["email"] == "partnerships@nike.com"
+        assert contact["email"] is None
         assert "nike" in contact["website"]
         assert contact["verified"] is False
+
+    def test_contact_for_is_none_for_unknown_brand(self):
+        assert contact_for("NOT_A_BRAND") is None
 
     def test_product_and_categories(self):
         assert product_for("NIKE") == "Nike Air"
@@ -854,3 +875,78 @@ class TestLogoRetrievalValidation:
         assert brands == ["SAMSUNG", "SONY"]
         # Best-of aggregation keeps the top SAMSUNG sim (1.0), not the weaker dup.
         assert abs(res[0][1] - 1.0) < 1e-3
+
+    def test_batched_ocr_matches_per_crop_and_cuts_round_trips(self):
+        """Batching must not change results, only the number of OCR calls.
+
+        The OCR worker is a subprocess and every call is a blocking pipe
+        write/readline, so a frame with N logo boxes cost 2N round-trips. This
+        pins both halves: identical brands out either way, O(1) calls batched.
+        """
+        from src.layer2.brand_resolver import BrandResolver
+
+        brands = ["NIKE", "SAMSUNG", "SONY", "APPLE", "ADIDAS", "XIAOMI"]
+        calls = {"batch": 0, "single": 0}
+        counter = {"i": 0}
+
+        def _next_text():
+            name = brands[counter["i"] % len(brands)]
+            counter["i"] += 1
+            return [{"text": f"{name} logo"}]
+
+        class BatchOCR:
+            """Has the batch API; one round-trip covers the whole frame."""
+
+            def extract_text(self, crop):
+                calls["single"] += 1
+                return _next_text()
+
+            def extract_text_batch(self, frames):
+                calls["batch"] += 1
+                return [_next_text() for _ in frames]
+
+        class PerCropOCR:
+            """No batch API, so resolve() must fall back to extract_text."""
+
+            def extract_text(self, crop):
+                calls["single"] += 1
+                return _next_text()
+
+        frame = np.zeros((100, 160, 3), dtype=np.uint8)
+        dets = [{"bbox": [10 + 20 * i, 10, 26 + 20 * i, 26],
+                 "confidence": 0.9, "class_name": "brand logo"} for i in range(6)]
+
+        counter["i"] = 0
+        got = BrandResolver(ocr_extractor=BatchOCR(), crop_scale=1.0).resolve([dets], [frame])[0]
+        assert [d["brand"] for d in got] == brands
+        assert calls["single"] == 0, "batched path must not use per-crop calls"
+        assert calls["batch"] == 1, calls
+
+        counter["i"] = 0
+        calls.update(batch=0, single=0)
+        got2 = BrandResolver(ocr_extractor=PerCropOCR(), crop_scale=1.0).resolve([dets], [frame])[0]
+        assert [d["brand"] for d in got2] == brands, "batched and per-crop must agree"
+        assert calls["single"] > 0 and calls["batch"] == 0
+
+    def test_batched_ocr_skips_editorial_boxes_entirely(self):
+        """An oversized box is suppressed before OCR, so it costs no round-trip."""
+        from src.layer2.brand_resolver import BrandResolver
+
+        seen = []
+
+        class SpyOCR:
+            def extract_text_batch(self, frames):
+                seen.append(len(frames))
+                return [[{"text": "NIKE logo"}] for _ in frames]
+
+        frame = np.zeros((100, 160, 3), dtype=np.uint8)
+        dets = [
+            {"bbox": [0, 0, 159, 99], "confidence": 0.9, "class_name": "brand logo"},
+            {"bbox": [10, 10, 40, 40], "confidence": 0.9, "class_name": "brand logo"},
+        ]
+        out = BrandResolver(ocr_extractor=SpyOCR(), crop_scale=1.0).resolve([dets], [frame])[0]
+
+        assert out[0]["brand"] is None and out[0].get("editorial_box")
+        assert out[1]["brand"] == "NIKE"
+        # Only the compact box was sent; the editorial one never reached OCR.
+        assert seen == [1], seen

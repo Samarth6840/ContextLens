@@ -33,12 +33,22 @@ benchmark/results/*
 # Open-set candidate crops (runtime evidence images, regenerated per run)
 static/openset_crops/
 
+# Ad-hoc probe render output (scratch dir, same as fusion_eval/out/)
+fusion_eval/out_probe/
+
 # Python coverage artifacts
 .coverage
 htmlcov/
 
 # Phase 3 SQLite job store (runtime data)
 var/
+
+# Downloaded model weights (fetched by scripts/download_models.py / HF cache)
+weights/
+
+# Editor and OS junk
+.DS_Store
+*.bak
 
 # Node plugin deps (opencode ponytail)
 node_modules/

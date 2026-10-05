@@ -48,10 +48,16 @@ class CrossModalConsistencyLoss(nn.Module):
         is_video_deg = (corruption_type == 1).unsqueeze(1).float()  # (n, 1)
         is_clean     = (corruption_type == 2).unsqueeze(1).float()  # (n, 1)
 
+        # Detach: the projections are nn.Linear layers whose weights receive
+        # gradient from here unless stopped. Training then has a trivial
+        # optimum — scale audio_proj/video_proj toward zero and the MSE goes
+        # to 0 without fused_embed matching anything. This loss is meant to
+        # train the fusion transformer to MATCH the projections, so the
+        # projections must be a fixed teacher.
         target = (
-            is_audio_deg * video_proj
-            + is_video_deg * audio_proj
-            + is_clean * (audio_proj + video_proj) / 2
+            is_audio_deg * video_proj.detach()
+            + is_video_deg * audio_proj.detach()
+            + is_clean * (audio_proj.detach() + video_proj.detach()) / 2
         )
 
         return self.mse(fused_embed, target)

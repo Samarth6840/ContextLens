@@ -22,6 +22,7 @@ from src.openset import (  # noqa: E402
     ReverseImageResult,
     _brand_likeness,
     _derive_candidate_name,
+    _is_void_name,
     create_backend,
 )
 
@@ -284,6 +285,30 @@ def test_derive_candidate_never_surfaces_void_names():
             ReverseImageResult(title="logo", url="", source="yandex_cbir_tags"),
         ]
         assert _derive_candidate_name(results, _GENERIC_WORDS, _GENERIC_DOMAINS) is None
+
+
+def test_derive_candidate_never_surfaces_negated_identifications():
+    """'NOT IDENTIFIABLE' is a failed lookup, not a brand. Regression: it was
+    reaching logo.dev and coming back verified as identifiable.ca."""
+    for void in (
+        "NOT IDENTIFIABLE",
+        "not identifiable",
+        "The brand is not identifiable",
+        "cannot identify",
+        "unidentifiable",
+        "no logo detected",
+    ):
+        results = [
+            ReverseImageResult(title=void, url="", source="gemini_grounded_tags"),
+            ReverseImageResult(title="logo", url="", source="yandex_cbir_tags"),
+        ]
+        assert _derive_candidate_name(results, _GENERIC_WORDS, _GENERIC_DOMAINS) is None
+
+
+def test_void_name_matching_keeps_real_not_prefixed_brands():
+    """Phrase matching must not swallow real brands that start with 'not'."""
+    for real in ("Notion", "Nottington", "Nokia"):
+        assert not _is_void_name(real)
 
 
 def test_identify_records_banner_shape_rejection():

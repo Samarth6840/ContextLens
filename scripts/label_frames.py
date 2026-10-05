@@ -198,7 +198,16 @@ addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;   // typing a brand must not trigger keys
   if(e.key==='d'){boxes.pop();draw()}
   else if(e.key==='k')save('free');else if(e.key==='n')skip();
-  else if(e.key==='l')save('logo');else if(e.key==='s')save('skip')});
+  else if(e.key==='l')save('logo');
+  // SKIP is a measurement, not a navigation key. An 88%-skip run left a test set
+  // with 0 free frames, which cannot yield a false-positive rate at all. Make it
+  // cost a deliberate double-press so it cannot be reached by muscle memory on
+  // the way past a frame; n is the real "next" key and stays one press.
+  else if(e.key==='s'){
+    if(!confirm('SKIP means this frame CANNOT be judged - unreadable, truncated, '
+      +'or ambiguous.\\n\\nA frame with no logo is NOT a skip. Press k instead.\\n\\n'
+      +'Skips are excluded from the dataset. Confirm only if you truly cannot judge.'))return;
+    save('skip')}});
 load();
 </script>"""
 
@@ -264,12 +273,24 @@ class Store:
                     self.rows[r["file"]] = r
 
     def put(self, row: dict) -> None:
+        # Rewrite, don't append. Appending left one line per save, so re-judging
+        # a frame gave the same key twice on disk while the in-memory dict stayed
+        # correct - the UI looked fine and the file was silently wrong. Any
+        # consumer counting lines or keys then disagrees with what was reviewed.
         self.rows[row["file"]] = row
-        with self.path.open("a") as fh:
-            fh.write(json.dumps(row) + "\n")
+        self.path.write_text(
+            "".join(json.dumps(r) + "\n" for r in self.rows.values()))
 
     def labelled(self) -> set[str]:
-        return set(self.rows)
+        """Frames with a real verdict. SKIP is deliberately excluded.
+
+        Counting a SKIP as done retires the frame permanently: the pool drains,
+        the reviewer never sees it again, and the set silently ends up with
+        frames nobody judged. SKIP means "could not judge", so the frame has to
+        stay in the queue until it gets a real verdict. Re-offering them is the
+        only way an accidental SKIP is recoverable at all.
+        """
+        return {f for f, r in self.rows.items() if r["verdict"] != "skip"}
 
     def next_frame(self, files: list[Path], done: set[str],
                    deferred: set[str] | None = None) -> Path | None:
@@ -342,7 +363,11 @@ def serve(args: argparse.Namespace, files: list[Path],
                 for r in rows:
                     verdicts[r["verdict"]] += 1
                 return self._send(200, json.dumps({
-                    "done": len(rows), "total": len(files),
+                    # `done` is the real verdict count, not len(rows): a SKIP
+                    # stays in the queue, so counting it as finished reported
+                    # 100/100 on a set with 88 unjudged frames.
+                    "done": verdicts["logo"] + verdicts["free"],
+                    "total": len(files),
                     "judged": verdicts["logo"] + verdicts["free"],
                     "logo": verdicts["logo"], "free": verdicts["free"],
                     "skip": verdicts["skip"],

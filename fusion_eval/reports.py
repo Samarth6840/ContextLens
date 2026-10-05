@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-from .calibration import best_temperature
 from .error_taxonomy import classify
-from .metrics import compute_metrics, split_by_difficulty
 
 
 def build_report(
@@ -18,6 +16,7 @@ def build_report(
     ablation: Dict,
     calibration: Dict,
     out_dir: str,
+    by_modality: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> str:
     rows = []
     for p in preds:
@@ -50,6 +49,15 @@ def build_report(
                   f"{m['f1']} | {m['ece']} | {m['abstention_rate']} |")
     md.append("")
 
+    if by_modality:
+        md.append("## By modality availability")
+        md.append("| modalities | n | top1 | top1_covered | f1 | abstention |")
+        md.append("|---|---|---|---|---|---|")
+        for label, m in by_modality.items():
+            md.append(f"| {label} | {int(m['n'])} | {m['top1_accuracy']} | "
+                      f"{m['top1_accuracy_covered']} | {m['f1']} | {m['abstention_rate']} |")
+        md.append("")
+
     if ablation:
         md.append("## Ablations (delta vs ALL)")
         md.append("| combo | top1 | f1 | ece | abstention | Δtop1 | Δf1 | Δece |")
@@ -60,7 +68,14 @@ def build_report(
         md.append("")
 
     md.append("## Calibration")
-    md.append(f"best temperature: {calibration['temperature']}  (ECE {calibration['ece']}, Brier {calibration['brier']})")
+    md.append(f"best temperature: {calibration['temperature']}  (fit ECE {calibration['ece']}, "
+              f"fit Brier {calibration['brier']}, n_fit {calibration.get('n_fit', '?')})")
+    if "heldout_ece" in calibration:
+        md.append(f"held-out ECE {calibration['heldout_ece']}  "
+                  f"held-out Brier {calibration['heldout_brier']}  "
+                  f"n_test {calibration['n_test']}")
+    else:
+        md.append("held-out: not evaluated (insufficient covered rows to split)")
     md.append("")
 
     md.append("## Per-video verdicts")
@@ -73,7 +88,8 @@ def build_report(
 
     md_path = os.path.join(out_dir, "eval_report.md")
     open(md_path, "w").write("\n".join(md))
-    json.dump({"metrics": metrics, "by_difficulty": by_difficulty, "ablation": ablation,
+    json.dump({"metrics": metrics, "by_difficulty": by_difficulty,
+               "by_modality": by_modality or {}, "ablation": ablation,
                "calibration": calibration, "rows": rows},
               open(os.path.join(out_dir, "predictions.json"), "w"), indent=2, default=str)
     return md_path

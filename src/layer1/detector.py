@@ -76,8 +76,10 @@ class SceneObjectDetector:
         all_detections = []
         for i in range(0, len(frames), batch_size):
             batch = frames[i : i + batch_size]
+            # Pipeline frames are RGB; Ultralytics interprets raw NumPy arrays
+            # as BGR, so channel-swap at the model boundary (RGB -> BGR).
             results = self.model(
-                batch,
+                [frame[:, :, ::-1] for frame in batch],
                 conf=self.confidence_threshold,
                 iou=self.iou_threshold,
                 classes=classes,
@@ -93,7 +95,10 @@ class SceneObjectDetector:
                     for box, conf, cls_id in zip(boxes, confidences, class_ids):
                         detections.append({
                             "bbox": box.tolist(),
-                            "confidence": float(conf),
+                            # ravel: ultralytics returns conf as (N,) today and
+                            # (N,1) in some builds; float() on an ndim>0 array
+                            # is deprecated and errors in numpy>=1.25.
+                            "confidence": float(np.ravel(conf)[0]),
                             "class_id": int(cls_id),
                             "class_name": result.names[int(cls_id)],
                             "detection_source": "coco",

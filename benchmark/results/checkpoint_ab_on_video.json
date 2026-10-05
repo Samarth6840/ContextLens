@@ -1,0 +1,26 @@
+{
+  "conf": 0.1,
+  "imgsz": 640,
+  "frames": 641,
+  "note": "same frames, same conf, no labels - pure geometry A/B of what each training distribution taught",
+  "results": {
+    "LogoDet-trained (config active)": {
+      "boxes_per_frame": 73.2,
+      "median": 73.0,
+      "frames_with_a_box": 641,
+      "area_p50": 0.1713,
+      "w_over_frame_p50": 0.61,
+      "frac_area_lt_1pct": 0.0,
+      "frac_area_lt_0p1pct": 0.0
+    },
+    "OpenLogo-trained (abandoned ep12/15)": {
+      "boxes_per_frame": 0.9,
+      "median": 0.0,
+      "frames_with_a_box": 313,
+      "area_p50": 0.0271,
+      "w_over_frame_p50": 0.162,
+      "frac_area_lt_1pct": 0.3933,
+      "frac_area_lt_0p1pct": 0.0017
+    }
+  }
+}

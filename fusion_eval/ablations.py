@@ -22,16 +22,55 @@ COMBOS = [
 ]
 
 
+def _filter_ledger(ledger: Dict[str, List[dict]], disable: List[str]) -> Dict[str, List[dict]]:
+    return {
+        b: [it for it in items if it["family"] not in disable]
+        for b, items in ledger.items()
+        if any(it["family"] not in disable for it in items)
+    }
+
+
 def rerun_fusion(
-    pipeline,
-    entry: dict,
+    pred: dict,
     disable: List[str],
+    *,
+    weights: Optional[Dict[str, float]] = None,
+    temperature: float = 1.0,
+    time_bucket: float = 2.0,
+    accept: float = 0.30,
+    margin_min: float = 0.15,
+    agreement_bonus: float = 0.30,
+    contradiction_penalty: float = 0.5,
 ) -> dict:
-    """Run the fusion stage alone for `entry` with `disable` families removed."""
-    cfg = pipeline.cfg["layer2b"]["fusion"]
-    cfg["disable_families"] = disable
-    out = entry["_pred_all"]  # cached ALL-families prediction
-    return out
+    """Re-fuse a cached prediction row with `disable` families removed.
+
+    The row must carry `_ledger` (kept by the pipeline for exactly this purpose).
+    Returns a new prediction row; detection is never re-run.
+    """
+    from src.layer2.evidence_fusion import fuse_candidates
+
+    ledger = _filter_ledger(pred.get("_ledger") or {}, disable)
+    f = fuse_candidates(
+        ledger,
+        base_weights=weights or None,
+        temperature=temperature,
+        time_bucket=time_bucket,
+        accept=accept,
+        margin_min=margin_min,
+        agreement_bonus=agreement_bonus,
+        contradiction_penalty=contradiction_penalty,
+    )
+    ranking = f.get("ranking") or []
+    return {
+        **pred,
+        "_ledger": ledger,
+        "winner": f.get("winner"),
+        "prob": ranking[0]["prob"] if ranking else 0.0,
+        "margin": f.get("margin", 0.0),
+        "verdict": f.get("verdict"),
+        "families": ranking[0].get("families", {}) if ranking else {},
+        "top3": [r["candidate"] for r in ranking[:3]],
+    }
 
 
 def ablation_report(base_preds: List[dict], per_combo: Dict[str, List[dict]]) -> dict:

@@ -9,9 +9,15 @@ Each brand entry carries:
     category         — primary category
     categories       — categories the brand belongs to (drives Layer 3 graph)
     aliases          — OCR/ASR-friendly alias strings used for matching
-    contact_email    — best-effort public contact (placeholder, edit in CRM)
     contact_website  — official public domain
-    contact_verified — False → the email is a placeholder to replace
+
+There is deliberately NO contact_email field. The catalog previously carried
+guessed addresses (pr@brand.com, partnerships@brand.com, brand@brand.com)
+that were never sourced from anywhere — the same fabrication class as the
+hallucinated logo brands this project exists to stop. A guessed address that
+reaches a creator's outreach list is worse than no address at all, because it
+looks real. Get a real address from a verified source (logo.dev response,
+brand press page) and store it in the CRM, not in this file.
 
 The catalog is deliberately small and manually curated for a first version
 (the prompt's Section 7 specifies manual curation for v1, LLM-assisted mining
@@ -31,351 +37,273 @@ BRAND_CATALOG: Dict[str, dict] = {
         "category": "APPAREL",
         "categories": ["APPAREL", "FOOTWEAR", "SPORTS"],
         "aliases": ['nike', 'swoosh', 'नाइके'],
-        "contact_email": "partnerships@nike.com",
         "contact_website": "https://www.nike.com",
-        "contact_verified": False,
     },
     "ADIDAS": {
         "product": "Adidas Samba",
         "category": "APPAREL",
         "categories": ["APPAREL", "FOOTWEAR", "SPORTS"],
         "aliases": ['adidas', 'three stripes', 'एडिडास'],
-        "contact_email": "partnerships@adidas.com",
         "contact_website": "https://www.adidas.com",
-        "contact_verified": False,
     },
     "PUMA": {
         "product": "Puma Suede",
         "category": "APPAREL",
         "categories": ["APPAREL", "FOOTWEAR", "SPORTS"],
         "aliases": ['puma', 'cat logo', 'पूमा'],
-        "contact_email": "brand@puma.com",
         "contact_website": "https://us.puma.com",
-        "contact_verified": False,
     },
     "ASICS": {
         "product": "Asics Gel-Kayano",
         "category": "FOOTWEAR",
         "categories": ["FOOTWEAR", "SPORTS"],
         "aliases": ['asics', 'एसिक्स'],
-        "contact_email": "contact@asics.com",
         "contact_website": "https://www.asics.com",
-        "contact_verified": False,
     },
     "REEBOK": {
         "product": "Reebok Club C",
         "category": "FOOTWEAR",
         "categories": ["FOOTWEAR", "SPORTS", "APPAREL"],
         "aliases": ['reebok', 'रीबॉक'],
-        "contact_email": "pr@reebok.com",
         "contact_website": "https://www.reebok.com",
-        "contact_verified": False,
     },
     "NEW BALANCE": {
         "product": "New Balance 574",
         "category": "FOOTWEAR",
         "categories": ["FOOTWEAR", "SPORTS", "APPAREL"],
         "aliases": ['new balance', 'न्यू बैलेंस'],
-        "contact_email": "mediarelations@newbalance.com",
         "contact_website": "https://www.newbalance.com",
-        "contact_verified": False,
     },
     "UNDER ARMOUR": {
         "product": "Under Armour HOVR",
         "category": "APPAREL",
         "categories": ["APPAREL", "FOOTWEAR", "SPORTS"],
         "aliases": ['under armour', 'underarmour', 'अंडर आर्मर'],
-        "contact_email": "pr@underarmour.com",
         "contact_website": "https://www.underarmour.com",
-        "contact_verified": False,
     },
     "DECATHLON": {
         "product": "Decathlon Sports Gear",
         "category": "SPORTS",
         "categories": ["SPORTS", "OUTDOOR", "APPAREL"],
         "aliases": ['decathlon', 'डेकाथलॉन'],
-        "contact_email": "partners@decathlon.com",
         "contact_website": "https://www.decathlon.com",
-        "contact_verified": False,
     },
     "APPLE": {
         "product": "Apple Vision Pro",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['apple', 'एप्पल'],
-        "contact_email": "press@apple.com",
         "contact_website": "https://www.apple.com",
-        "contact_verified": False,
     },
     "SAMSUNG": {
         "product": "Samsung Galaxy",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['samsung', 'सैमसंग', 'सैमसन', 'सामसंग'],
-        "contact_email": "pr@samsung.com",
         "contact_website": "https://www.samsung.com",
-        "contact_verified": False,
     },
     "SONY": {
         "product": "Sony WH-1000XM5",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['sony', 'सोनी'],
-        "contact_email": "pr@sony.com",
         "contact_website": "https://www.sony.com",
-        "contact_verified": False,
     },
     "QUALCOMM": {
         "product": "Snapdragon",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['qualcomm', 'क्वालकॉम'],
-        "contact_email": "corpcomm@qualcomm.com",
         "contact_website": "https://www.qualcomm.com",
-        "contact_verified": False,
     },
     "LG": {
         "product": "LG OLED",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ["lg", "lg electronics", "lge"],
-        "contact_email": "pr@lg.com",
         "contact_website": "https://www.lg.com",
-        "contact_verified": False,
     },
     "GOOGLE": {
         "product": "Google Pixel",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['google', 'गूगल'],
-        "contact_email": "press@google.com",
         "contact_website": "https://about.google",
-        "contact_verified": False,
     },
     "NVIDIA": {
         "product": "NVIDIA GeForce",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "SEMICONDUCTOR", "TECH"],
         "aliases": ['nvidia', 'एनवीडिया'],
-        "contact_email": "press@nvidia.com",
         "contact_website": "https://www.nvidia.com",
-        "contact_verified": False,
     },
     "XIAOMI": {
         "product": "Xiaomi Redmi",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['xiaomi', 'श्याओमी', 'ज़ियाओमी'],
-        "contact_email": "press@xiaomi.com",
         "contact_website": "https://www.mi.com/global",
-        "contact_verified": False,
     },
     "OPPO": {
         "product": "OPPO Find",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['oppo', 'ओप्पो', 'ओपो'],
-        "contact_email": "media@oppo.com",
         "contact_website": "https://www.oppo.com",
-        "contact_verified": False,
     },
     "VIVO": {
         "product": "Vivo V Series",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['vivo', 'वीवो'],
-        "contact_email": "pr@vivo.com",
         "contact_website": "https://www.vivo.com",
-        "contact_verified": False,
     },
     "MICROSOFT": {
         "product": "Microsoft Surface",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['microsoft', 'माइक्रोसॉफ्ट'],
-        "contact_email": "rapidresponse@microsoft.com",
         "contact_website": "https://www.microsoft.com",
-        "contact_verified": False,
     },
     "META": {
         "product": "Meta Quest",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH", "SOCIAL"],
         "aliases": ['meta', 'facebook', 'instagram', 'इंस्टाग्राम', 'फेसबुक'],
-        "contact_email": "press@meta.com",
         "contact_website": "https://about.meta.com",
-        "contact_verified": False,
     },
     "AMAZON": {
         "product": "Amazon Devices",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH", "RETAIL"],
         "aliases": ['amazon', 'अमेज़न', 'अमेजन'],
-        "contact_email": "press@amazon.com",
         "contact_website": "https://www.amazon.com",
-        "contact_verified": False,
     },
     "NESCAFÉ": {
         "product": "NESCAFÉ Gold",
         "category": "BEVERAGE",
         "categories": ["BEVERAGE", "FOOD"],
         "aliases": ["nescafe", "nescafé"],
-        "contact_email": "consumer.services@nescafe.com",
         "contact_website": "https://www.nescafe.com",
-        "contact_verified": False,
     },
     "COCA-COLA": {
         "product": "Coca-Cola Zero",
         "category": "BEVERAGE",
         "categories": ["BEVERAGE", "FOOD"],
         "aliases": ['coca cola', 'coca-cola', 'coke', 'कोका कोला'],
-        "contact_email": "pr@coca-cola.com",
         "contact_website": "https://www.coca-cola.com",
-        "contact_verified": False,
     },
     "PEPSI": {
         "product": "Pepsi Max",
         "category": "BEVERAGE",
         "categories": ["BEVERAGE", "FOOD"],
         "aliases": ['pepsi', 'पेप्सी'],
-        "contact_email": "pr@pepsico.com",
         "contact_website": "https://www.pepsi.com",
-        "contact_verified": False,
     },
     "RED BULL": {
         "product": "Red Bull Energy",
         "category": "BEVERAGE",
         "categories": ["BEVERAGE", "ENERGY", "SPORTS"],
         "aliases": ['red bull', 'रेड बुल'],
-        "contact_email": "media@redbull.com",
         "contact_website": "https://www.redbull.com",
-        "contact_verified": False,
     },
     "STARBUCKS": {
         "product": "Starbucks Cup",
         "category": "BEVERAGE",
         "categories": ["BEVERAGE", "FOOD"],
         "aliases": ['starbucks', 'स्टारबक्स'],
-        "contact_email": "partnerrelations@starbucks.com",
         "contact_website": "https://www.starbucks.com",
-        "contact_verified": False,
     },
     "STANLEY": {
         "product": "Stanley Mug",
         "category": "DRINKWARE",
         "categories": ["DRINKWARE", "OUTDOOR"],
         "aliases": ["stanley"],
-        "contact_email": "pr@stanley.com",
         "contact_website": "https://www.stanley1913.com",
-        "contact_verified": False,
     },
     "YETI": {
         "product": "YETI Rambler",
         "category": "DRINKWARE",
         "categories": ["DRINKWARE", "OUTDOOR"],
         "aliases": ["yeti"],
-        "contact_email": "pr@yeti.com",
         "contact_website": "https://www.yeti.com",
-        "contact_verified": False,
     },
     "MERCEDES": {
         "product": "Mercedes C-Class",
         "category": "AUTOMOTIVE",
         "categories": ["AUTOMOTIVE", "LUXURY"],
         "aliases": ['mercedes', 'mercedes-benz', 'mercedes benz', 'benz', 'मर्सिडीज', 'बेंज'],
-        "contact_email": "pr@mercedes-benz.com",
         "contact_website": "https://www.mercedes-benz.com",
-        "contact_verified": False,
     },
     "BMW": {
         "product": "BMW 5 Series",
         "category": "AUTOMOTIVE",
         "categories": ["AUTOMOTIVE", "LUXURY"],
         "aliases": ['bmw', 'बीएमडब्ल्यू', 'बी एम डब्ल्यू'],
-        "contact_email": "pr@bmwgroup.com",
         "contact_website": "https://www.bmw.com",
-        "contact_verified": False,
     },
     "TESLA": {
         "product": "Tesla Model 3",
         "category": "AUTOMOTIVE",
         "categories": ["AUTOMOTIVE", "ELECTRONICS"],
         "aliases": ['tesla', 'टेस्ला'],
-        "contact_email": "press@tesla.com",
         "contact_website": "https://www.tesla.com",
-        "contact_verified": False,
     },
     "SUPREME": {
         "product": "Supreme Box Logo",
         "category": "APPAREL",
         "categories": ["APPAREL", "STREETWEAR"],
         "aliases": ["supreme"],
-        "contact_email": "info@supremenewyork.com",
         "contact_website": "https://www.supremenewyork.com",
-        "contact_verified": False,
     },
     "GUCCI": {
         "product": "Gucci Bag",
         "category": "APPAREL",
         "categories": ["APPAREL", "LUXURY"],
         "aliases": ['gucci', 'गुच्ची'],
-        "contact_email": "pr@gucci.com",
         "contact_website": "https://www.gucci.com",
-        "contact_verified": False,
     },
     "ROLEX": {
         "product": "Rolex Submariner",
         "category": "LUXURY",
         "categories": ["LUXURY", "ACCESSORIES"],
         "aliases": ['rolex', 'रोलेक्स'],
-        "contact_email": "pr@rolex.com",
         "contact_website": "https://www.rolex.com",
-        "contact_verified": False,
     },
     "LEVI'S": {
         "product": "Levi's 501",
         "category": "APPAREL",
         "categories": ["APPAREL", "DENIM"],
         "aliases": ["levis", "levi's", "levi s"],
-        "contact_email": "pr@levi.com",
         "contact_website": "https://www.levi.com",
-        "contact_verified": False,
     },
     "ZARA": {
         "product": "Zara Collection",
         "category": "APPAREL",
         "categories": ["APPAREL", "RETAIL"],
         "aliases": ["zara"],
-        "contact_email": "pr@zara.com",
         "contact_website": "https://www.zara.com",
-        "contact_verified": False,
     },
     "LULULEMON": {
         "product": "Lululemon Align",
         "category": "APPAREL",
         "categories": ["APPAREL", "SPORTS"],
         "aliases": ["lululemon", "lulu"],
-        "contact_email": "pr@lululemon.com",
         "contact_website": "https://shop.lululemon.com",
-        "contact_verified": False,
     },
     "VISA": {
         "product": "Visa Card",
         "category": "FINANCE",
         "categories": ["FINANCE", "PAYMENTS"],
         "aliases": ["visa"],
-        "contact_email": "pr@visa.com",
         "contact_website": "https://www.visa.com",
-        "contact_verified": False,
     },
     "MASTERCARD": {
         "product": "Mastercard",
         "category": "FINANCE",
         "categories": ["FINANCE", "PAYMENTS"],
         "aliases": ['mastercard', 'master card', 'मास्टरकार्ड'],
-        "contact_email": "media@mastercard.com",
         "contact_website": "https://www.mastercard.com",
-        "contact_verified": False,
     },
 }
 
@@ -428,6 +356,16 @@ def normalize_text(text: str) -> str:
 _ALIAS_PATTERNS: Dict[str, re.Pattern] = {}
 
 
+def _ordered_aliases(info: dict) -> list:
+    """Aliases longest-first, so overlapping matches prefer the full phrase.
+
+    "Mercedes-Benz" would otherwise match 'mercedes' AND 'mercedes-benz' AND
+    'benz' (three mentions for one brand). Longest-first with span dedupe in
+    `find_brand_mentions` yields one mention per region.
+    """
+    return sorted(info["aliases"], key=lambda a: len(normalize_text(a)), reverse=True)
+
+
 def _alias_pattern(alias_norm: str) -> re.Pattern:
     pattern = _ALIAS_PATTERNS.get(alias_norm)
     if pattern is None:
@@ -441,16 +379,19 @@ def _alias_pattern(alias_norm: str) -> re.Pattern:
 def match_brand(text: str) -> Optional[str]:
     """Return the canonical brand name found in `text`, or None.
 
-    Uses word-boundary alias matching on normalized text. Requires the
-    alias to be at least 3 characters to avoid trivial false positives.
+    Uses letter-boundary alias matching on normalized text. Requires the alias
+    to be at least 2 characters: word boundaries are enforced on both sides
+    (e.g. "lg" won't match inside "BLOG"), so a 2-char alias is a deliberate
+    real brand (LG) rather than a false-positive risk. Single characters are
+    still too ambiguous to ever match.
     """
     norm = normalize_text(text)
     if not norm:
         return None
     for brand, info in BRAND_CATALOG.items():
-        for alias in info["aliases"]:
+        for alias in _ordered_aliases(info):
             alias_norm = normalize_text(alias)
-            if len(alias_norm) < 3:
+            if len(alias_norm) < 2:
                 continue
             if _alias_pattern(alias_norm).search(norm):
                 return brand
@@ -536,33 +477,40 @@ def find_brand_mentions(
     if not text:
         return []
     found = []
-    matched_positions: set = set()
+    # brand -> list of (start, end) spans already recorded, so overlapping
+    # aliases for the same brand ("mercedes" + "mercedes-benz" + "benz" in
+    # "Mercedes-Benz") collapse into one mention instead of inflating the count.
+    spans_by_brand: dict = {}
     for brand, info in BRAND_CATALOG.items():
-        for alias in info["aliases"]:
+        for alias in _ordered_aliases(info):
             alias_norm = normalize_text(alias)
-            if len(alias_norm) < 3:
+            if len(alias_norm) < 2:
                 continue
             raw_pattern = re.compile(
                 rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])",
                 re.IGNORECASE,
             )
             for m in raw_pattern.finditer(text):
+                span = (m.start(), m.end())
+                if any(s <= span[0] and span[1] <= e for s, e in spans_by_brand.get(brand, ())):
+                    continue
                 found.append({
                     "brand": brand,
                     "position": m.start(),
                     "snippet": text[
-                        max(0, m.start() - 20): m.start() + len(alias) + 20
+                        max(0, m.start() - 20): m.end() + 20
                     ],
                 })
-                matched_positions.add(m.start())
+                spans_by_brand.setdefault(brand, []).append(span)
 
     if fuzzy and max_distance > 0:
         # Supplement: token-level phonetic matching for transliteration
         # variants the exact matcher missed. One mention per token, using the
         # best-matching alias, and never over tokens that already matched.
-        for token in re.split(r"\s+", text):
-            start = text.find(token)
-            if start in matched_positions or start < 0:
+        for m in re.finditer(r"\S+", text):
+            token = m.group(0)
+            start = m.start()
+            if any(s <= start and m.end() <= e for spans in spans_by_brand.values() for s, e in spans):
                 continue
             best = _fuzzy_token_match(normalize_text(token), max_distance)
             if best is None:
@@ -572,7 +520,7 @@ def find_brand_mentions(
                 "brand": brand,
                 "position": start,
                 "snippet": text[
-                    max(0, start - 20): start + len(token) + 20
+                    max(0, start - 20): m.end() + 20
                 ],
             })
 
@@ -592,14 +540,21 @@ def lookup(brand: str) -> Optional[dict]:
 
 
 def contact_for(brand: str) -> Optional[dict]:
-    """Return contact metadata for a brand, or None."""
+    """Return contact metadata for a brand, or None.
+
+    `email` is always None: the catalog carries no contact addresses, because
+    every address it used to carry was guessed rather than sourced (see the
+    module docstring). Callers must source a real address from a verified
+    lookup before any outreach. `website` is the official public domain, which
+    IS curated and safe to show.
+    """
     info = lookup(brand)
     if not info:
         return None
     return {
-        "email": info.get("contact_email"),
+        "email": None,
         "website": info.get("contact_website"),
-        "verified": bool(info.get("contact_verified")),
+        "verified": False,
     }
 
 

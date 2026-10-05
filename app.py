@@ -197,7 +197,12 @@ if uploaded_file is not None:
                 if l1["brand_mentions"]:
                     st.markdown("**Brand mentions in speech:**")
                     for m in l1["brand_mentions"]:
-                        st.markdown(f"  • **{m['brand']}** — `...{m['text_snippet']}...`")
+                        # find_brand_mentions() returns "snippet" (see
+                        # src/brand_catalog.py:534). The deprecated
+                        # detect_brand_mentions() in layer1/audio.py returned
+                        # "text_snippet"; reading that key here raised KeyError
+                        # on every transcript with a brand mention.
+                        st.markdown(f"  • **{m['brand']}** — `...{m.get('snippet', '')}...`")
 
                 # Audio events
                 if l1["audio_events"]:

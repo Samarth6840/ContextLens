@@ -28,6 +28,7 @@ LightGCN-style affinity model and/or an LLM-as-ranker (prompt §7).
 """
 
 import logging
+import math
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -41,6 +42,12 @@ DEFAULT_CATEGORY_AFFINITY = 0.7
 # blended with the graph/evidence score with this weight (the rest goes to the
 # explainable graph/evidence signal). 0.0 disables the learned signal entirely.
 DEFAULT_AFFINITY_BLEND = 0.5
+# Spoken-mention credit. The ceiling is deliberately below the 0.5 strong-
+# evidence line and below any real logo confidence: naming a brand is weaker
+# evidence than showing it. SPEECH_SATURATION is the mention count at which the
+# credit stops growing (log curve, so 1 mention is worth far less than 4).
+SPEECH_CEILING = 0.45
+SPEECH_SATURATION = 8
 
 
 class BrandRecommender:
@@ -113,8 +120,35 @@ class BrandRecommender:
         brand_evidence = brand_evidence or {}
         detected = sorted(timeline.keys())
 
+        def _speech_weight(entry: dict) -> float:
+            """Strength contributed by being named out loud, capped below a logo.
+
+            Speech appearances carry a placeholder confidence of 1.0 (the ASR
+            gives no per-mention score), so only the COUNT is real evidence, and
+            only up to a point: a narrator reading out a spec sheet names ten
+            brands they are not endorsing. The curve therefore saturates, and
+            the ceiling sits below the 0.5 strong-evidence line so a brand that
+            is only ever spoken can never claim to be strongly evidenced.
+            """
+            n = sum(
+                1 for a in entry.get("appearances", [])
+                if a.get("modality") == "speech"
+            )
+            if not n:
+                return 0.0
+            ramp = math.log2(1 + n) / math.log2(1 + SPEECH_SATURATION)
+            return SPEECH_CEILING * min(1.0, ramp)  # ponytail: log curve, capped below logo strength; raise SPEECH_SATURATION if real videos name brands far more often
+
         def _evidence(brand: str) -> float:
-            """Evidence for a brand: explicit strength or mean logo confidence."""
+            """Evidence for a brand: explicit strength or mean logo confidence.
+
+            An explicit `brand_evidence` value is authoritative and returned
+            as-is: it comes from layer 2b's evidence fusion, which already
+            counts spoken mentions as one of its sources, so adding the speech
+            bonus here would double-count it. The bonus applies only to the
+            derived path, where a brand spoken ten times and never shown used
+            to score 0.0 — the same as a brand mentioned once.
+            """
             if brand in brand_evidence:
                 return float(brand_evidence[brand])
             entry = timeline.get(brand, {})
@@ -122,7 +156,12 @@ class BrandRecommender:
                 a.get("confidence") for a in entry.get("appearances", [])
                 if a.get("modality") == "logo" and a.get("confidence") is not None
             ]
-            return float(np.mean(confs)) if confs else 0.0
+            base = float(np.mean(confs)) if confs else 0.0
+            # Speech fills the headroom the logos left rather than stacking on
+            # top: a 0.9-confidence brand plus one mention must not clamp to 1.0
+            # and flatten the ranking of every strong brand. For a brand with no
+            # logo at all this reduces exactly to the speech weight.
+            return base + _speech_weight(entry) * (1.0 - base)
 
         recs: List[dict] = []
 
@@ -136,16 +175,23 @@ class BrandRecommender:
             info = self.graph.catalog.get(brand, {})
             entry = timeline[brand]
             ev = max(_evidence(brand), entry.get("confidence", 0.0))
-            modalities = entry.get("modalities", [])
             reasons = []
             n_logo = sum(
                 1 for a in entry.get("appearances", [])
                 if a.get("modality") == "logo"
             )
+            n_speech = sum(
+                1 for a in entry.get("appearances", [])
+                if a.get("modality") == "speech"
+            )
             if n_logo:
                 reasons.append(f"LOGO / ON-SCREEN DETECTED — {n_logo} appearance(s)")
-            if "speech" in modalities:
-                reasons.append("MENTIONED IN SPOKEN CONTENT")
+            if n_speech:
+                reasons.append(
+                    f"NAMED {n_speech}x IN THE AUDIO"
+                    if n_speech > 1
+                    else "NAMED ONCE IN THE AUDIO"
+                )
             if entry.get("cross_scene"):
                 reasons.append(
                     "CROSS-SCENE — VISUAL + SPOKEN EVIDENCE LINKED"

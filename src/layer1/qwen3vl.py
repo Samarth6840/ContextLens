@@ -100,11 +100,18 @@ class Qwen3VL32B(Qwen3VLAbstract):
         # repo id that is already in the local HF cache. Anything else fails
         # closed immediately with a clear message — no implicit ~60GB download.
         if not self._weights_available_locally(self.model_name):
-            logger.error(
-                "Qwen3-VL weights for '%s' are NOT available locally (no local "
-                "path and not in the HuggingFace cache). Failing closed — "
-                "download the weights first (e.g. via huggingface-cli) and set "
-                "config layer1.central_vision_model.model to the local path.",
+            # Absent weights are an intentional steady state here, not a failure:
+            # every caller already degrades to a fallback result (see
+            # analyze_frame / resolve_product_manufacturer), and project policy
+            # forbids auto-downloading ~60GB. Logged at INFO so it stops looking
+            # like a broken upload in the server log. Raise this back to
+            # logger.error only once Qwen3-VL is actually wired into scoring.
+            logger.info(
+                "Qwen3-VL '%s' disabled: weights not present locally. This is "
+                "expected and non-fatal — all Qwen outputs return fallback "
+                "values, and detection/OCR/CLIP are unaffected. To enable it, "
+                "download the weights and point config "
+                "layer1.central_vision_model.model at the local path.",
                 self.model_name,
             )
             self._initialized = True

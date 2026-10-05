@@ -107,7 +107,7 @@ class YOLOWorldLogoDetector(LogoDetectionBackend):
             self._current_queries = list(queries)
 
         results = self.model(
-            image,
+            image[:, :, ::-1],  # pipeline frames are RGB; Ultralytics wants BGR
             conf=self.confidence_threshold,
             device=self.device,
             verbose=False,
@@ -149,7 +149,7 @@ class YOLOWorldLogoDetector(LogoDetectionBackend):
         for i in range(0, len(frames), batch_size):
             batch = frames[i : i + batch_size]
             results = self.model(
-                batch,
+                [frame[:, :, ::-1] for frame in batch],  # RGB in, Ultralytics wants BGR
                 conf=self.confidence_threshold,
                 device=self.device,
                 verbose=False,
@@ -173,6 +173,102 @@ class YOLOWorldLogoDetector(LogoDetectionBackend):
         return all_detections
 
 
+class YOLOLogoDetector(LogoDetectionBackend):
+    """
+    Single-class supervised logo detector (Ultralytics YOLO), e.g. weights
+    trained by scripts/train_logo_detector.py on LogoDet-3K.
+
+    Classes come from the checkpoint and there is no CLIP text encoder to
+    re-encode, so `set_classes` is never called and `text_queries` is ignored.
+    A trained class name is a category ("logo"), never a brand verdict.
+    """
+
+    def __init__(
+        self,
+        model_name: str = "weights/logo_detector/train/weights/best.pt",
+        confidence_threshold: float = 0.25,
+        device: Optional[str] = None,
+        text_queries: Optional[List[str]] = None,
+    ):
+        import torch
+        from ultralytics import YOLO
+
+        self.confidence_threshold = confidence_threshold
+        self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
+        self._current_queries = None  # fixed classes, nothing to re-prompt
+
+        logger.info("Loading supervised logo detector '%s' on %s", model_name, self.device)
+        self.model = YOLO(model_name)
+        self.model.to(self.device)
+        logger.info("Supervised logo detector loaded (classes: %s)", self.model.names)
+
+    def detect(
+        self,
+        image: np.ndarray,
+        text_queries: Optional[List[str]] = None,
+    ) -> List[dict]:
+        if image is None or image.size == 0:
+            return []
+        results = self.model(
+            image[:, :, ::-1],  # pipeline frames are RGB; Ultralytics wants BGR
+            conf=self.confidence_threshold,
+            device=self.device,
+            verbose=False,
+        )
+        # ultralytics >=8.4 returns a LIST even for a single image; older
+        # versions returned the bare Results. Accept both.
+        if isinstance(results, list):
+            results = results[0] if results else None
+        return self._to_detections(results) if results is not None else []
+
+    def detect_batch(
+        self,
+        frames: List[np.ndarray],
+        text_queries: Optional[List[str]] = None,
+        batch_size: int = 8,
+    ) -> List[List[dict]]:
+        if not frames:
+            return []
+        # One entry per frame, in order. Callers index this against the frame
+        # list (pipeline.py assigns all_logo_detections[idx] = dets), so
+        # flattening the batch here silently mis-assigns every box.
+        out: List[List[dict]] = []
+        for i in range(0, len(frames), batch_size):
+            results = self.model(
+                [f[:, :, ::-1] for f in frames[i : i + batch_size]],  # RGB in -> BGR for YOLO
+                conf=self.confidence_threshold,
+                device=self.device,
+                verbose=False,
+            )
+            for result in results:
+                out.append(self._to_detections(result))
+        # Guard the contract the pipeline relies on rather than trusting it.
+        if len(out) != len(frames):
+            raise RuntimeError(
+                f"detect_batch returned {len(out)} frames for {len(frames)} inputs"
+            )
+        return out
+
+    @staticmethod
+    def _to_detections(result) -> List[dict]:
+        detections = []
+        if result.boxes is None:
+            return detections
+        boxes = result.boxes.xyxy.cpu().numpy()
+        confidences = result.boxes.conf.cpu().numpy()
+        class_ids = result.boxes.cls.cpu().numpy().astype(int)
+        for box, conf, cls_id in zip(boxes, confidences, class_ids):
+            detections.append(
+                {
+                    "bbox": box.tolist(),
+                    "confidence": float(conf),
+                    "text_prompt": None,
+                    "class_name": result.names[int(cls_id)],
+                }
+            )
+        return detections
+
+
 def create_logo_detector(
     backend: str = "yolo_world",
     model_name: str = "yolov8s-worldv2.pt",
@@ -185,7 +281,7 @@ def create_logo_detector(
     Factory: create the configured logo detection backend.
 
     Args:
-        backend: "yolo_world"
+        backend: "yolo_world" (zero-shot, prompted) | "yolo" (trained single-class)
         model_name: model weights path
         confidence_threshold: minimum confidence for detections
         device: "cuda", "cpu", or None for auto
@@ -201,8 +297,13 @@ def create_logo_detector(
             device=device,
             text_queries=text_queries,
         )
-    else:
-        raise ValueError(
-            f"Unknown logo detection backend: '{backend}'. "
-            "Choose 'yolo_world'."
+    if backend == "yolo":
+        return YOLOLogoDetector(
+            model_name=model_name,
+            confidence_threshold=confidence_threshold,
+            device=device,
         )
+    raise ValueError(
+        f"Unknown logo detection backend: '{backend}'. "
+        "Choose 'yolo_world' or 'yolo'."
+    )

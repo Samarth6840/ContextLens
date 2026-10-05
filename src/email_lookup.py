@@ -142,7 +142,6 @@ def _grounding(urls: List[str], supports: List[dict]) -> Set[str]:
     """Collect real retrieved URLs from groundingMetadata."""
     found = set(urls)
     for s in supports or []:
-        seg = (s.get("segment") or {}).get("text") or ""
         uris = (s.get("groundingChunks") or [])
         for chunk in uris or []:
             uri = ((chunk or {}).get("web") or {}).get("uri") or ""

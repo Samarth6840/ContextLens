@@ -98,9 +98,9 @@ def check_beats():
     try:
         urllib.request.urlretrieve(source_url, destination)
         logger.info(
-            f"Downloaded fine-tuned BEATs checkpoint (%d bytes). "
-            f"Feature-extractor fallback BEATs_iter3_plus_AS2M.pt, if present, "
-            f"remains valid for the degraded path.",
+            "Downloaded fine-tuned BEATs checkpoint (%d bytes). "
+            "Feature-extractor fallback BEATs_iter3_plus_AS2M.pt, if present, "
+            "remains valid for the degraded path.",
             destination.stat().st_size,
         )
         return True

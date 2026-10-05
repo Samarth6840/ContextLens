@@ -38,6 +38,7 @@ import string
 import sys
 import tempfile
 import threading
+import time
 import uuid
 import functools
 from datetime import datetime, timezone
@@ -107,6 +108,7 @@ OPEN_SET_CROP_DIR = ROOT / str(_OPEN_SET_CFG.get("crop_cache_dir", "static/opens
 # logo.dev brand-validation cache (B2b fabrication safeguard). Only status
 # "verified" may ever be presented as a real brand.
 _BRAND_VALIDATION_CACHE: dict = {}
+_BRAND_VALIDATION_CACHE_TTL = 1 * 60 * 60  # seconds; re-check web lookups hourly
 
 
 # ── Phase 3 SaaS: auth (feature-flagged) + SQLite job store ────────────
@@ -210,9 +212,12 @@ def _enrich_recommendations(recs, appearance_counts=None, emails=None) -> list:
         key = _normalize_brand(brand)
         info = (BRAND_CATALOG or {}).get(brand) or {}
         enriched = dict(rec)
-        enriched.setdefault("contact_email", info.get("contact_email"))
+        # No catalog email: BRAND_CATALOG deliberately carries no contact
+        # addresses (they were guesses). A contact_email here can ONLY come
+        # from the Gemini grounding lookup below, which is sourced.
+        enriched.setdefault("contact_email", None)
         enriched.setdefault("contact_website", info.get("contact_website"))
-        enriched.setdefault("contact_verified", bool(info.get("contact_verified")))
+        enriched.setdefault("contact_verified", False)
         if key in counts:
             enriched["appearances"] = int(counts.get(key, 0) or 0)
         else:
@@ -450,6 +455,8 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             generic_tag_filter=list(_OPEN_SET_CFG["generic_tag_filter"] or []),
             generic_domain_filter=list(_OPEN_SET_CFG["generic_domain_filter"] or []),
             logodev_timeout=float(_OPEN_SET_CFG["logodev_timeout"]),
+            saturated_proposals_per_frame=int(
+                _OPEN_SET_CFG.get("saturated_proposals_per_frame", 30) or 30),
         )
     except Exception as exc:  # noqa: BLE001
         return {
@@ -689,9 +696,9 @@ def _build_dashboard(result: dict, job: dict) -> dict:
                     "appearances": set(),
                     "confidences": [],
                     "frame_texts": [],
-                    "contact_email": info.get("contact_email"),
+                    "contact_email": None,
                     "contact_website": info.get("contact_website"),
-                    "contact_verified": bool(info.get("contact_verified")),
+                    "contact_verified": False,
                 }
             entry = product_map[key]
             entry["appearances"].add(frame_idx)
@@ -850,7 +857,9 @@ def _build_dashboard(result: dict, job: dict) -> dict:
             p["gemini_emails"] = entry["emails"]
             p["hr_emails"] = entry.get("hr_emails") or []
         else:
-            p["contact_email_source"] = "catalog"
+            # No email. Previously "catalog", which meant "here is a guessed
+            # address from BRAND_CATALOG" — that source is gone.
+            p["contact_email_source"] = None
     recommendations = _enrich_recommendations(
         (result.get("layer3") or {}).get("recommendations", []),
         appearance_counts=appearance_counts,
@@ -994,7 +1003,7 @@ def _persist_job(job: dict) -> None:
             "created_at": job.get("created_at"),
             "finished_at": job.get("finished_at"),
             "dashboard": job.get("dashboard"),
-            "forwarded": job.get("forwarded"),
+            "approved": job.get("approved"),
             "result": prune_for_store(job.get("result") or {}),
         }
         JOB_STORE.save(job["job_id"], snapshot)
@@ -1448,12 +1457,21 @@ def source_video(job_id: str):
 
 
 def _validate_brand(brand: str) -> dict:
-    """External logo.dev existence check, cached per brand (B2b safeguard)."""
+    """External logo.dev existence check, cached per brand (B2b safeguard).
+
+    Only definitive verdicts are cached — `unavailable` is a transient state
+    (network blip, unset key) and must be re-attempted instead of poisoning the
+    cache forever. Every cached verdict also expires so a brand that appears on
+    logo.dev later (or is renamed) is eventually picked up.
+    """
     key = _normalize_brand(brand)
-    if key in _BRAND_VALIDATION_CACHE:
-        return _BRAND_VALIDATION_CACHE[key]
+    now = time.time()
+    entry = _BRAND_VALIDATION_CACHE.get(key)
+    if entry and now - entry["at"] < _BRAND_VALIDATION_CACHE_TTL:
+        if entry["result"].get("status") != "unavailable":
+            return entry["result"]
     result = LogoDevClient().validate_brand(brand)
-    _BRAND_VALIDATION_CACHE[key] = result
+    _BRAND_VALIDATION_CACHE[key] = {"at": now, "result": result}
     return result
 
 
@@ -1571,9 +1589,20 @@ def outreach_generate():
     })
 
 
-@app.post("/api/outreach/forward")
+@app.post("/api/outreach/approve")
 @login_required
-def outreach_forward():
+def outreach_approve():
+    """Record a HUMAN approval of a draft. Sends nothing.
+
+    This used to be `/api/outreach/forward` and returned
+    {"status": "forwarded"} — but it only appended a timestamp to the job
+    record. The UI rendered "Forwarded to <creator>", which claims an email
+    went out when none did. An outreach tool that fakes its own sends is
+    indistinguishable from one that fabricates brand evidence.
+
+    Sending requires a real mail transport and human approval of the
+    recipient. Until both exist, this is a review marker and says so.
+    """
     if not OUTREACH_ENABLED:
         return jsonify({"error": OUTREACH_REASON or "OUTREACH DISABLED"}), 403
 
@@ -1584,18 +1613,22 @@ def outreach_forward():
     job = _job(job_id) if job_id else None
     if job is None or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT FOUND"}), 404
+    if not brand:
+        return jsonify({"error": "BRAND REQUIRED"}), 400
 
-    forwarded = job.setdefault("forwarded", [])
+    approved = job.setdefault("approved", [])
     stamped = {
         "brand": brand,
         "at": _now_iso(),
         "request_id": str(uuid.uuid4())[:8].upper(),
     }
-    forwarded.append(stamped)
+    approved.append(stamped)
     _persist_job(job)
 
     return jsonify({
-        "status": "forwarded",
+        "status": "marked_approved",
+        "sent": False,
+        "note": "Marked as reviewed. Nothing was sent — send the draft yourself.",
         "target": job["dashboard"].get("creator", "CHANNEL"),
         "at": stamped["at"],
     })

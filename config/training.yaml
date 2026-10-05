@@ -1,8 +1,11 @@
 # Training Configuration for Quality-Aware Gating Network
 
 training:
-  learning_rate: 1e-4
-  weight_decay: 1e-2
+  # NOTE: `1e-4` (no decimal point before the `e`) is parsed by PyYAML as the
+  # STRING "1e-4", not a float — only readers that explicitly cast() survived.
+  # Always write 1.0e-4 so every reader sees a number.
+  learning_rate: 1.0e-4
+  weight_decay: 1.0e-2
   epochs: 100
   warmup_epochs: 10
   patience: 15  # early stopping
@@ -13,9 +16,15 @@ training:
   lambda_entropy: 0.1
 
   # Model architecture
+  # These MUST match the production model built in
+  # pipeline._fusion_factory (src/pipeline.py:939), which reads
+  # layer1.audio_events.embedding_dim (256) and
+  # layer1.visual_embeddings.output_dim (768). A mismatch makes
+  # load_state_dict fail on the first Linear, so there is no checkpoint
+  # trained against this file that can load into production.
   fusion:
-    audio_dim: 1024
-    video_dim: 1024
+    audio_dim: 256    # layer1.audio_events.embedding_dim
+    video_dim: 768    # layer1.visual_embeddings.output_dim
     hidden_dim: 512
     num_heads: 8
     num_layers: 3

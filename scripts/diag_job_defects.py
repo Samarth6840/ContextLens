@@ -192,7 +192,7 @@ def main():
                    if d['class_name'] in ("brand logo", "company logo", "text logo", "product logo")]
     print("\n=== D1.3 sanity: SAMSUNG true positive raw box @ frame 41 ===")
     print(f"  generic-brand raw boxes @conf=0.01: {[(c, round(v,3)) for c,v in samsung_box]}")
-    print(f"  (archived SAMSUNG TP came from OCR 'Samsung Galaxy M07...' text on this frame,")
+    print("  (archived SAMSUNG TP came from OCR 'Samsung Galaxy M07...' text on this frame,")
     print(f"   resolved via crop-OCR; its own YOLO conf is {samsung_box[0][1]:.3f} if present)" if samsung_box else
           "  no generic-brand box on frame 41; SAMSUNG was resolved purely from OCR text.")
 

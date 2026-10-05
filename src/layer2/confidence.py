@@ -26,6 +26,28 @@ STATUS_IMPLEMENTED = "implemented"
 STATUS_SCAFFOLDED = "scaffolded"
 
 
+def _ece(scores: np.ndarray, labels: np.ndarray, n_bins: int = 10) -> float:
+    """Binned Expected Calibration Error, weighted by bin sample count.
+
+    A plain mean over bins over-counts sparsely-populated bins and silently
+    drops empty ones; the standard definition weights each bin by its share of
+    samples, so a bin with 90% of the data dominates the error.
+    """
+    unique_labels = np.unique(labels)
+    if len(unique_labels) < 2 or scores.size == 0:
+        return 0.0
+    bin_edges = np.linspace(0.0, 1.0, n_bins + 1)
+    bin_ids = np.clip(np.digitize(scores, bin_edges[1:-1]), 0, n_bins - 1)
+    err = 0.0
+    for b in range(n_bins):
+        idx = bin_ids == b
+        count = int(idx.sum())
+        if count == 0:
+            continue
+        err += (count / scores.size) * abs(float(labels[idx].mean()) - float(scores[idx].mean()))
+    return float(err)
+
+
 class EvidenceConfidenceScorer:
     """
     Computes decomposed, explainable confidence scores from multimodal evidence.
@@ -221,14 +243,21 @@ class EvidenceConfidenceScorer:
 
             # Apply modality quality modulation
             if modality_quality_weights is not None:
-                if ev_type in ("logo_detected", "ocr_hit", "scene_context"):
+                if ev_type in ("logo_detected", "ocr_hit"):
                     # Video-dependent evidence
                     video_weight = modality_quality_weights.get(
                         "video_weight", 0.5
                     )
                     weight = weight * (0.5 + 0.5 * video_weight)
-                elif ev_type == "speech_mention":
-                    # Audio-dependent evidence
+                elif ev_type in ("speech_mention", "scene_context", "audio_event"):
+                    # Audio-dependent evidence. scene_context and audio_event
+                    # are both built from BEATs audio events
+                    # (pipeline._aggregate_evidence: scene_strength comes
+                    # straight from `audio_events`), so a blurry FRAME must
+                    # not discount them — bad video quality leaves the audio
+                    # stream untouched. They were previously modulated by
+                    # video_weight, which under-weighted a clear audio cue
+                    # whenever the video leg was degraded.
                     audio_weight = modality_quality_weights.get(
                         "audio_weight", 0.5
                     )
@@ -357,7 +386,7 @@ class EvidenceConfidenceScorer:
             )
             if len(prob_true) == 0:
                 return {"ece": 0.0, "prob_true": [], "prob_pred": []}
-            ece = float(np.mean(np.abs(prob_true - prob_pred)))
+            ece = _ece(raw_scores, ground_truth, n_bins=10)
         except ValueError:
             return {"ece": 0.0, "prob_true": [], "prob_pred": []}
 
@@ -388,17 +417,7 @@ class EvidenceConfidenceScorer:
         if len(unique_labels) < 2:
             return 0.0
 
-        try:
-            prob_true, prob_pred = calibration_curve(
-                labels, scores, n_bins=n_bins
-            )
-            if len(prob_true) == 0:
-                return 0.0
-            ece = float(np.mean(np.abs(prob_true - prob_pred)))
-        except ValueError:
-            return 0.0
-
-        return ece
+        return _ece(scores, labels, n_bins=n_bins)
 
     def compute_roc_auc(
         self,

@@ -43,7 +43,8 @@ new models — only a bounded amount of per-logo inference.
 """
 
 import logging
-from typing import Dict, List, Optional, Sequence, Tuple
+import time
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -116,8 +117,15 @@ class BrandResolver:
         max_logo_area_fraction: float = 0.50,
         superset_margin_ratio: float = 0.45,
         product_resolver=None,
+        progress: Optional[Callable[[str], None]] = None,
     ):
         self.ocr = ocr_extractor
+        # Progress callback (best-effort, never raises into the resolver):
+        # brand resolution is the longest post-OCR stage (thousands of logo
+        # boxes -> crop -> OCR -> CLIP retrieve, all silent), and without
+        # per-frame lines the job feed freezes after the OCR summary.
+        self._progress_raw = progress
+        self._last_progress = time.monotonic()
         self.class_confidence = float(class_confidence)
         self.crop_scale = float(crop_scale)
         # Multiline-card OCR superset (see _crop_superset). The primary (tight)
@@ -256,12 +264,153 @@ class BrandResolver:
             nh, nw = int(nh * ratio), int(nw * ratio)
         return cv2.resize(crop, (nw, nh), interpolation=cv2.INTER_CUBIC)
 
+    @staticmethod
+    def _collect_texts(results) -> List[str]:
+        """Dedupe OCR result dicts into an ordered text list."""
+        seen = set()
+        texts: List[str] = []
+        for r in results or []:
+            t = r.get("text", "") if isinstance(r, dict) else str(r)
+            if t and t not in seen:
+                seen.add(t)
+                texts.append(t)
+        return texts
+
+    def _area_fraction(self, det: dict, frame: np.ndarray) -> float:
+        """Fraction of the frame covered by the detection box (0.0 if unusable)."""
+        bbox = det.get("bbox")
+        if not bbox or frame is None:
+            return 0.0
+        frame_h, frame_w = frame.shape[:2]
+        if frame_h <= 0 or frame_w <= 0:
+            return 0.0
+        try:
+            bx1, by1, bx2, by2 = (int(v) for v in bbox)
+        except (TypeError, ValueError):
+            return 0.0
+        bh = max(0, min(frame_h, by2) - max(0, by1))
+        bw = max(0, min(frame_w, bx2) - max(0, bx1))
+        return (bh * bw) / (frame_h * frame_w)
+
+    def _ocr_crops_batch(self, crops: List[np.ndarray]) -> List[List[str]]:
+        """OCR many crops in ONE subprocess round-trip per attempt.
+
+        Mirrors `_ocr_crop_texts` (upscale first, fall back to the original) but
+        batches, so a frame with N logo boxes costs 1-2 round-trips instead of
+        2N. OCR lives in a separate process and every request is a blocking
+        pipe write/readline, so per-crop calls made a dense frame (hundreds of
+        boxes) cost minutes of wall clock for no extra information.
+        """
+        n = len(crops)
+        if not n or self.ocr is None:
+            return [[] for _ in crops]
+        out: List[List[str]] = [[] for _ in crops]
+
+        # Only OCRExtractor exposes the batch API. A duck-typed OCR object (test
+        # stub, custom extractor) may implement extract_text alone, so fall back
+        # to the per-crop path rather than silently resolving nothing.
+        if not hasattr(self.ocr, "extract_text_batch"):
+            for i, c in enumerate(crops):
+                out[i] = self._ocr_crop_texts(c)
+            return out
+
+        scaled = [self._upscale(c, self.crop_scale) if c is not None else None
+                  for c in crops]
+        first = [i for i in range(n) if scaled[i] is not None]
+        if first:
+            try:
+                res = self.ocr.extract_text_batch([scaled[i] for i in first])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Batched crop-OCR failed: %s", exc)
+                return out
+            for i, r in zip(first, res):
+                out[i] = self._collect_texts(r)
+
+        retry = [i for i in first
+                 if not out[i] and crops[i] is not None and scaled[i] is not crops[i]]
+        if retry:
+            try:
+                res = self.ocr.extract_text_batch([crops[i] for i in retry])
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Batched crop-OCR retry failed: %s", exc)
+                return out
+            for i, r in zip(retry, res):
+                out[i] = self._collect_texts(r)
+        return out
+
+    def _emit_progress(self, msg: str) -> None:
+        """Best-effort progress emit, throttled to >=1 line per 2 seconds.
+
+        The resolver loops over hundreds of frames; unthrottled emits would
+        flood the 50-entry feed ring and crowd out every other stage's lines.
+        """
+        if self._progress_raw is None:
+            return
+        try:
+            now = time.monotonic()
+            if now - self._last_progress >= 2.0:
+                self._progress_raw(msg)
+                self._last_progress = now
+        except Exception:  # noqa: BLE001 — reporting must never kill the job
+            pass
+
+    def _prefetch_ocr(self, frames, logo_detections) -> Dict[tuple, List[str]]:
+        """Pre-OCR every crop in each frame using a fixed number of round-trips.
+
+        Returns {(frame_idx, det_idx, "tight"|"superset"): [texts]}. The
+        superset retry is only queued for crops whose tight read did not name a
+        brand, which is exactly the condition `_resolve_detection` uses, so the
+        batched result is identical to resolving one detection at a time.
+        """
+        cache: Dict[tuple, List[str]] = {}
+        if self.ocr is None:
+            return cache
+        n_ocr_frames = sum(
+            1 for fr, ds in zip(frames, logo_detections)
+            if fr is not None and fr.size > 0 and ds
+        )
+        for fi, (frame, dets) in enumerate(zip(frames, logo_detections)):
+            if frame is None or frame.size == 0:
+                continue
+            if dets:
+                self._emit_progress(
+                    f"Brand resolution — reading text on logo crops "
+                    f"(frame {fi + 1}/{len(frames)}, {n_ocr_frames} with logos)"
+                )
+            pending = []
+            for di, det in enumerate(dets):
+                # Editorial/oversized boxes are suppressed before OCR ever runs.
+                if self._area_fraction(det, frame) > self.max_logo_area_fraction:
+                    continue
+                crop = self._crop(frame, det.get("bbox"))
+                if crop is not None:
+                    pending.append((di, crop))
+            if not pending:
+                continue
+
+            for (di, _), texts in zip(pending,
+                                      self._ocr_crops_batch([c for _, c in pending])):
+                cache[(fi, di, "tight")] = texts
+
+            sup_idx, sup_crops = [], []
+            for di, crop in pending:
+                texts = cache.get((fi, di, "tight")) or []
+                if texts and match_brand(" ".join(texts)):
+                    continue
+                sc = self._crop_superset(frame, dets[di].get("bbox"))
+                if sc is not None:
+                    sup_idx.append(di)
+                    sup_crops.append(sc)
+            if sup_crops:
+                for di, texts in zip(sup_idx, self._ocr_crops_batch(sup_crops)):
+                    cache[(fi, di, "superset")] = texts
+        return cache
+
     def _ocr_crop_texts(self, crop: np.ndarray) -> List[str]:
         """OCR a crop and return the recognized text list.
 
-        Tries the upscaled crop first (best for small logo text), and falls back
-        to the original if upscaling produced nothing. Dedupes while preserving
-        order.
+        Single-crop path, kept for direct callers; `resolve()` uses the batched
+        `_prefetch_ocr` instead.
         """
         if self.ocr is None or crop is None:
             return []
@@ -270,7 +419,6 @@ class BrandResolver:
         candidates.append(scaled)
         if scaled is not crop:
             candidates.append(crop)
-        seen = set()
         texts: List[str] = []
         for img in candidates:
             try:
@@ -278,17 +426,19 @@ class BrandResolver:
             except Exception as exc:  # noqa: BLE001
                 logger.debug("Crop-OCR failed for logo box: %s", exc)
                 continue
-            for r in results:
-                t = r.get("text", "")
-                if t and t not in seen:
-                    seen.add(t)
-                    texts.append(t)
+            texts = self._collect_texts(results)
             if texts:
                 break
         return texts
 
-    def _resolve_detection(self, det: dict, frame: np.ndarray) -> dict:
-        """Resolve a single logo detection to a canonical brand name."""
+    def _resolve_detection(self, det: dict, frame: np.ndarray,
+                           ocr_cache: Optional[Dict] = None,
+                           ocr_key: Optional[tuple] = None) -> dict:
+        """Resolve a single logo detection to a canonical brand name.
+
+        `ocr_cache`/`ocr_key` are supplied by `resolve()`'s batched prefetch; when
+        present no per-detection OCR subprocess call is made.
+        """
         out = dict(det)
         out["brand"] = None
         class_name = str(det.get("class_name") or "")
@@ -302,17 +452,7 @@ class BrandResolver:
         #    a false DIRECT recommendation (observed: a ~0.58-frame-area box whose
         #    headline text resolved to GOOGLE). Suppress oversized boxes entirely
         #    and tag them for audit so they never become brand evidence.
-        bbox = det.get("bbox")
-        frame_h, frame_w = frame.shape[:2]
-        frac = 0.0
-        if bbox and frame_h > 0 and frame_w > 0:
-            try:
-                bx1, by1, bx2, by2 = (int(v) for v in bbox)
-            except (TypeError, ValueError):
-                bx1 = by1 = bx2 = by2 = 0
-            bh = max(0, min(frame_h, by2) - max(0, by1))
-            bw = max(0, min(frame_w, bx2) - max(0, bx1))
-            frac = (bh * bw) / (frame_h * frame_w)
+        frac = self._area_fraction(det, frame) if frame is not None else 0.0
         if frac > self.max_logo_area_fraction:
             out["editorial_box"] = True
             out["editorial_box_reason"] = (
@@ -321,6 +461,7 @@ class BrandResolver:
                 f"editorial, not a compact wordmark"
             )
             out["ocr_text"] = ""
+            out["unresolved_reason"] = "editorial_box"
             logger.info(
                 "Brand SUPPRESSED as full-frame editorial: class='%s' (conf=%.2f) "
                 "bbox=%.1f%% of frame (>\u00a0%.0f%%) — not a brand wordmark",
@@ -340,10 +481,14 @@ class BrandResolver:
         ocr_brand, joined_ocr = None, ""
         retrieval_candidates: List[Tuple[str, float]] = []
         retrieval_brand, retrieval_sim = None, 0.0
+        retrieval_diag: Dict[str, object] = {}
         superset_crop = None
         if crop is not None:
             if self.ocr is not None:
-                texts = self._ocr_crop_texts(crop)
+                cached = None
+                if ocr_cache is not None and ocr_key is not None:
+                    cached = ocr_cache.get(ocr_key + ("tight",))
+                texts = cached if cached is not None else self._ocr_crop_texts(crop)
                 joined_ocr = " ".join(texts)
                 if texts:
                     ocr_brand = match_brand(joined_ocr)
@@ -359,7 +504,13 @@ class BrandResolver:
                 if not ocr_brand:
                     superset_crop = self._crop_superset(frame, det.get("bbox"))
                     if superset_crop is not None:
-                        superset_texts = self._ocr_crop_texts(superset_crop)
+                        scached = None
+                        if ocr_cache is not None and ocr_key is not None:
+                            scached = ocr_cache.get(ocr_key + ("superset",))
+                        superset_texts = (
+                            scached if scached is not None
+                            else self._ocr_crop_texts(superset_crop)
+                        )
                         superset_joined = " ".join(superset_texts)
                         superset_brand = (
                             match_brand(superset_joined) if superset_texts else None
@@ -386,11 +537,12 @@ class BrandResolver:
                             )
                             joined_ocr = superset_joined
                             out["superset_ocr"] = True
-            if self.retrieval_index is not None and not self.retrieval_index.is_empty:
-                retrieval_candidates = self._retrieval_query(crop)
-                if retrieval_candidates:
-                    retrieval_brand, retrieval_sim = retrieval_candidates[0]
-                    retrieval_candidates = retrieval_candidates[:3]
+            # No outer is_empty guard: _retrieval_query reports a missing bank
+            # as "no_retrieval_index" instead of silently skipping the call.
+            retrieval_candidates, retrieval_diag = self._retrieval_query(crop)
+            if retrieval_candidates:
+                retrieval_brand, retrieval_sim = retrieval_candidates[0]
+                retrieval_candidates = retrieval_candidates[:3]
 
         # 2. Fusion priority (plan §11): OCR wins when text is present and names
         #    a brand; else CLIP retrieval (icon-only / corrects spurious class
@@ -433,6 +585,7 @@ class BrandResolver:
             # raw class + reason for audit; never promote to a brand appearance.
             out["screen_content"] = True
             out["screen_content_reason"] = "ocr_text_reads_phone_ui"
+            out["unresolved_reason"] = "screen_content"
             out["ocr_text"] = joined_ocr[:40]
             out["retrieval_top3"] = retrieval_candidates
             if class_brand and class_brand != ocr_brand:
@@ -540,7 +693,14 @@ class BrandResolver:
             return out
 
         # 3. Unresolved — keep the raw label, brand stays None so it is
-        #    excluded from brand products and recommendations.
+        #    excluded from brand products and recommendations. Record WHY: an
+        #    unresolved crop with no attributable cause is indistinguishable
+        #    from a detector false positive, which is what made the identity
+        #    eval unreportable (every failure looked identical).
+        out["unresolved_reason"] = (
+            retrieval_diag.get("reason") or "no_brand_signal"
+        )
+        out["retrieval_diag"] = retrieval_diag
         return out
 
     def _is_screen_content_text(self, joined_ocr: str) -> bool:
@@ -559,10 +719,15 @@ class BrandResolver:
                 return True
         return False
 
-    def _retrieval_query(self, crop: np.ndarray) -> List[Tuple[str, float]]:
+    def _retrieval_query(
+        self, crop: np.ndarray
+    ) -> Tuple[List[Tuple[str, float]], Dict[str, object]]:
         """Top retrieval candidates for a crop, filtered by similarity+margin.
 
-        Returns [(brand, similarity), ...] desc by similarity, truncated to top-k.
+        Returns (candidates, diag). `candidates` is [(brand, similarity), ...]
+        desc by similarity, truncated to top-k. `diag` always describes what
+        happened — including on rejection — so an unresolved crop can be
+        attributed to a cause instead of vanishing.
         A candidate is accepted ONLY when BOTH hold:
           1. absolute floor  — top-1 similarity >= retrieval_min_similarity
           2. margin          — top-1 minus top-2 (distinct-brand) similarity
@@ -576,14 +741,14 @@ class BrandResolver:
         reason so the thresholds can be tuned on real data rather than guessed.
         """
         if self.retrieval_index is None or self.retrieval_index.is_empty:
-            return []
+            return [], {"reason": "no_retrieval_index"}
         candidates = self.retrieval_index.query(crop)
         candidates = [
             (b, float(s)) for (b, s) in candidates
             if float(s) >= self.retrieval_min_similarity
         ]
         if not candidates:
-            return []
+            return [], {"reason": "below_similarity_floor"}
         top1_brand, top1_sim = candidates[0]
         # Distinct-brand top-2 (skip any duplicate brand, e.g. two aliases of the
         # same canonical brand ranked 1st and 2nd).
@@ -612,9 +777,16 @@ class BrandResolver:
             or margin >= self.retrieval_min_margin
         )
         top3 = [(b, round(s, 3)) for b, s in candidates[:3]]
+        diag = {
+            "top1": top3[0][0],
+            "top1_sim": round(top1_sim, 4),
+            "top2_sim": None if top2_sim is None else round(top2_sim, 4),
+            "margin": None if margin is None else round(margin, 4),
+            "top3": top3,
+        }
         if floor_ok and margin_ok:
-            return candidates
-        # Rejected — log why so the next failure mode is caught pre-ship.
+            return candidates, diag
+        # Rejected — record why so the unresolved crop is attributable.
         reason = "below_similarity_floor" if not floor_ok else "small_margin"
         logger.info(
             "Retrieval REJECTED (reason=%s, min_sim=%.2f, min_margin=%.2f): "
@@ -625,7 +797,7 @@ class BrandResolver:
             ("%.3f" % margin) if margin is not None else "None",
             top3,
         )
-        return []
+        return [], dict(diag, reason=reason)
 
     def _log_near_misses(self, joined: str, class_name: str, confidence: float) -> None:
         """Log OCR/class text that nearly matches a catalog brand (diagnostics)."""
@@ -663,16 +835,27 @@ class BrandResolver:
             key (None when unresolved) and `class_name` set to the canonical
             brand when resolved.
         """
+        n_boxes = sum(len(fd) for fd in logo_detections)
+        self._emit_progress(
+            f"Brand resolution — {n_boxes} logo box(es) across "
+            f"{len(frames)} frame(s)"
+        )
         resolved = []
         n_resolved = 0
         n_total = 0
         class_outcomes: Dict[str, int] = {}
         resolved_by_class: Dict[str, str] = {}
-        for frame, frame_dets in zip(frames, logo_detections):
+        # One OCR prefetch for the whole batch: a fixed number of subprocess
+        # round-trips per frame instead of two per detection.
+        ocr_cache = self._prefetch_ocr(frames, logo_detections)
+        for fi, (frame, frame_dets) in enumerate(zip(frames, logo_detections)):
+            self._emit_progress(
+                f"Brand resolution — matching brands (frame {fi + 1}/{len(frames)})"
+            )
             out = []
-            for det in frame_dets:
+            for di, det in enumerate(frame_dets):
                 n_total += 1
-                r = self._resolve_detection(det, frame)
+                r = self._resolve_detection(det, frame, ocr_cache, (fi, di))
                 cls = str(det.get("class_name") or "?")
                 class_outcomes[cls] = class_outcomes.get(cls, 0) + 1
                 if r.get("brand"):
@@ -796,6 +979,7 @@ def build_brand_timeline(
     resolved_logos: List[List[dict]],
     brand_mentions: List[dict],
     video_fps: float = 0.0,
+    video_stride: int = 1,
     transcript: Optional[str] = None,
     transcript_duration: Optional[float] = None,
 ) -> Dict[str, dict]:
@@ -835,7 +1019,7 @@ def build_brand_timeline(
             entry = _entry(brand)
             entry["appearances"].append({
                 "frame_index": idx,
-                "timestamp": round(idx / video_fps, 1) if video_fps else idx,
+                "timestamp": round(idx * video_stride / video_fps, 1) if video_fps else idx * video_stride,
                 "modality": "logo",
                 "confidence": round(float(det.get("confidence", 0.0)), 3),
                 "resolution_source": det.get("resolution_source"),
@@ -874,8 +1058,10 @@ def build_brand_timeline(
         out[brand] = {
             "brand": brand,
             "appearance_count": len(apps),
-            "first_seen": timestamps[0] if timestamps else None,
-            "last_seen": timestamps[-1] if timestamps else None,
+            # Appearances are appended per modality (logos first, then speech),
+            # so min/max — never [0]/[-1] — give the true first/last instant.
+            "first_seen": min(timestamps) if timestamps else None,
+            "last_seen": max(timestamps) if timestamps else None,
             "modalities": modalities,
             "cross_scene": "logo" in modalities and "speech" in modalities,
             "appearances": apps,

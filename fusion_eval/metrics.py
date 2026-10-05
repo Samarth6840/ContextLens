@@ -46,9 +46,9 @@ def compute_metrics(preds: List[dict]) -> Dict[str, float]:
 
     tp = sum(1 for r in accepted if r["winner"] == r["gt_brand"])
     fp = sum(1 for r in accepted if r["winner"] != r["gt_brand"])
-    fn = sum(1 for r in positives if (r["verdict"] not in COVERED_VERDICTS) or r["winner"] != r["gt_brand"])
 
     prec = tp / (tp + fp) if (tp + fp) else 0.0
+    # every positive is either a TP or an FN, so len(positives) == tp + fn
     rec = tp / max(1, len(positives))
     f1 = 2 * prec * rec / (prec + rec) if (prec + rec) else 0.0
 
@@ -85,7 +85,33 @@ def compute_metrics(preds: List[dict]) -> Dict[str, float]:
 
 
 def split_by_difficulty(preds: List[dict]) -> Dict[str, Dict[str, float]]:
+    return split_by_field(preds, "difficulty")
+
+
+def split_by_field(preds: List[dict], key: str) -> Dict[str, Dict[str, float]]:
+    """Metric ledger grouped by any row field (e.g. difficulty, length)."""
     per: Dict[str, List[dict]] = {}
     for p in preds:
-        per.setdefault(p.get("difficulty", "?"), []).append(p)
+        per.setdefault(str(p.get(key, "?")), []).append(p)
+    return {k: compute_metrics(v) for k, v in sorted(per.items())}
+
+
+def split_by_modality(preds: List[dict]) -> Dict[str, Dict[str, float]]:
+    """Metric ledger grouped by which modalities carried evidence.
+
+    Answers the brief's "accuracy vs modality availability" question: does the
+    system still work when only visual, only text, or all modalities are
+    present? Rows expose a `modalities` dict ({logo, ocr, speech, product,
+    audio_event}); missing data is treated as "unknown" so old prediction
+    files still evaluate.
+    """
+    per: Dict[str, List[dict]] = {}
+    for p in preds:
+        mods = p.get("modalities")
+        if not isinstance(mods, dict):
+            label = "unknown"
+        else:
+            active = [k for k, v in mods.items() if v]
+            label = "+".join(sorted(active)) if active else "none"
+        per.setdefault(label, []).append(p)
     return {k: compute_metrics(v) for k, v in sorted(per.items())}

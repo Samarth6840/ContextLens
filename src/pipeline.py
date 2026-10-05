@@ -117,11 +117,17 @@ def _timestamp_mentions(
         return [dict(m) for m in mentions]
 
     # Reconstruct the joined-transcript character offsets of each segment,
-    # mirroring `" ".join(...)` (single space separator).
+    # mirroring `" ".join([" ".strip()]...)` exactly. The transcript is built
+    # from STRIPPED segment text (see process_video), while ASR segment text
+    # often carries a leading space — using the raw text here makes the cursor
+    # drift by ~1 char per segment and slides every later mention onto the
+    # wrong timestamp. Empty stripped segments contribute no span.
     spans = []
     cursor = 0
     for seg in segments:
-        seg_text = seg.get("text", "") or ""
+        seg_text = (seg.get("text", "") or "").strip()
+        if not seg_text:
+            continue
         spans.append((cursor, cursor + len(seg_text), seg))
         cursor += len(seg_text) + 1  # the joining space
 
@@ -144,7 +150,7 @@ def _timestamp_mentions(
                 )
         if chosen:
             start_char, end_char, seg = chosen
-            seg_text = seg.get("text", "") or ""
+            seg_text = (seg.get("text", "") or "").strip()
             span_len = max(1, len(seg_text))
             seg_start = float(seg.get("start", 0.0))
             seg_end = float(seg.get("end", seg_start))
@@ -616,11 +622,6 @@ class Phase1Pipeline:
         # simultaneously (check-then-set race condition).
         self._init_locks: Dict[str, threading.Lock] = {}
 
-        # Per-model wall-time profile (in seconds), collected by _locked_call.
-        # Lets us verify real parallelism: if a single GPU-bound lock serializes
-        # all models, the sum of these ~= total executor time (fake parallel).
-        self._model_wall_times: Dict[str, float] = {}
-
         # Layer 3 / Layer 2d Phase 2 additions.
         self._affinity_model = None   # optional LightGCN creator-brand affinity
         self._creator_profile_state: Dict[str, object] = {}  # id -> CreatorProfile
@@ -733,9 +734,16 @@ class Phase1Pipeline:
         from src.brand_catalog import build_text_queries
         logo_cfg = self.cfg["layer1"].get("logo_detection", {})
         queries = list(logo_cfg.get("text_queries") or [])
-        for q in build_text_queries():
-            if q not in queries:
-                queries.append(q)
+        # Detect and identify are separate jobs. By default the detector proposes
+        # generic logo regions only, and brand identity comes from crop-OCR /
+        # CLIP retrieval in BrandResolver. Adding all 39 '<Brand> logo' prompts
+        # here measurably wrecked precision (F1 0.059, 270 FP vs 13 TP on
+        # LogoDet-3K) because every brand prompt is another chance to hallucinate
+        # a box on a logo-free frame. See config region_proposal_only.
+        if not logo_cfg.get("region_proposal_only", True):
+            for q in build_text_queries():
+                if q not in queries:
+                    queries.append(q)
         return create_logo_detector(
             backend=logo_cfg.get("backend", "yolo_world"),
             model_name=logo_cfg.get("model", "yolov8s-worldv2.pt"),
@@ -765,7 +773,10 @@ class Phase1Pipeline:
                 cpu_threads=ocr_cfg.get("cpu_threads", 0),
             )
         except Exception as e:
-            if freeai_cfg.get("fallback", True) and freeai_cfg.get("enabled", True):
+            # Uploading a creator's frames to a third-party cloud is a data-
+            # consent decision, not an automatic fallback: it fires ONLY when
+            # config explicitly opts in (enabled AND fallback, both true).
+            if freeai_cfg.get("fallback", False) and freeai_cfg.get("enabled", False):
                 logger.warning(
                     "PaddleOCR failed to load (%s) — falling back to Free.ai cloud OCR", e
                 )
@@ -782,9 +793,10 @@ class Phase1Pipeline:
                 model_name=stt_cfg["model"],
                 device=self.device,
                 compute_dtype=stt_cfg.get("compute_dtype"),
+                language=stt_cfg.get("language"),
             )
         except Exception as e:
-            if freeai_cfg.get("fallback", True) and freeai_cfg.get("enabled", True):
+            if freeai_cfg.get("fallback", False) and freeai_cfg.get("enabled", False):
                 logger.warning(
                     "Local Whisper failed to load (%s) — falling back to Free.ai cloud STT", e
                 )
@@ -1205,7 +1217,9 @@ class Phase1Pipeline:
             )
             result = self._locked_call(
                 lock, "central_vision",
-                vl.resolve_product_manufacturer, product_span, frame,
+                vl.resolve_product_manufacturer,
+                None,  # no per-job wall-times dict on this path (outside process_video)
+                product_span, frame,
             )
             self._qwen_product_calls += 1
             return result or {}
@@ -1265,9 +1279,11 @@ class Phase1Pipeline:
 
         timings: Dict[str, float] = {}
         _t_total = time.monotonic()
-        self._model_wall_times = {}
-        # Per-video Tier-3 (Qwen product-resolution) budget resets each job so a
-        # long-lived pipeline instance never permanently exhausts it across runs.
+        # Per-job state: reset each video so concurrent uploads don't overwrite each other.
+        _model_wall_times: Dict[str, float] = {}
+        _qwen_product_calls = 0
+        _creator_id = creator_id or self._creator_id
+        # Reset per-job Qwen product-call counter so concurrent jobs don't interfere.
         self._qwen_product_calls = 0
         logger.info(f"Processing video: {video_path}")
 
@@ -1341,10 +1357,11 @@ class Phase1Pipeline:
         product_resolutions: List[dict] = []
         audio_events_list = []
         ocr_pass = None
-        self._qwen_enabled = False
-        self._qwen_future = None
-        self._qwen_frames = []
-        self._qwen_results = None
+        modality_failed: List[str] = []
+        _qwen_enabled = False
+        _qwen_future = None
+        _qwen_frames: List[np.ndarray] = []
+        _qwen_results = None
 
         # Submit everything — logo, embeddings, STT, audio_events, AND detection —
         # into the same concurrent pool. OCR submits in a second wave once
@@ -1359,6 +1376,7 @@ class Phase1Pipeline:
             futures[self._locked_submit(
                 executor, "logo_detector", self.logo_detector.detect_batch,
                 logo_frames, None, batch_size,
+                wall_times=_model_wall_times,
             )] = "logo_detection"
 
             # Open-vocabulary scene objects (YOLO-World zero-shot, ADDITIONAL
@@ -1373,6 +1391,7 @@ class Phase1Pipeline:
                 futures[self._locked_submit(
                     executor, "open_vocab", self.detector.detect_open_vocab,
                     logo_frames, _ov_queries, batch_size,
+                    wall_times=_model_wall_times,
                 )] = "open_vocab"
 
             # Qwen3-VL central analysis is NOT submitted up-front. It is gated by
@@ -1383,11 +1402,15 @@ class Phase1Pipeline:
             # submission happens as a second wave once detection results arrive,
             # alongside OCR.
             _vl_cfg = self.cfg["layer1"].get("central_vision_model", {})
-            self._qwen_enabled = bool(_vl_cfg.get("enable_qwen", True))
+            # Qwen3-VL is NOT production-ready (it cannot send images to the
+            # model and its weights guard fails closed), so it must be an
+            # explicit opt-in. Anything claiming it runs by default is noise.
+            _qwen_enabled = bool(_vl_cfg.get("enable_qwen", False))
 
             futures[self._locked_submit(
                 executor, "embedding_extractor",
                 self.embedding_extractor.extract_batch, embed_frames, batch_size,
+                wall_times=_model_wall_times,
             )] = "embeddings"
 
             if audio is not None and len(audio) > 0:
@@ -1398,19 +1421,43 @@ class Phase1Pipeline:
                 if _transcribe is None:
                     _transcribe = self.stt.transcribe_segment
                 futures[self._locked_submit(
-                    executor, "stt", _transcribe, audio
+                    executor, "stt", _transcribe, audio,
+                    wall_times=_model_wall_times,
                 )] = "stt"
 
             if audio is not None and self.audio_events:
                 _t_beats = time.monotonic()
+                # Per-chunk callback: uncapped audio (`max_audio_seconds: null`)
+                # makes BEATs the longest silent stage on long videos — without
+                # this the job feed shows nothing between the STT result and
+                # completion, which reads as a hang. Best-effort by contract:
+                # the server-side push never raises, but a broken callback must
+                # not kill the audio pass, so it is wrapped.
+                if progress is not None:
+                    def _beats_progress(msg: str) -> None:
+                        try:
+                            progress(msg)
+                        except Exception:  # noqa: BLE001
+                            pass
+                else:
+                    _beats_progress = None
+                # max_chunks: config-driven BEATs cap (uniform sampling across
+                # the full duration). null/absent = decode everything (legacy).
+                _max_chunks_cfg = self.cfg["layer1"]["audio_events"].get("max_chunks")
                 futures[self._locked_submit(
-                    executor, "audio_events", self.audio_events.detect_events, audio
+                    executor, "audio_events", self.audio_events.detect_events, audio,
+                    progress=_beats_progress,
+                    max_chunks=(
+                        int(_max_chunks_cfg) if _max_chunks_cfg is not None else None
+                    ),
+                    wall_times=_model_wall_times,
                 )] = "audio_events"
 
             # Detection runs concurrently with the other models (only OCR needs its result)
             _t_det = time.monotonic()
             detection_future = self._locked_submit(
                 executor, "detector", self.detector.detect_batch, frames, batch_size,
+                wall_times=_model_wall_times,
             )
             futures[detection_future] = "detection"
 
@@ -1420,8 +1467,23 @@ class Phase1Pipeline:
                 try:
                     result = future.result()
                 except Exception as e:
+                    # Project premise: degrade gracefully under a missing/failed
+                    # modality instead of aborting the whole job. Record the failure,
+                    # stub in a safe default, and let the remaining modalities proceed.
                     logger.error(f"Layer 1 modality '{modality}' failed: {e}")
-                    raise
+                    modality_failed.append(modality)
+                    if modality == "logo_detection":
+                        all_logo_detections = [[] for _ in frames]
+                    elif modality == "detection":
+                        all_detections = [[] for _ in frames]
+                    elif modality == "embeddings":
+                        embed_raw = None
+                    elif modality == "stt":
+                        transcript = ""
+                        _stt_segments = []
+                    elif modality == "audio_events":
+                        audio_events_list = []
+                    continue
 
                 if modality == "logo_detection":
                     timings["logo_detection"] = time.monotonic() - _t_logo
@@ -1500,7 +1562,7 @@ class Phase1Pipeline:
                     # Submitted as a second wave here (after logo+object results
                     # are known); collected via self._qwen_results and null-guarded
                     # before any downstream read.
-                    if self._qwen_enabled:
+                    if _qwen_enabled:
                         logo_fired = (
                             all_logo_detections is not None
                             and any(len(d) > 0 for d in all_logo_detections)
@@ -1518,15 +1580,16 @@ class Phase1Pipeline:
                             keep = np.linspace(0, len(flag_idx) - 1, max_qwen).astype(int)
                             flag_idx = [flag_idx[i] for i in keep]
                         if flag_idx:
-                            self._qwen_results = None  # will be set when the future resolves
+                            _qwen_results = None  # will be set when the future resolves
                             _qwen_frames = [frames[i] for i in flag_idx]
-                            self._qwen_frames = _qwen_frames
-                            self._qwen_future = self._locked_submit(executor, "central_vision",
+                            _qwen_frames = [frames[i] for i in flag_idx]
+                            _qwen_future = self._locked_submit(executor, "central_vision",
                                 self.central_vision_model.analyze_batch,
-                                _qwen_frames, "")
+                                _qwen_frames, "",
+                                wall_times=_model_wall_times)
                             # NOTE: the future is not tracked in `futures`, so
                             # as_completed() won't yield it; results are resolved
-                            # via self._qwen_future.result() after the executor
+                            # via _qwen_future.result() after the executor
                             # block's shutdown(wait=True).
                             logger.info(
                                 "Qwen3-VL selective activation: %d flagged frame(s)",
@@ -1561,16 +1624,16 @@ class Phase1Pipeline:
                 logger.error(f"OCR failed: {e}")
 
         # Wait for Qwen3-VL (selective-activation second wave, resolved after close)
-        if self._qwen_future is not None:
+        if _qwen_future is not None:
             try:
-                self._qwen_results = self._qwen_future.result()
+                _qwen_results = _qwen_future.result()
             except Exception as e:
                 logger.error(f"Qwen3-VL analysis failed: {e}")
-                self._qwen_results = None
+                _qwen_results = None
 
         # Null-guard Qwen results for downstream reads.
-        if self._qwen_results is None:
-            self._qwen_results = []
+        if _qwen_results is None:
+            _qwen_results = []
 
         # Guard against catastrophic failures
         if all_logo_detections is None:
@@ -1903,16 +1966,27 @@ class Phase1Pipeline:
             audio_embed = torch.from_numpy(audio_features).float().to(self.device)
             audio_embed = audio_embed.unsqueeze(0)
 
-        # Detection-weighted aggregation: frames with detections get higher weight
-        frame_weights = np.ones(len(embeddings), dtype=np.float32)
-        for i, frame_dets in enumerate(all_detections):
-            if frame_dets:
-                frame_weights[i] = 1.0 + max(d["confidence"] for d in frame_dets)
-        frame_weights = frame_weights / frame_weights.sum()
-        weighted_embed = np.sum(
-            embeddings * frame_weights[:, np.newaxis], axis=0, keepdims=True
-        )
-        video_embed = torch.from_numpy(weighted_embed).float().to(self.device)
+        # Detection-weighted aggregation: frames with detections get higher
+        # weight. IMPORTANT: only the embedded rows carry signal — the zero
+        # vectors padded onto unembedded frames would dilute the mean (and a
+        # detection on an unembedded frame would throw its weight at a zero
+        # row), so the aggregation is restricted to `embed_indices`.
+        active = np.asarray(embed_indices, dtype=np.intp)
+        if active.size == 0:
+            video_embed = torch.zeros(
+                1, embeddings.shape[1], dtype=torch.float32, device=self.device
+            )
+        else:
+            w = np.ones(active.size, dtype=np.float32)
+            for k, i in enumerate(active):
+                frame_dets = all_detections[i] if i < len(all_detections) else []
+                if frame_dets:
+                    w[k] = 1.0 + max(d["confidence"] for d in frame_dets)
+            w = w / w.sum()
+            weighted_embed = np.sum(
+                embeddings[active] * w[:, np.newaxis], axis=0, keepdims=True
+            )
+            video_embed = torch.from_numpy(weighted_embed).float().to(self.device)
 
         # Run fusion
         fusion_result = self.fusion(
@@ -1966,6 +2040,7 @@ class Phase1Pipeline:
             all_logo_detections, brand_mentions, all_ocr_results, audio_events_list,
             visual_product_matches=product_matches,
             video_fps=video_fps,
+            video_stride=video_stride,
         )
         audio_events = audio_events_list
 
@@ -2034,13 +2109,13 @@ class Phase1Pipeline:
             logger.info("  %-20s %.3fs", stage + ":", duration)
 
         # Log per-model wall-time profile (parallelism diagnostic).
-        if self._model_wall_times:
-            total_wall = sum(self._model_wall_times.values())
+        if _model_wall_times:
+            total_wall = sum(_model_wall_times.values())
             logger.info(
                 "Layer 1 per-model wall time (sum=%.2fs): %s",
                 total_wall,
                 {k: round(v, 2) for k, v in sorted(
-                    self._model_wall_times.items(), key=lambda kv: -kv[1]
+                    _model_wall_times.items(), key=lambda kv: -kv[1]
                 )},
             )
             exec_wall = timings.get("layer1_visual", 0.0)
@@ -2066,7 +2141,17 @@ class Phase1Pipeline:
             "has_audio": audio is not None,
             "hardware_profile": self.hardware_profile,
             "concurrency_preset": self.concurrency_preset,
+            "modality_failed": modality_failed,
             "timings": timings,
+            # Per-model wall time, collected by _locked_call on THIS job's dict.
+            # A parallelism diagnostic: sum(model wall) vs the layer-1 wall
+            # tells an operator whether the thread pool is doing real work or
+            # silently serialising on one GPU lock.
+            "model_wall_times": {
+                k: round(v, 3) for k, v in sorted(
+                    _model_wall_times.items(), key=lambda kv: -kv[1]
+                )
+            },
             "layer1": {
                 "scene_object_detections": all_detections,
                 "logo_detections": all_logo_detections,
@@ -2076,9 +2161,9 @@ class Phase1Pipeline:
                 "brand_mentions": brand_mentions,
                 "product_resolutions": product_resolutions,
                 "audio_events": audio_events,
-                "qwen_enabled": self._qwen_enabled,
-                "qwen_frames_analyzed": len(self._qwen_frames or []),
-                "qwen_results": self._qwen_results or [],
+                "qwen_enabled": _qwen_enabled,
+                "qwen_frames_analyzed": len(_qwen_frames or []),
+                "qwen_results": _qwen_results or [],
             },
             "layer2a": {
                 "audio_quality": audio_quality,
@@ -2138,6 +2223,7 @@ class Phase1Pipeline:
         lock_name: str,
         fn: Callable,
         *args,
+        wall_times: Optional[Dict[str, float]] = None,
         **kwargs,
     ):
         """
@@ -2153,19 +2239,36 @@ class Phase1Pipeline:
             lock_name: Logical name for the model (e.g. 'detector', 'stt').
                        Locks are created on first use.
             fn: The callable to execute (typically a bound method).
+            wall_times: Per-job dict this call accumulates its wall time into.
+                        Passed EXPLICITLY rather than read from an instance
+                        attribute: the dict belongs to one process_video call,
+                        and two concurrent jobs on one pipeline must not share
+                        it. (It used to be read from a bare local name here,
+                        which is invisible in this scope — every locked call
+                        died with NameError and the whole run failed.)
 
         Returns:
             The concurrent.futures.Future from executor.submit().
         """
         lock = self._model_locks.setdefault(lock_name, threading.Lock())
-        wrapped = partial(self._locked_call, lock, lock_name, fn, *args, **kwargs)
+        wrapped = partial(
+            self._locked_call, lock, lock_name, fn, wall_times, *args, **kwargs
+        )
         return executor.submit(wrapped)
 
-    def _locked_call(self, lock: threading.Lock, lock_name: str, fn: Callable, *args, **kwargs):
+    def _locked_call(
+        self,
+        lock: threading.Lock,
+        lock_name: str,
+        fn: Callable,
+        wall_times: Optional[Dict[str, float]],
+        *args,
+        **kwargs,
+    ):
         """Execute fn with the given lock held, recording wall time by model.
 
         The per-model wall time lets the operator confirm real parallelism: if a
-        single GPU-bound lock serializes every model, `sum(_model_wall_times)`
+        single GPU-bound lock serializes every model, `sum(wall_times)`
         approaches the total executor wall time and the pool is effectively
         single-threaded (fake parallel) — a cue to drop pool size or move to
         batched single-process inference.
@@ -2175,9 +2278,10 @@ class Phase1Pipeline:
             with lock:
                 return fn(*args, **kwargs)
         finally:
-            self._model_wall_times[lock_name] = (
-                self._model_wall_times.get(lock_name, 0.0) + (time.monotonic() - t0)
-            )
+            if wall_times is not None:
+                wall_times[lock_name] = (
+                    wall_times.get(lock_name, 0.0) + (time.monotonic() - t0)
+                )
 
     @staticmethod
     def _sample_indices(total: int, max_frames: int = 30) -> List[int]:
@@ -2305,6 +2409,7 @@ class Phase1Pipeline:
         audio_events: List[dict],
         visual_product_matches: Optional[List[dict]] = None,
         video_fps: float = 0.0,
+        video_stride: int = 1,
     ) -> Dict[str, float]:
         """
         Aggregate evidence from all modalities into evidence strengths.
@@ -2471,6 +2576,7 @@ class Phase1Pipeline:
                 visual_product_matches,
                 video_fps=video_fps,
                 fusion_cfg=fusion_cfg,
+                video_stride=video_stride,
             )
         return evidence
 
@@ -2483,34 +2589,70 @@ class Phase1Pipeline:
         *,
         video_fps: float,
         fusion_cfg: dict,
+        video_stride: int = 1,
     ) -> dict:
         """Build the per-candidate evidence ledger and run learned-structure fusion."""
-        from src.layer2.evidence_fusion import BASE_WEIGHTS, fuse_candidates
+        from src.layer2.evidence_fusion import (
+            BASE_WEIGHTS,
+            CONTRADICT,
+            fuse_candidates,
+        )
         from src.brand_catalog import match_brand
+        from src.layer2.evidence_tracking import attach_track_ids
 
         def _ts(frame_idx: int) -> Optional[float]:
-            return frame_idx / video_fps if video_fps and video_fps > 0 else None
+            # frame_idx counts SAMPLED frames; the stride steps over `video_stride`
+            # source frames per sample, so the instant is idx*stride/fps — not
+            # idx/fps (that was ~stride× too small, e.g. a 17 s scene at 0.68 s).
+            if not video_fps or video_fps <= 0:
+                return None
+            return frame_idx * max(1, int(video_stride)) / video_fps
+
+        # Associate detections across frames so one physical object is ONE
+        # evidence track (best observation + persistence) rather than N
+        # correlated per-frame votes. Cheap, pure-python, label-agnostic.
+        tracking_cfg = (self.cfg.get("layer2b", {}) or {}).get("tracking") or {}
+        if tracking_cfg.get("enabled", True):
+            tracked = attach_track_ids(
+                logo_detections,
+                iou_threshold=float(tracking_cfg.get("iou_threshold", 0.3)),
+                max_gap=int(tracking_cfg.get("max_gap", 2)),
+            )
+        else:
+            tracked = logo_detections
 
         ledger: Dict[str, List[dict]] = {}
 
-        def _add(brand: str, **item: float) -> None:
+        def _add(brand: str, **item) -> None:
             if not brand:
                 return
             ledger.setdefault(brand, []).append(item)
 
-        for frame_idx, frame_logos in enumerate(logo_detections):
+        for frame_idx, frame_logos in enumerate(tracked):
             for det in frame_logos:
                 brand = det.get("brand")
                 if not brand:
                     continue
                 q = float(det.get("resolution_quality") or det.get("confidence", 0.0))
                 _add(brand, family="logo", strength=float(det.get("confidence", 0.0) or 0.0),
-                     quality=q, timestamp=_ts(frame_idx), frame_index=frame_idx)
+                     quality=q, timestamp=_ts(frame_idx), frame_index=frame_idx,
+                     track_id=det.get("track_id"),
+                     persistence=det.get("track_persistence"))
                 ocr_text = det.get("ocr_text")
-                if ocr_text and match_brand(ocr_text):
-                    _add(brand, family="ocr", strength=min(float(det.get("confidence", 0.5)), 0.90),
-                         quality=min(float(det.get("confidence", 0.5)), 0.90),
-                         timestamp=_ts(frame_idx), frame_index=frame_idx)
+                if ocr_text:
+                    other = match_brand(ocr_text)
+                    if other:
+                        s = min(float(det.get("confidence", 0.5)), 0.90)
+                        if other == brand:
+                            _add(brand, family="ocr", strength=s, quality=s,
+                                 timestamp=_ts(frame_idx), frame_index=frame_idx)
+                        else:
+                            # OCR reads a RIVAL wordmark inside a box resolved to
+                            # this brand -> explicit contradicting evidence, not
+                            # absence. Net evidence erodes without being erased.
+                            _add(brand, family="ocr", strength=s, quality=s,
+                                 timestamp=_ts(frame_idx), frame_index=frame_idx,
+                                 polarity=CONTRADICT)
         for frame_idx, frame_ocr in enumerate(ocr_results):
             for result in frame_ocr:
                 brand = match_brand(result.get("text", ""))
@@ -2520,7 +2662,10 @@ class Phase1Pipeline:
                          timestamp=_ts(frame_idx), frame_index=frame_idx)
         for mention in brand_mentions:
             brand = mention.get("brand") if isinstance(mention, dict) else str(mention)
-            _add(brand, family="speech", strength=1.0, quality=1.0)
+            # Speech carries the REAL STT segment timestamp so a spoken brand can
+            # temporally co-occur with its on-screen logo in the fusion buckets.
+            _add(brand, family="speech", strength=1.0, quality=1.0,
+                 timestamp=mention.get("start_time") if isinstance(mention, dict) else None)
         if visual_product_matches:
             by_brand: Dict[str, List[float]] = {}
             best_ts: Dict[str, Optional[float]] = {}
@@ -2556,6 +2701,50 @@ class Phase1Pipeline:
                 if any(it["family"] not in disabled for it in items)
             }
 
+        # Cross-modal contradiction mining: turn one-sided modality conflicts
+        # (product-retrieval vs wordmark identity, ASR vs visual) into explicit
+        # negative evidence so a rival's claim erodes the competing candidate.
+        cmc_cfg = fusion_cfg.get("cross_modal_contradiction") or {}
+        if cmc_cfg.get("enabled", True):
+            from src.layer2.evidence_fusion import derive_cross_modal_contradictions
+
+            ledger = derive_cross_modal_contradictions(
+                ledger,
+                min_product_similarity=float(
+                    cmc_cfg.get("min_product_similarity", 0.6)),
+                min_visual_strength=float(cmc_cfg.get("min_visual_strength", 0.5)),
+            )
+
+        # Candidate generation funnel: propose from raw signals, hand fusion only
+        # the top-K (+ any brand with direct evidence). Bounds the ranking space;
+        # top_k <= 0 disables gating.
+        gen_cfg = (self.cfg.get("layer2b", {}) or {}).get("candidate_generation") or {}
+        candidates: List[dict] = []
+        if gen_cfg.get("enabled", False):
+            from src.layer2.candidate_generation import (
+                generate_candidates,
+                select_candidates,
+            )
+            logo_brands = [
+                d.get("brand") for frame in tracked for d in frame if d.get("brand")
+            ]
+            ocr_texts = [
+                r.get("text", "") for frame in ocr_results for r in frame
+            ]
+            ocr_texts += [
+                d.get("ocr_text", "") for frame in tracked for d in frame
+                if d.get("ocr_text")
+            ]
+            candidates = generate_candidates(
+                logo_brands=logo_brands,
+                ocr_texts=ocr_texts,
+                speech_mentions=brand_mentions,
+                product_matches=visual_product_matches,
+            )
+            ledger = select_candidates(
+                ledger, candidates, int(gen_cfg.get("top_k", 0))
+            )
+
         res = fuse_candidates(
             ledger,
             base_weights=base_weights or None,
@@ -2564,8 +2753,10 @@ class Phase1Pipeline:
             accept=float(fusion_cfg.get("accept", 0.30)),
             margin_min=float(fusion_cfg.get("margin_min", 0.15)),
             agreement_bonus=float(fusion_cfg.get("agreement_bonus", 0.30)),
+            contradiction_penalty=float(fusion_cfg.get("contradiction_penalty", 0.5)),
         )
         # Ledger stays available for the evaluation harness (ablation re-fuses
         # without re-running detection); it is never part of the published fusion.
         res["_ledger"] = ledger
+        res["_candidates"] = candidates
         return res

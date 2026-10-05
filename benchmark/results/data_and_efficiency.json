@@ -1,0 +1,50 @@
+{
+  "note": "Numbers measured on the current pool. Anything derived from the detector or from OCR is an ESTIMATE, not reviewed ground truth. Only the LogoDet columns in domain_mismatch.json are human GT.",
+  "data_questions": {
+    "1_distinct_videos": 2,
+    "2_frames_per_video": {
+      "63fb2ac4d1": 203,
+      "df01d5a843": 438
+    },
+    "3_approx_logo_boxes_per_video": {
+      "basis": "detector at conf>=0.10, ESTIMATE",
+      "63fb2ac4d1": {"boxes": 12608, "per_frame": 62.1, "frames_with_a_box": "203/203", "conf_median": 0.138, "conf_p90": 0.253},
+      "df01d5a843": {"boxes": 34283, "per_frame": 78.3, "frames_with_a_box": "438/438", "conf_median": 0.15, "conf_p90": 0.268}
+    },
+    "4_videos_with_no_logos": "UNDECIDABLE by model: the detector fires on 100% of frames in both videos at conf>=0.10 with median conf 0.14-0.15, so it carries no information about which frames are logo-free. Requires the review sheet.",
+    "5_known_brands_present": {
+      "basis": "real OCR on 51 sampled frames, matched against the 39-brand catalog",
+      "brands": {"SAMSUNG": 3, "META": 4, "GOOGLE": 2, "NVIDIA": 1},
+      "note": "META only in 63fb2ac4d1; SAMSUNG/GOOGLE/NVIDIA in df01d5a843"
+    },
+    "6_unknown_unseen_brands_present": {
+      "basis": "OCR strings with no catalog match; real brands, not in the 39-brand catalog",
+      "confirmed": ["EXPEDIA (match_brand -> None)", "GEMINI (match_brand -> None)"],
+      "other_non_catalog_text": ["Search", "Weekly meeting", "Cooking class", "Flights", "Stays", "Packages", "Where to?", "Up to 25% off"]
+    }
+  },
+  "efficiency": {
+    "device": "Apple M4, MPS, 10 CPU cores",
+    "detector_ms_per_frame_imgsz640": 16.9,
+    "detector_fps_imgsz640": 59.3,
+    "detector_ms_per_frame_imgsz960": 29.3,
+    "detector_fps_imgsz960": 34.1,
+    "ocr_ms_per_full_frame": 1145.2,
+    "ocr_fps_full_frame": 0.9,
+    "ocr_ms_per_single_crop": 423.5,
+    "ocr_us_per_px": 3529.19,
+    "mps_allocated_mb": 45,
+    "cpu_rss_mb": 1077,
+    "verdict": "OCR is the bottleneck by ~68x over the detector (1145 ms vs 16.9 ms per frame). Batching the detector buys nothing; the OCR worker is the cost centre."
+  },
+  "label_audit_logodet": {
+    "train_images": 321,
+    "train_boxes": 101873,
+    "boxes_per_train_image": 317.2,
+    "frac_train_boxes_over_50pct_of_frame": 0.087,
+    "val_images": 88,
+    "val_boxes": 12825,
+    "frac_val_boxes_over_50pct_of_frame": 0.079,
+    "verdict": "8% of LogoDet boxes cover more than half the frame. A full-frame box is not a logo; training on these teaches the model to fire on scenes. This is label corruption, not a domain preference, and it is a candidate cause of the large-bucket recall of 0.0000."
+  }
+}

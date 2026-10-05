@@ -282,4 +282,94 @@ def test_affinity_ignored_on_cold_start_creator():
     # An unseen creator must fall back to pure graph/evidence scores.
     out = rec.recommend(_timeline(), top_k=12, creator_id="brand_new_creator")
     assert out[0]["brand"] == "NIKE"
-    assert out[0]["score"] == round(min(1.0, 0.9), 3)  # pure evidence, no blend
+    # Pinned against a blend-free run rather than a hardcoded evidence number:
+    # the intent is "affinity contributes nothing", which stays true as the
+    # evidence rule itself evolves.
+    plain = BrandRecommender(graph=KnowledgeGraph(_mini_catalog())).recommend(
+        _timeline(), top_k=12
+    )
+    assert out[0]["score"] == plain[0]["score"]
+    assert not any("AFFINITY" in r.upper() for r in out[0]["reasons"])
+
+
+def _speech_only_timeline(n_mentions, conf=0.0):
+    """A brand that is only ever named out loud — never shown on screen."""
+    appearances = [
+        {"frame_index": None, "timestamp": 10.0 * i, "modality": "speech", "confidence": 1.0}
+        for i in range(n_mentions)
+    ]
+    if conf:
+        appearances.append(
+            {"frame_index": 5, "timestamp": 1.0, "modality": "logo", "confidence": conf}
+        )
+    return {
+        "NIKE": {
+            "appearance_count": len(appearances),
+            "modalities": ["logo", "speech"] if conf else ["speech"],
+            "cross_scene": False,
+            "appearances": appearances,
+        },
+    }
+
+
+def test_repeated_spoken_mentions_outrank_a_single_one():
+    """A brand named ten times should not score the same as one named once."""
+    from src.layer3.recommender import BrandRecommender as R
+
+    rec = R(graph=KnowledgeGraph(_mini_catalog()))
+    # Select NIKE, not [0]: a SUGGESTED brand with 0.7 category affinity can
+    # legitimately outrank a weakly-evidenced DIRECT brand.
+    nike = lambda tl: next(r for r in rec.recommend(tl, top_k=12) if r["brand"] == "NIKE")
+    once, many = nike(_speech_only_timeline(1)), nike(_speech_only_timeline(10))
+    assert many["score"] > once["score"]
+
+
+def test_spoken_evidence_saturates():
+    """Past the saturation point extra mentions must not keep adding score."""
+    from src.layer3.recommender import BrandRecommender as R
+
+    rec = R(graph=KnowledgeGraph(_mini_catalog()))
+    at_cap = rec.recommend(_speech_only_timeline(8), top_k=12)[0]
+    way_past = rec.recommend(_speech_only_timeline(40), top_k=12)[0]
+    assert at_cap["score"] == way_past["score"]
+
+
+def test_spoken_evidence_stays_below_logo_strength():
+    """Naming a brand is weaker than showing it: a speech-only brand must never
+    reach the 0.5 strong-evidence line on mentions alone."""
+    from src.layer3.recommender import SPEECH_CEILING
+
+    rec = BrandRecommender(graph=KnowledgeGraph(_mini_catalog()))
+    out = rec.recommend(_speech_only_timeline(50), top_k=12)[0]
+    assert out["score"] <= SPEECH_CEILING
+    assert not any("STRONG EVIDENCE" in r for r in out["reasons"])
+
+
+def test_speech_fills_headroom_without_clamping_strong_brands():
+    """A strong logo plus one mention must not flatten to 1.0 and erase the
+    ranking between strong brands."""
+    from src.layer3.recommender import BrandRecommender as R
+
+    rec = R(graph=KnowledgeGraph(_mini_catalog()))
+    strong = rec.recommend(_speech_only_timeline(1, conf=0.9), top_k=12)[0]
+    assert strong["score"] > 0.9
+    assert strong["score"] < 1.0
+
+
+def test_mention_count_is_reported_in_reasons():
+    """The count is what makes the claim defensible, so it must be stated."""
+    rec = BrandRecommender(graph=KnowledgeGraph(_mini_catalog()))
+    nike = lambda n: next(
+        r for r in rec.recommend(_speech_only_timeline(n), top_k=12)
+        if r["brand"] == "NIKE"
+    )
+    assert "NAMED 4x IN THE AUDIO" in " ".join(nike(4)["reasons"])
+    assert "NAMED ONCE IN THE AUDIO" in " ".join(nike(1)["reasons"])
+
+
+def test_explicit_brand_evidence_is_not_double_counted():
+    """Layer 2b's fusion already counts spoken mentions as an evidence source, so
+    an explicit strength must be returned untouched."""
+    rec = BrandRecommender(graph=KnowledgeGraph(_mini_catalog()))
+    out = rec.recommend(_speech_only_timeline(20), brand_evidence={"NIKE": 0.42}, top_k=12)
+    assert out[0]["score"] == 0.42

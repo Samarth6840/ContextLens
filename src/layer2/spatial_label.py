@@ -216,8 +216,14 @@ def normalize_brand_name(brand: str) -> str:
 
     Resolved brands arrive in various forms ('Samsung', 'SAMSUNG', 'samsung').
     Map them to the canonical uppercase key used in BRAND_PRODUCT_CATEGORIES.
+
+    An unresolved brand (None/empty) returns '' — it must never fall through to
+    the prefix match, since every table key startswith('') and the first entry
+    (SAMSUNG) would then anchor every unresolved logo.
     """
     key = (brand or "").strip().upper()
+    if not key:
+        return ""
     if key in BRAND_PRODUCT_CATEGORIES:
         return key
     # Fall back to a case-insensitive prefix match against the table keys.

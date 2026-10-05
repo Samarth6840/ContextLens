@@ -7,7 +7,7 @@ Both load real model weights — no mock/stub/placeholder inference.
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import numpy as np
 import torch
@@ -139,7 +139,8 @@ class SpeechToText:
         audio: np.ndarray,
         sample_rate: int = 16000,
         frame_ms: int = 30,
-        min_segment_ms: float = 0.5,
+        min_segment_s: float = 0.5,
+        min_silence_s: float = 0.5,
         max_segment_s: float = 30.0,
         silence_threshold_percentile: int = 15,
         energy_multiplier: float = 1.5,
@@ -151,11 +152,16 @@ class SpeechToText:
         each segment independently (fresh decoder state), rather than one
         continuous pass over the full audio.
 
+        A segment is CLOSED once voice returns after a silent run of at least
+        `min_silence_s`; shorter gaps just extend the current segment, so normal
+        inter-word pauses don't split speech.
+
         Args:
             audio: Audio waveform as numpy array
             sample_rate: Sample rate in Hz
             frame_ms: Frame size in milliseconds for energy computation
-            min_segment_ms: Minimum segment duration in seconds
+            min_segment_s: Minimum segment duration in seconds (shorter spans are dropped)
+            min_silence_s: Silent run that closes the current segment
             max_segment_s: Maximum segment duration in seconds
             silence_threshold_percentile: Percentile of frame energies used as
                                           noise floor estimate
@@ -165,55 +171,58 @@ class SpeechToText:
             List of (start_sample, end_sample) tuples for each speech segment
         """
         frame_len = int(sample_rate * frame_ms / 1000)
-        hop_len = frame_len // 2
+        hop_len = max(1, frame_len // 2)
         n_frames = max(1, (len(audio) - frame_len) // hop_len + 1)
 
         energies = np.zeros(n_frames, dtype=np.float32)
-        for i in range(n_frames):
-            start = i * hop_len
-            end = start + frame_len
-            energies[i] = np.mean(audio[start:end] ** 2)
+        if len(audio) >= frame_len:
+            windows = np.lib.stride_tricks.sliding_window_view(audio, frame_len)
+            energies = (windows[::hop_len][:n_frames].astype(np.float32) ** 2).mean(axis=1)
+        else:
+            energies[0] = float(np.mean(audio ** 2)) if len(audio) else 0.0
 
         noise_floor = np.percentile(energies, silence_threshold_percentile)
         threshold = noise_floor * energy_multiplier
         is_voice = energies > threshold
 
-        min_seg_samples = int(sample_rate * min_segment_ms)
+        min_seg_samples = int(sample_rate * min_segment_s)
+        min_silence_samples = int(sample_rate * min_silence_s)
         max_seg_samples = int(sample_rate * max_segment_s)
 
-        segments = []
+        segments: List[Tuple[int, int]] = []
+
+        def _emit(start: int, end: int) -> None:
+            if end - start < min_seg_samples:
+                return
+            # Hard cap: a long continuous run is chopped so no segment is decoded
+            # without a decoder reset for too long.
+            for chunk_start in range(start, end, max_seg_samples):
+                segments.append((chunk_start, min(chunk_start + max_seg_samples, end)))
+
         in_speech = False
         seg_start = 0
+        silence_start: Optional[int] = None
 
         for i in range(n_frames):
             frame_start = i * hop_len
-            if is_voice[i] and not in_speech:
-                in_speech = True
-                seg_start = frame_start
-            elif not is_voice[i] and in_speech:
-                silence_len = frame_start - (i - 1) * hop_len - frame_len
-                if silence_len > min_seg_samples:
-                    seg_end = (i - 1) * hop_len + frame_len
-                    if seg_end - seg_start >= min_seg_samples:
-                        if seg_end - seg_start > max_seg_samples:
-                            for chunk_start in range(seg_start, seg_end, max_seg_samples):
-                                chunk_end = min(chunk_start + max_seg_samples, seg_end)
-                                segments.append((chunk_start, chunk_end))
-                        else:
-                            segments.append((seg_start, seg_end))
-                    in_speech = False
+            if is_voice[i]:
+                if not in_speech:
+                    in_speech = True
+                    seg_start = frame_start
+                elif silence_start is not None and frame_start - silence_start >= min_silence_samples:
+                    _emit(seg_start, silence_start)
+                    seg_start = frame_start
+                silence_start = None
+            elif in_speech and silence_start is None:
+                silence_start = frame_start
 
         if in_speech:
-            seg_end = len(audio)
-            if seg_end - seg_start >= min_seg_samples:
-                if seg_end - seg_start > max_seg_samples:
-                    for chunk_start in range(seg_start, seg_end, max_seg_samples):
-                        chunk_end = min(chunk_start + max_seg_samples, seg_end)
-                        segments.append((chunk_start, chunk_end))
-                else:
-                    segments.append((seg_start, seg_end))
+            _emit(seg_start, silence_start if silence_start is not None else len(audio))
 
-        if not segments:
+        # No speech detected: transcribe the whole clip as one segment (the
+        # segment-level anti-hallucination guard doesn't apply). Empty audio
+        # yields no segments rather than a zero-length one.
+        if not segments and len(audio) > 0:
             segments = [(0, len(audio))]
 
         logger.info(
@@ -425,7 +434,9 @@ class AudioEventDetector:
 
     @torch.no_grad()
     def detect_events(
-        self, audio: np.ndarray, max_chunk_seconds: float = 30.0
+        self, audio: np.ndarray, max_chunk_seconds: float = 30.0,
+        progress: Optional[Callable[[str], None]] = None,
+        max_chunks: Optional[int] = None,
     ) -> List[dict]:
         """
         Detect audio events in a waveform.
@@ -436,6 +447,18 @@ class AudioEventDetector:
         Args:
             audio: Audio waveform as numpy array (samples,)
             max_chunk_seconds: Maximum chunk duration in seconds
+            progress: Optional callback invoked once per chunk with a short
+                      human-readable status line ("Audio events — chunk 7/20
+                      of 98 (170.0–200.0 s)"). Uncapped audio on long videos
+                      makes this stage run for many minutes with no other
+                      observable output, so per-chunk reporting is what keeps
+                      the job feed visibly alive.
+            max_chunks: Cap on the number of chunks actually decoded. When the
+                      audio spans more chunks than this, chunks are sampled
+                      UNIFORMLY across the full duration (first and last
+                      chunk always included) — real BEATs inference with real
+                      timestamps on every sampled window, just fewer of them.
+                      None = decode everything (legacy behavior).
 
         Returns:
             List of event dicts with keys:
@@ -450,10 +473,49 @@ class AudioEventDetector:
         max_chunk = int(max_chunk_seconds * self.sample_rate)
         events = []
 
-        for offset in range(0, len(audio), max_chunk):
+        # Pre-compute the true chunk count so the feed can show "7/20 of 98"
+        # instead of an open-ended counter. The final sub-0.5s tail is dropped
+        # by the loop's break, so it is excluded here.
+        min_chunk = int(0.5 * self.sample_rate)
+        all_offsets = [
+            off for off in range(0, len(audio), max_chunk)
+            if len(audio[off : off + max_chunk]) >= min_chunk
+        ]
+
+        # Uniform sample across the whole duration when the cap binds.
+        # Evenly-spaced picks (same strategy as pipeline keyframe sampling):
+        # first and last chunk always survive, mid-video gaps stay bounded.
+        offsets = all_offsets
+        sampled_total = len(all_offsets)
+        if max_chunks is not None and 0 < max_chunks < len(all_offsets):
+            picks = np.linspace(0, len(all_offsets) - 1, max_chunks, dtype=int)
+            offsets = [all_offsets[i] for i in sorted(set(picks.tolist()))]
+            sampled_total = len(all_offsets)
+            logger.info(
+                "Audio events sampling: %d -> %d chunk(s) of %.0fs "
+                "(max_chunks=%d, uniform across full duration)",
+                len(all_offsets), len(offsets), max_chunk_seconds, max_chunks,
+            )
+
+        for chunk_idx, offset in enumerate(offsets, start=1):
             chunk = audio[offset : offset + max_chunk]
-            if len(chunk) < int(0.5 * self.sample_rate):
-                break
+            if len(chunk) < min_chunk:
+                continue
+
+            if progress is not None:
+                try:
+                    t_start = offset / self.sample_rate
+                    t_end = (offset + len(chunk)) / self.sample_rate
+                    scope = (
+                        f" of {sampled_total}"
+                        if sampled_total != len(offsets) else ""
+                    )
+                    progress(
+                        f"Audio events — chunk {chunk_idx}/{len(offsets)}{scope} "
+                        f"({t_start:.1f}–{t_end:.1f} s of audio)"
+                    )
+                except Exception:  # noqa: BLE001 — reporting must never kill the job
+                    pass
 
             chunk_tensor = torch.from_numpy(chunk).float().unsqueeze(0).to(self.device)
             features, _ = self.model.extract_features(chunk_tensor)

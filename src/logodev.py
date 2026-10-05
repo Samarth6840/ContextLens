@@ -217,6 +217,34 @@ class LogoDevClient:
         return bank
 
     # ── B2b: brand validation (fabrication safeguard) ──────────
+    @staticmethod
+    def _norm(s: str) -> str:
+        """Lowercase alphanumeric-only form: 'Coca-Cola' -> 'cocacola'."""
+        return "".join(c for c in (s or "").lower() if c.isalnum())
+
+    @staticmethod
+    def _result_matches_query(query: str, result: dict) -> bool:
+        """True when the fuzzy search result really corresponds to the query.
+
+        logo.dev search is fuzzy, so an arbitrary query (even a non-brand string)
+        usually returns *something*. A result only counts as a verification when
+        its name or domain actually matches the queried brand, otherwise a garden
+        rake can be "verified" as a brand.
+        """
+        q = LogoDevClient._norm(query)
+        if not q:
+            return False
+        name = LogoDevClient._norm(result.get("name"))
+        domain_label = LogoDevClient._norm((result.get("domain") or "").split(".")[0])
+        # Exact equality on either field, or a prefix relationship that is
+        # meaningful (>= 3 chars) so short brands ("LG" -> "LG Electronics",
+        # leading to domain "lg.com") still match without matching "a"/"co".
+        if q == name or q == domain_label:
+            return True
+        if len(q) >= 3:
+            return name.startswith(q) or domain_label.startswith(q)
+        return False
+
     def validate_brand(self, brand: str) -> Dict[str, Any]:
         """
         Check whether `brand` exists in logo.dev (authoritative existence).
@@ -236,11 +264,13 @@ class LogoDevClient:
         except Exception as exc:  # noqa: BLE001
             logger.warning("logo.dev validation failed for %s: %s", brand, exc)
             return {"status": "unavailable", "brand": brand, "domain": None}
-        if not results:
-            return {"status": "unverified", "brand": brand, "domain": None}
-        top = results[0]
-        return {
-            "status": "verified",
-            "brand": top.get("name") or brand,
-            "domain": top.get("domain"),
-        }
+        # A fuzzy search hit is only a verification when it names the queried
+        # brand. Search is rank-ordered, so the first matching result wins.
+        for top in results:
+            if self._result_matches_query(brand, top):
+                return {
+                    "status": "verified",
+                    "brand": top.get("name") or brand,
+                    "domain": top.get("domain"),
+                }
+        return {"status": "unverified", "brand": brand, "domain": None}

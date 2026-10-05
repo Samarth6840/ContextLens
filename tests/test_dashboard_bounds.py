@@ -74,11 +74,16 @@ def test_valid_dashboard_passes_unchanged():
     assert out is dash
 
 
-def test_enrich_recommendations_adds_catalog_contact():
+def test_enrich_recommendations_never_invents_a_contact_email():
+    """The catalog used to carry guessed addresses (partnerships@nike.com,
+    pr@reebok.com). Those were never sourced, so a recommendation now carries
+    no email unless the Gemini grounding lookup actually found one."""
     recs = [{"brand": "NIKE", "type": "DIRECT", "score": 0.9}]
     out = _enrich_recommendations(recs)
-    assert out[0]["contact_email"] == "partnerships@nike.com"
+    assert out[0]["contact_email"] is None
     assert out[0]["contact_verified"] is False
+    # The curated website IS safe to show — keep it.
+    assert out[0]["contact_website"] == "https://www.nike.com"
     assert out[0]["appearances"] == 0
     # Original fields preserved, not mutated.
     assert out[0]["type"] == "DIRECT" and out[0]["score"] == 0.9

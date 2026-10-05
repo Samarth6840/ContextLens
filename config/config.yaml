@@ -44,14 +44,40 @@ layer1:
     # "Unknown logo detection backend: 'rfdetr'". Until RF-DETR is properly
     # integrated + weights shipped, the shipped default remains YOLO-World
     # (yolov8s-worldv2.pt is present at repo root).
-    backend: "yolo_world"  # "yolo_world" (shipped) | "rfdetr" (not yet wired)
-    model: "yolov8s-worldv2.pt"  # YOLO-World zero-shot weights (present at repo root)
+    # "yolo" = trained single-class detector (LogoDet-3K, real photos, val
+    # mAP50 0.1933 vs YOLO-World's 0.0204 on the same held-out split).
+    # "yolo_world" = zero-shot prompted fallback, kept for comparison.
+    backend: "yolo"  # "yolo" (trained) | "yolo_world" (zero-shot)
+    model: "weights/logo_detector/train/weights/best.pt"
     confidence_threshold: 0.10
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with
     # '<Brand> logo' queries generated from the brand catalog (src/brand_catalog.py)
     # so known brands are matched zero-shot. Crop-OCR then resolves the actual name.
+    #
+    # region_proposal_only: DETECT and IDENTIFY as separate jobs. When true, the
+    # detector sees ONLY the generic queries below and proposes "a logo is here";
+    # identity is decided downstream by crop-OCR and CLIP retrieval
+    # (src/layer2/brand_resolver.py), both already fail-closed. A brand name
+    # taken from a detector class label is never evidence.
+    #
+    # MEASURED on 30 real LogoDet-3K test frames / 41 logo boxes
+    # (scripts/eval_logo.py, no resolver, IoU 0.5):
+    #
+    #   classes                     conf>=0.10   TP   FP   FN      P      R     F1
+    #   45 (6 generic + 39 brand)      ON         3   99   38  0.029  0.073  0.042
+    #   6  (generic only)              ON         0    2   41  0.000  0.000  0.000
+    #
+    # So YOLO-World is not usable as a logo detector EITHER way: the brand
+    # prompts buy 3 true positives at the cost of 99 false ones, and the
+    # generic prompts find nothing at all. Removing the brand prompts is the
+    # architecturally correct end state, but on its own it only trades false
+    # positives for zero recall. It stays default-OFF until a detector trained
+    # on real logo boxes replaces the open-vocabulary prompt (see
+    # scripts/train_logo_detector.py); turning it on before then is a silent
+    # recall regression, not a fix.
+    region_proposal_only: false
     text_queries:
       - "brand logo"
       - "company logo"
@@ -177,12 +203,13 @@ layer1:
     # enable_qwen: when True, Qwen3-VL is allowed to run. It is gated at runtime
     # by a frame-selection filter (see pipeline) so it only analyzes frames where
     # logo/object detection or OCR already fired — empty/background frames are
-    # skipped. NOTE: the loader in src/layer1/qwen3vl.py still FAILS CLOSED
-    # (returns fallback dicts, no real inference) until the 32B weights are wired.
-    enable_qwen: True
+    # skipped. The loader in src/layer1/qwen3vl.py FAILS CLOSED (returns fallback
+    # dicts, no real inference — it cannot even send frames to the model), so this
+    # stays OFF: enabling it changes nothing today and only misleads dashboards.
+    enable_qwen: false
     model: "Qwen3-VL-32B"
     load_8bit: True  # Use 8-bit quantization for memory efficiency on Apple Silicon
-    device: None  # auto-detect (mps/cuda/cpu)
+    device: null  # auto-detect (mps/cuda/cpu)
 
   # Legacy speech-to-text (maintained for backward compatibility)
   speech_to_text:
@@ -207,6 +234,18 @@ layer1:
     checkpoint: "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
     sample_rate: 16000
     embedding_dim: 256  # 128 mel bins × 2 stats (mean + std)
+    # Max BEATs chunks processed per video (each chunk = 30 s of audio).
+    # null = decode the WHOLE audio (legacy behavior). That is brutally slow on
+    # long videos: ~100 chunks for a 50-minute upload at ~12 s/chunk on MPS =
+    # 20+ minutes of wall time in this one stage (measured: job BNVRDTNO-X9J53
+    # sat silent for 21 min after all other models finished).
+    # A number caps the pass with UNIFORM sampling across the full duration:
+    # first and last chunk always included, real BEATs inference, real
+    # timestamps — just fewer chunks. Audio events are supplementary evidence
+    # (their strength is hard-capped at 0.4 in the Layer 2b scorer), so 20
+    # chunks (~10 min of audio spread across the whole video) preserves the
+    # signal while bounding this stage to ~2-3 minutes.
+    max_chunks: 20
 
   visual_embeddings:
     model: "facebook/dinov3-vitb16-pretrain-lvd1689m"
@@ -268,11 +307,13 @@ layer1:
 
   # Free.ai API (OCR, STT, Vision) — optional cloud fallback.
   # Requires FREE_AI_API_KEY in .env (30K free tokens/day, no credit card).
-  # When the heavy local models (PaddleOCR/Whisper) fail to load, or when
-  # freeai.fallback is True, the pipeline uses Free.ai's cloud API instead.
+  # When the heavy local models (PaddleOCR/Whisper) fail to load, the pipeline
+  # uses Free.ai's cloud API ONLY when BOTH enabled AND fallback are true —
+  # uploading a creator's frames/audio to a third party is an explicit consent
+  # decision, so the shipped default is opt-in (off).
   freeai:
-    enabled: True
-    fallback: True  # use Free.ai as fallback when local models are unavailable
+    enabled: false
+    fallback: false  # set BOTH true to allow cloud fallback on local-model failure
     base_url: "https://api.free.ai/v1"
 
 layer2a:
@@ -341,16 +382,56 @@ layer2b:
   aggregation: "weighted_sum"  # weighted_sum | learned_calibration | noisy_or
   min_evidence_threshold: 0.55
 
+  # Object/event evidence tracking (Phase 5). Per-frame logo detections are
+  # associated across frames into physical-object tracks, so a static overlay
+  # held for many frames contributes ONE evidence track (best observation +
+  # mean quality + persistence) rather than N correlated per-frame votes.
+  # Association is label-agnostic (boxes only) and greedy (ByteTrack-style: it
+  # associates every box, including low-confidence ones, to avoid fragmenting
+  # a trajectory). See src/layer2/evidence_tracking.py.
+  tracking:
+    enabled: true
+    iou_threshold: 0.3   # min IoU for a detection to join an existing track
+    max_gap: 2           # max skipped frames a detection may join across
+
+  # Candidate generation funnel (Phase 5). Evidence used to feed candidate
+  # scores directly; now a generator proposes candidates from OCR/ASR aliases,
+  # logo retrieval and product matches, fusion scores only the top-K, and the
+  # verdict ranks the top-5. Bounds the fusion search space and stops a flood
+  # of weak generated names from diluting the winner.
+  candidate_generation:
+    enabled: true
+    top_k: 20            # candidates handed to fusion (0 = no gating)
+
   # Compiled multimodal fusion (candidate-centric, dependency-aware).
   # Replaces naive weighted-sum with temporal grounding + dependency discount
   # + agreement bonus + conflict/abstain verdict + temperature-scaled prob.
   fusion:
     enabled: True
-    temperature: 1.0        # calibration; >1 flattens probabilities
+    # Power scaling: prob ** (1/temperature), so >1 RAISES prob toward 1
+    # (sharper) and <1 lowers it. The opposite of softmax(z/T), where >1
+    # flattens — do not read this as a conventional temperature. It is applied
+    # BEFORE margin/verdict, so it moves the accept/abstain boundary, not just
+    # the reported confidence. 1.0 = identity; fusion_eval/calibration.py fits
+    # a value but nothing writes it back here, so serving is uncalibrated.
+    temperature: 1.0
     time_bucket_seconds: 2.0  # correlation window for the dependency discount
     agreement_bonus: 0.30   # bonus on cross-modal temporal agreement
     accept: 0.30            # below this, top candidate -> low_support verdict
     margin_min: 0.15        # top-vs-2nd margin below this -> ambiguous verdict
+    # Weight applied to a candidate's contradiction score when computing net
+    # evidence (support - penalty * contradiction); <1 so a rival sighting
+    # erodes but does not single-handedly erase strong supporting evidence.
+    contradiction_penalty: 0.5
+    # Cross-modal contradiction mining: file one-sided modality conflicts as
+    # negative evidence against the candidate they disagree with (product
+    # retrieval vs wordmark identity; ASR vs visual). A rival seen in BOTH audio
+    # and video is treated as consistent, not contradictory, so multi-brand
+    # videos do not self-penalise.
+    cross_modal_contradiction:
+      enabled: true
+      min_product_similarity: 0.6  # rival product match strong enough to count
+      min_visual_strength: 0.5     # visual proof strong enough to contradict audio-only
 
 layer2c:
   # Temporal memory / cross-scene reasoning (brand entity timeline).
@@ -442,6 +523,17 @@ open_set:
   min_crop_area: 3000
   # maximum bbox/crop aspect (w/h); wider = ticker/strap, not a searchable logo
   max_crop_aspect: 3.0
+  # REPORTING ONLY - a frame with at least this many logo proposals is flagged
+  # as saturated in the dashboard's detector diagnostics. It never drops,
+  # reorders or caps a candidate; the funnel of zeros is a detector diagnosis,
+  # and hiding proposals to make the count look tidy would destroy the evidence
+  # for it. Measured on 7864fa1c52 (98 frames, human labels): 112 proposals per
+  # frame on frames WITH a logo, 62 on frames WITHOUT, p50 confidence 0.148 vs
+  # 0.143. Confidence barely separates the two, so the confidence gate rejects
+  # a flat noise floor - the gates are working, the detector is not.
+  # 30 is well below the worst observed per-frame count, so a saturated frame is
+  # reported rather than tuned to look rare.
+  saturated_proposals_per_frame: 30
   # Hard cap on reverse-image + logo.dev calls per video.
   max_candidates_per_video: 5
   crop_cache_dir: "static/openset_crops"

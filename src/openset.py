@@ -33,7 +33,6 @@ without keys — no key means no names are surfaced, ever.
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import logging
 import os
@@ -43,6 +42,7 @@ import subprocess
 import tempfile
 import time
 from abc import ABC, abstractmethod
+from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -664,13 +664,56 @@ def _crop_bbox(frame: np.ndarray, bbox, margin: float = 0.1) -> Optional[np.ndar
     return frame[y1:y2, x1:x2]
 
 
+# Hamming distance (out of 256 bits) at which two crops count as the same
+# logo. Measured on rendered wordmarks (tests/test_crop_hash_perceptual.py):
+# the same logo across frame-to-frame jitter and sensor noise lands at <=20,
+# while the closest two DIFFERENT wordmarks (SONY/BMW) are 105 apart. 32 sits
+# in that empty middle: far above same-logo noise, far below any cross-logo
+# pair. Re-measure if CROP_HASH_BITS changes — the two must scale together.
+CROP_HASH_BITS = 256
+CROP_HASH_MAX_DISTANCE = 32
+
+# Grayscale level above which a crop pixel counts as "logo" when trimming to
+# the content bounding box. Dark wordmarks on a dark video frame still land
+# well above this; compression noise does not.
+CROP_TRIM_THRESHOLD = 40
+
+
 def _crop_hash(crop: np.ndarray) -> str:
-    """Cheap perceptual-ish hash for deduplicating near-identical crops."""
+    """Perceptual difference hash (dHash) for deduplicating near-identical crops.
+
+    Hashing raw bytes only dedupes byte-identical crops, and two frames of the
+    same video never are — the detection box shifts a pixel or two and sensor
+    noise changes the values, so exact hashing never fired and every frame of
+    a persistent logo spent its own search budget.
+
+    Trimming to the content bounding box FIRST is what makes this work: the box
+    shift is the dominant source of variation, and normalising it away makes
+    the same logo hash identically (distance 0). Without the trim, dHash on the
+    raw crop is not translation-stable at any grid or blur radius I measured —
+    and a fixed Hamming threshold cannot be calibrated, because the same-logo
+    and different-logo distributions overlap.
+
+    Returns a CROP_HASH_BITS-bit hash as hex; compare with _crop_hash_distance.
+    """
     import cv2
 
-    small = cv2.resize(crop, (32, 32), interpolation=cv2.INTER_AREA)
-    gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
-    return hashlib.sha1(gray.tobytes()).hexdigest()[:16]
+    grid = int(CROP_HASH_BITS**0.5)
+
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    mask = (gray > CROP_TRIM_THRESHOLD).astype(np.uint8)
+    if mask.any():
+        ys, xs = np.nonzero(mask)
+        gray = gray[ys.min() : ys.max() + 1, xs.min() : xs.max() + 1]
+
+    small = cv2.resize(gray, (grid + 1, grid), interpolation=cv2.INTER_AREA)
+    bits = (small[:, 1:] > small[:, :-1]).flatten()
+    return f"{int(''.join('1' if b else '0' for b in bits), 2):0{CROP_HASH_BITS // 4}x}"
+
+
+def _crop_hash_distance(a: str, b: str) -> int:
+    """Hamming distance between two hex dHashes, in bits."""
+    return bin(int(a, 16) ^ int(b, 16)).count("1")
 
 
 def _read_frame(
@@ -772,16 +815,23 @@ def _derive_candidate_name(
         if not m:
             continue
         domain = m.group(1).lower()
-        if any(pat in domain for pat in (generic_domains or ())):
+        # Substring match is wrong: with pattern "x.com", "netflix.com",
+        # "dropbox.com" and "wix.com" ALL contain "x.com". Only the domain
+        # itself (or a subdomain of it) is a match.
+        if any(domain == pat or domain.endswith("." + pat) for pat in (generic_domains or ())):
             continue
         domain_counts[domain] = domain_counts.get(domain, 0) + 1
     if not domain_counts:
         return None
     top_domain = max(domain_counts, key=domain_counts.get)
-    # brand-ish token = the registrable part before the TLD
+    # brand-ish token = the registrable part before the TLD. For a two-letter
+    # ccTLD ("foo.co.uk", "bar.com.au") the label before it is a pseudo-TLD
+    # ("co", "com"), so step one more label back.
     parts = top_domain.split(".")
     if len(parts) >= 2:
-        name = parts[-2].upper()
+        tld = parts[-1]
+        idx = -2 if len(tld) > 2 else -3
+        name = parts[idx].upper() if len(parts) >= -idx else top_domain.upper()
         return None if _is_void_name(name) else name
     name = top_domain.upper()
     return None if _is_void_name(name) else name
@@ -803,6 +853,27 @@ _VOID_NAMES = {
     "unknown brand",
 }
 
+# A model that answers "not identifiable" is reporting a failed lookup, not a
+# brand. Matched as phrases so the whole negation family is caught, not just the
+# exact strings above ("NOT IDENTIFIABLE" was reaching logo.dev and coming back
+# verified as identifiable.ca). Whole-phrase matching keeps real brands that
+# merely start with "not" — Notion, Nottingham — out of the net.
+_VOID_PHRASES = (
+    "not identifiable",
+    "not identified",
+    "not recognizable",
+    "not recognisable",
+    "not a brand",
+    "not a logo",
+    "cannot identify",
+    "can t identify",
+    "unable to identify",
+    "no identifiable",
+    "unidentifiable",
+    "no logo detected",
+    "no brand detected",
+)
+
 
 def _is_void_name(name: str) -> bool:
     """A candidate name that semantically means "no identification" is treated
@@ -811,7 +882,9 @@ def _is_void_name(name: str) -> bool:
     if not name:
         return True
     t = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-    return (not t) or t in _VOID_NAMES
+    if not t or t in _VOID_NAMES:
+        return True
+    return any(phrase in t for phrase in _VOID_PHRASES)
 
 
 class OpenSetBrandIdentifier:
@@ -828,6 +901,7 @@ class OpenSetBrandIdentifier:
         generic_tag_filter,
         generic_domain_filter,
         logodev_timeout: float,
+        saturated_proposals_per_frame: int = 30,
     ):
         """All tunables are explicit and come from config `open_set:`.
 
@@ -856,11 +930,24 @@ class OpenSetBrandIdentifier:
         self.min_crop_area = float(min_crop_area)
         self.max_crop_aspect = float(max_crop_aspect)
         self.max_candidates_per_video = int(max_candidates_per_video)
+        # Reporting threshold only. It never drops a candidate: the point is
+        # to make a saturated frame visible, and silently discarding proposals
+        # to hit a number would hide the defect instead of describing it.
+        # 30 is roughly where a frame stops being "a few marks" and starts
+        # being the detector failing to discriminate - on the one video
+        # measured (7864fa1c52) the p50 was 109 and the minimum on any frame
+        # was 62, so every frame clears it and the flag is honest rather than
+        # tuned to look rare.
+        self.saturated_proposals_per_frame = int(saturated_proposals_per_frame)
+        self.max_saturated_frames_listed = 20
         self.crop_cache_dir = Path(crop_cache_dir)
         self.crop_cache_dir.mkdir(parents=True, exist_ok=True)
         self.generic_words = set(str(w).lower().strip() for w in (generic_tag_filter or ()))
         self.generic_domains = set(str(d).lower().strip() for d in (generic_domain_filter or ()))
         self.logodev_timeout = float(logodev_timeout)
+        if not saturated_proposals_per_frame or int(saturated_proposals_per_frame) <= 0:
+            raise ValueError(
+                "OpenSetBrandIdentifier requires saturated_proposals_per_frame > 0")
         self._logodev_client = None  # lazy
         self._result_cache: Dict[str, List[ReverseImageResult]] = {}
 
@@ -886,11 +973,20 @@ class OpenSetBrandIdentifier:
           - capped at max_candidates_per_video,
           - per-crop search results cached.
 
-        Returns ``(accepted, rejected, skipped)`` where ``rejected`` is a list
-        of {frame_index, det_index, confidence, bbox, width, height, aspect,
-        reason} for every gate-skipped det (reason in {"too_small",
-        "banner_shape"}) and ``skipped`` counts the non-recordable skips
-        (below-min-confidence, duplicate hash).
+        Returns ``(accepted, rejected, skipped, diagnostics)`` where ``rejected``
+        is a list of {frame_index, det_index, confidence, bbox, width, height,
+        aspect, reason} for every gate-skipped det, ``skipped`` counts the
+        non-recordable skips, and ``diagnostics`` reports the state of the
+        detector's output upstream of every gate here.
+
+        That last part is the point. When the detector is saturated, the
+        confidence distribution is flat and the gate rejects everything; read
+        alone, that looks like a resolver failure. Measured on 7864fa1c52 with
+        its human labels: 112 proposals/frame on frames WITH a logo vs 62 on
+        frames WITHOUT one, p50 confidence 0.148 vs 0.143. Confidence carries
+        almost no information about whether a logo is present, so a 0.30 gate
+        rejects a flat noise floor. The gates are behaving as documented; the
+        number of them says nothing on its own about why.
         """
         l1 = result["layer1"]
         video_stride = int(result.get("video_stride", 1) or 1)
@@ -900,7 +996,16 @@ class OpenSetBrandIdentifier:
         skipped_dup = 0
         seen_hashes: set = set()
         budget = int(self.max_candidates_per_video)
+        # Saturation is a property of the detector's raw output, so it is
+        # counted before any gate can discard a detection. Measuring it after
+        # the confidence gate would report the gate's effect, not the cause.
+        proposals_total = 0
+        per_frame: List[dict] = []
         for frame_idx, dets in enumerate(l1.get("logo_detections") or []):
+            n_dets = len(dets or [])
+            proposals_total += n_dets
+            if n_dets:
+                per_frame.append({"frame_index": frame_idx, "proposals": n_dets})
             for det_idx, det in enumerate(dets or []):
                 if len(accepted) >= budget:
                     break
@@ -910,6 +1015,14 @@ class OpenSetBrandIdentifier:
                     continue
                 bbox = det.get("bbox")
                 if not bbox:
+                    # Recorded, not skipped silently: a detection that cannot
+                    # be located is a detector defect, and dropping it without
+                    # a record is how a stage ends up explaining nothing.
+                    rejected.append({
+                        "frame_index": frame_idx, "det_index": det_idx,
+                        "confidence": round(conf, 3), "bbox": None,
+                        "reason": "no_bbox",
+                    })
                     continue
                 bw = abs(int(bbox[2]) - int(bbox[0]))
                 bh = abs(int(bbox[3]) - int(bbox[1]))
@@ -928,9 +1041,21 @@ class OpenSetBrandIdentifier:
                     continue
                 frame = _read_frame(video_path, frame_idx, video_stride)
                 if frame is None:
+                    rejected.append({
+                        "frame_index": frame_idx, "det_index": det_idx,
+                        "confidence": round(conf, 3),
+                        "bbox": [float(v) for v in bbox],
+                        "reason": "unreadable_frame",
+                    })
                     continue
                 crop = _crop_bbox(frame, bbox)
                 if crop is None or crop.size == 0:
+                    rejected.append({
+                        "frame_index": frame_idx, "det_index": det_idx,
+                        "confidence": round(conf, 3),
+                        "bbox": [float(v) for v in bbox],
+                        "reason": "invalid_crop",
+                    })
                     continue
                 ch, cw = crop.shape[:2]
                 crop_area = cw * ch
@@ -947,7 +1072,10 @@ class OpenSetBrandIdentifier:
                     })
                     continue
                 h = _crop_hash(crop)
-                if h in seen_hashes:
+                if any(
+                    _crop_hash_distance(h, seen) <= CROP_HASH_MAX_DISTANCE
+                    for seen in seen_hashes
+                ):
                     skipped_dup += 1
                     continue
                 seen_hashes.add(h)
@@ -962,7 +1090,35 @@ class OpenSetBrandIdentifier:
             if len(accepted) >= budget:
                 break
         skipped = {"below_min_confidence": skipped_below_conf, "duplicate_hash": skipped_dup}
-        return accepted, rejected, skipped
+
+        # ── per-frame detector diagnostics. Reporting only, no behaviour
+        #    change: nothing here gates, reorders or drops a crop. A saturated
+        #    frame is flagged so the funnel's zeros are legible as a detector
+        #    problem instead of reading as a resolver problem.
+        counts = sorted((f["proposals"] for f in per_frame), reverse=True)
+        n_frames_with = len(per_frame)
+        saturated = [
+            f["frame_index"] for f in per_frame
+            if f["proposals"] >= self.saturated_proposals_per_frame
+        ]
+        diagnostics = {
+            "proposals_total": proposals_total,
+            "frames_with_proposals": n_frames_with,
+            "max_proposals_in_a_frame": counts[0] if counts else 0,
+            "median_proposals_in_a_frame": (
+                counts[len(counts) // 2] if counts else 0),
+            "saturated_proposals_per_frame": self.saturated_proposals_per_frame,
+            "saturated_frames": saturated[:self.max_saturated_frames_listed],
+            "saturated_frame_count": len(saturated),
+            "saturation_note": (
+                "The detector proposed this many boxes in one frame. A high "
+                "proposal count means identity work downstream is unreliable on "
+                "that frame: the real logo may not be distinguishable from the "
+                "noise around it. This is a detector-quality signal, not a "
+                "resolver result."
+            ),
+        }
+        return accepted, rejected, skipped, diagnostics
 
     def identify(self, result: dict, video_path: str) -> Dict[str, Any]:
         """Run open-set identification for a finished job.
@@ -988,7 +1144,8 @@ class OpenSetBrandIdentifier:
                 "install agent-browser)"
             )
 
-        accepted, rejected, skipped_counts = self._candidate_crops(result, video_path)
+        accepted, rejected, skipped_counts, diagnostics = self._candidate_crops(
+            result, video_path)
         for cand in accepted:
             crop = cand.pop("crop")
             entry: Dict[str, Any] = {
@@ -1060,4 +1217,8 @@ class OpenSetBrandIdentifier:
             "rejected": rejected,
             "skipped_counts": skipped_counts,
             "resolved": resolved,
+            # Detector state upstream of every gate above, so a funnel of
+            # zeros reads as a detector diagnosis rather than a resolver one.
+            "detector_diagnostics": diagnostics,
+            "rejected_reason_counts": dict(Counter(r["reason"] for r in rejected)),
         }
