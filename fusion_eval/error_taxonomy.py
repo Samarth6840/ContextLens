@@ -8,36 +8,37 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from .metrics import ABSTAIN_VERDICTS
+
+
 def classify(pred: dict) -> str:
     winner, gt = pred.get("winner"), pred.get("gt_brand")
     verdict, diff = pred.get("verdict"), pred.get("difficulty")
     fam = pred.get("families", {}) if isinstance(pred.get("families"), dict) else {}
 
-    if verdict == "abstain":
-        return "FN_UNKNOWN" if diff == "negative" else "FN_UNKNOWN"
-    if verdict == "low_support":
-        return "FN_LOW_EVIDENCE"
+    # A declined row has no answer, whatever winner the fusion layer reported.
+    if verdict in ABSTAIN_VERDICTS:
+        # Declining a NEGATIVE is the correct outcome, not a miss. Labelling it
+        # FN_* made correct restraint look like the dominant failure mode.
+        if gt is None or not pred.get("visible"):
+            return "OK"
+        return "FN_LOW_EVIDENCE" if verdict == "low_support" else "FN_UNKNOWN"
 
-    if winner != gt:
-        if winner is None or not pred.get("visible"):
-            return "FP_UNKNOWN_BRAND"
-        if verdict == "ambiguous":
-            return "FP_AMBIGUOUS_RIVAL"
-        if diff == "small" and fam.get("logo", 0) < 0.4:
-            return "FN_SMALL_LOGO"
-        if diff == "blur":
-            return "FN_BLUR"
-        if not fam:  # nothing fired for the winner
-            return "FP_WRONG_CANDIDATE"
-        if gt and winner and fam and set(winner).union({gt}):
-            return "FP_WRONG_CANDIDATE"
-        return "FP_WRONG_CANDIDATE"
+    # A row whose winner equals ground truth is not a failure, whatever the
+    # verdict said about confidence. An `ambiguous` verdict with the right
+    # winner is an under-confident success, not a false positive.
+    if winner == gt:
+        return "OK"
 
-    # correct winner but covered-with-ambiguity or near-miss is still a flag
-    if verdict == "ambiguous" and winner == gt:
-        return "FP_CORRELATED_EVIDENCE" if pred.get("margin", 0) < 0.1 else "FP_TEMPORAL"
-
-    return "OK"
+    if winner is None or not pred.get("visible"):
+        return "FP_UNKNOWN_BRAND"
+    if verdict == "ambiguous":
+        return "FP_AMBIGUOUS_RIVAL"
+    if diff == "small" and fam.get("logo", 0) < 0.4:
+        return "FN_SMALL_LOGO"
+    if diff == "blur":
+        return "FN_BLUR"
+    return "FP_WRONG_CANDIDATE"
 
 
 def _families(pred: dict) -> Dict[str, Any]:

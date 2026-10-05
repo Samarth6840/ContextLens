@@ -26,7 +26,7 @@ creator video.
 import json
 import logging
 import os
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -324,8 +324,12 @@ class ProductResolutionMemory:
 
     def __init__(self, min_distinct_videos: int = MIN_DISTINCT_VIDEOS_FOR_PROMOTION):
         self.min_distinct_videos = min_distinct_videos
-        # key: normalize_text(product_span) -> {brand, videos:{video_id}, sightings}
-        self._assoc: Dict[str, Dict[str, Any]] = {}
+        # key: (normalize_text(product_span), BRAND) -> {videos:{id}, sightings}.
+        # Keyed by the PAIR, not the product alone: a product genuinely maps to
+        # different brands on different videos, and crediting every observation
+        # to whichever brand was seen first handed that brand the other brand's
+        # distinct-video count.
+        self._assoc: Dict[Tuple[str, str], Dict[str, Any]] = {}
 
     # ------------------------------------------------------------------ #
     # Observation / learning
@@ -337,15 +341,11 @@ class ProductResolutionMemory:
         brand = (brand or "").strip().upper()
         if not key or not brand:
             return
-        ent = self._assoc.get(key)
+        ent = self._assoc.get((key, brand))
         if ent is None:
             ent = {"product": key, "brand": brand,
                    "videos": set(), "sightings": 0}
-            self._assoc[key] = ent
-        if ent["brand"] != brand:
-            # A product maps to conflicting brands across videos — keep both but
-            # do not merge. Resolve toward the most frequently observed brand.
-            pass
+            self._assoc[(key, brand)] = ent
         ent["sightings"] += 1
         if video_id:
             ent["videos"].add(video_id)
@@ -357,19 +357,22 @@ class ProductResolutionMemory:
         """Return a promoted association for `product_span`, else None.
 
         Promotion requires observation across >= min_distinct_videos DISTINCT
-        videos. If a product maps to multiple brands, the most-co-occurring brand
-        wins; ties fall back to most recent (highest sightings).
+        videos. Each (product, brand) pair is tracked and gated separately; if a
+        product maps to multiple brands, the best-supported one wins (most
+        distinct videos, then most sightings).
         """
         from src.brand_catalog import normalize_text
         key = normalize_text(product_span)
         if not key:
             return None
-        ent = self._assoc.get(key)
-        if not ent:
+        promoted = [
+            e for (p, _b), e in self._assoc.items()
+            if p == key and len(e["videos"]) >= self.min_distinct_videos
+        ]
+        if not promoted:
             return None
-        distinct = len(ent["videos"]) if ent["videos"] else 0
-        if distinct < self.min_distinct_videos:
-            return None
+        ent = max(promoted, key=lambda e: (len(e["videos"]), e["sightings"]))
+        distinct = len(ent["videos"])
         return {
             "product": key,
             "brand": ent["brand"],
@@ -399,9 +402,9 @@ class ProductResolutionMemory:
         mem = cls(min_distinct_videos=int(
             data.get("min_distinct_videos", MIN_DISTINCT_VIDEOS_FOR_PROMOTION)))
         for a in data.get("assoc", []):
-            key = a["product"]
+            key = (a["product"], a["brand"])
             mem._assoc[key] = {
-                "product": key, "brand": a["brand"],
+                "product": a["product"], "brand": a["brand"],
                 "videos": set(a.get("videos", [])),
                 "sightings": int(a.get("sightings", 0)),
             }

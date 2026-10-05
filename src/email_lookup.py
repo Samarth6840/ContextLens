@@ -225,15 +225,19 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
             continue
         break
     if resp is None:
-        result = {
-            "status": "error",
-            "reason": f"Gemini request failed: {last_exc}",
-            "emails": [],
-        }
-        _EMAIL_CACHE[key] = result
-        return result
+        # Transient (timeout/connection). Not cached: caching it makes a brand
+        # permanently email-less for the life of the process after one network
+        # blip, which is indistinguishable from a real "this brand has none".
+        return {"status": "error", "reason": f"Gemini request failed: {last_exc}",
+                "emails": [], "transient": True}
     if resp.status_code != 200:
         result = {"status": "error", "reason": f"Gemini HTTP {resp.status_code}", "emails": []}
+        # 429 and 5xx are the server's problem, not the brand's — retry later
+        # rather than memoising the failure. 4xx is a real config/permission
+        # error and stays cached.
+        if resp.status_code == 429 or resp.status_code >= 500:
+            result["transient"] = True
+            return result
         _EMAIL_CACHE[key] = result
         return result
     try:
@@ -262,7 +266,8 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
             "evidence": [{"url": u} for u in sorted(evidence_urls)[:8]],
         }
     except Exception as exc:  # noqa: BLE001 — fail closed, never raise
-        result = {"status": "error", "reason": str(exc)[:200], "emails": []}
+        result = {"status": "error", "reason": str(exc)[:200], "emails": [],
+                  "transient": True}
     _EMAIL_CACHE[key] = result
     return result
 

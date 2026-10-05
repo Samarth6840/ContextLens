@@ -207,6 +207,15 @@ TIER_LEARNED = 4
 
 # Tier-3 sub-states: corroborated vs unsupported by other evidence.
 TIER_QWEN_CORROBORATED = "qwen_corroborated"
+
+
+class LookupUnavailable(RuntimeError):
+    """A live lookup failed for a TRANSIENT reason (network, HTTP, timeout).
+
+    Callers must fail closed for this video but must NOT persist a negative
+    cache entry: the product may well resolve on the next run, and a cached
+    "no manufacturer" is indistinguishable from a real one afterwards.
+    """
 TIER_QWEN_UNSUPPORTED = "qwen_unsupported"
 
 # Quality weights per tier (mirrors resolution_quality conventions).
@@ -303,7 +312,10 @@ class WikidataProductLookup:
     def _query_wikidata(self, product: str) -> Optional[str]:
         """Live SPARQL query; returns a manufacturer string or None.
 
-        Network failures fail-closed (return None) rather than raising.
+        Returns None only for a GENUINE empty answer. A transport failure
+        raises LookupUnavailable, because "the network broke" and "Wikidata has
+        no manufacturer for this" must not be cached as the same permanent
+        negative.
         """
         if self._http_get is not None:
             # Test injection — raw response dict.
@@ -320,9 +332,9 @@ class WikidataProductLookup:
                                  headers={"Accept": "application/sparql-results+json"})
                 r.raise_for_status()
                 data = r.json()
-            except Exception as e:  # network / parse — fail closed
+            except Exception as e:  # network / parse — transient, do NOT cache
                 logger.warning("Wikidata query failed for %r: %s", product, e)
-                return None
+                raise LookupUnavailable(str(e)) from e
 
         # Parse W3C SPARQL JSON results → bindings.
         try:
@@ -373,10 +385,18 @@ class WikidataProductLookup:
                 time.sleep(wait)
             self._last_query_time = time.monotonic()
 
-            manufacturer = self._query_wikidata(key)
+            try:
+                manufacturer = self._query_wikidata(key)
+            except LookupUnavailable as exc:
+                # Transient: fail closed for this call, cache nothing.
+                self._misses += 1
+                logger.info("Wikidata unavailable, not caching a negative for %r: %s",
+                            key, exc)
+                return None
             self._misses += 1
             if not manufacturer:
-                # Negative cache so we don't re-query junk repeatedly.
+                # Genuine empty answer -> negative cache so we don't re-query
+                # junk on every video.
                 self._cache[key] = {"product": key, "brand": None,
                                     "source": "wikidata", "tier": TIER_WIKIDATA,
                                     "timestamp": now, "wikidata_manufacturer": None,

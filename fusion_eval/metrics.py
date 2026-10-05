@@ -25,27 +25,41 @@ def compute_metrics(preds: List[dict]) -> Dict[str, float]:
 
     Each row: {video_id, gt_brand, visible, winner, prob, verdict,
                top3(list), latency_layer1, difficulty}
+
+    Rows whose verdict is in ABSTAIN_VERDICTS are scored as having no answer,
+    regardless of the `winner` the fusion layer reports for them.
     """
     n = len(preds)
     out: Dict[str, float] = {}
 
-    covered = [p for p in preds if p["verdict"] in COVERED_VERDICTS]
-    accepted = [p for p in preds if p["verdict"] == "confident"]
-    positives = [p for p in preds if p.get("visible")]
-    negatives = [p for p in preds if not p.get("visible")]
+    # A declined row has NO answer. fuse_candidates() still returns its top
+    # candidate as `winner` for `low_support`, so scoring rows as-is made a
+    # correct decline on a negative count as a wrong answer — the system was
+    # penalised for the behaviour we asked of it. Strip the winner on abstained
+    # rows so a decline is credited on a negative (gt None) and still scores as
+    # a miss on a positive (gt a real brand).
+    rows = [
+        {**p, "winner": None} if p.get("verdict") in ABSTAIN_VERDICTS else p
+        for p in preds
+    ]
 
-    def hits(rows):
-        return sum(1 for r in rows if r.get("winner") == r.get("gt_brand"))
+    covered = [p for p in rows if p["verdict"] in COVERED_VERDICTS]
+    accepted = [p for p in rows if p["verdict"] == "confident"]
+    positives = [p for p in rows if p.get("visible")]
+    negatives = [p for p in rows if not p.get("visible")]
 
-    acc_all = hits(preds) / n if n else 0.0                    # abstains counted wrong
+    def hits(group):
+        return sum(1 for r in group if r.get("winner") == r.get("gt_brand"))
+
+    acc_all = hits(rows) / n if n else 0.0
     acc_covered = hits(covered) / len(covered) if covered else 0.0
     acc_top3_covered = (
-        sum(1 for r in covered if r.get("gt_brand") in r.get("top3") or [])
+        sum(1 for r in covered if r.get("gt_brand") in (r.get("top3") or []))
         / len(covered) if covered else 0.0
     )
 
-    tp = sum(1 for r in accepted if r["winner"] == r["gt_brand"])
-    fp = sum(1 for r in accepted if r["winner"] != r["gt_brand"])
+    tp = sum(1 for r in accepted if r.get("winner") == r.get("gt_brand"))
+    fp = sum(1 for r in accepted if r.get("winner") != r.get("gt_brand"))
 
     prec = tp / (tp + fp) if (tp + fp) else 0.0
     # every positive is either a TP or an FN, so len(positives) == tp + fn
@@ -55,15 +69,15 @@ def compute_metrics(preds: List[dict]) -> Dict[str, float]:
     fp_claims = sum(1 for r in accepted if r.get("visible") is False)
     fpr = fp_claims / len(negatives) if negatives else 0.0     # negative entries wrongly accepted
 
-    abst = sum(1 for p in preds if p["verdict"] in ABSTAIN_VERDICTS) / n if n else 0.0
-    amb = sum(1 for p in preds if p["verdict"] == "ambiguous") / n if n else 0.0
+    abst = sum(1 for p in rows if p["verdict"] in ABSTAIN_VERDICTS) / n if n else 0.0
+    amb = sum(1 for p in rows if p["verdict"] == "ambiguous") / n if n else 0.0
 
     _, ece, brier = reliability_curve(
         [r["prob"] for r in covered], [r["winner"] == r["gt_brand"] for r in covered]
     )
 
-    lat = [r.get("latency_layer1") or 0.0 for r in preds]
-    mem = [r.get("gpu_mem_mb") or 0.0 for r in preds]
+    lat = [r.get("latency_layer1") or 0.0 for r in rows]
+    mem = [r.get("gpu_mem_mb") or 0.0 for r in rows]
 
     out.update({
         "n": float(n),
