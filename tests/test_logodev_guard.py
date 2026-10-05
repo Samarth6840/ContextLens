@@ -205,3 +205,40 @@ def test_outreach_generate_uses_personalized_path_when_result_present():
         server.OUTREACH_ENABLED = original
         server.JOBS.pop("TESTJOB-PERS", None)
         _clear_validate_cache()
+
+
+# ============================================================================
+# Item 21 — fuzzy search results must be the SAME brand, not a prefix
+# ============================================================================
+
+class TestResultMatchesQueryRequiresIdentity:
+    """`verified` gates outreach drafts, so a false positive writes to the
+    wrong company. A `startswith` comparison accepted any company whose name
+    began with the query."""
+
+    @staticmethod
+    def _m(query, name, domain=""):
+        from src.logodev import LogoDevClient
+        return LogoDevClient._result_matches_query(query, {"name": name,
+                                                           "domain": domain})
+
+    def test_rejects_different_brand_sharing_a_prefix(self):
+        assert self._m("TEST", "Testbook", "testbook.com") is False
+        assert self._m("Book", "Facebook", "facebook.com") is False
+        assert self._m("AMAZ", "Amazonia", "amazonia.com") is False
+
+    def test_accepts_real_brand_behind_a_corporate_suffix(self):
+        assert self._m("LG", "LG Electronics", "lg.com") is True
+        assert self._m("Sony", "Sony Corporation", "sony.com") is True
+        assert self._m("Apple", "Apple Inc.", "apple.com") is True
+
+    def test_exact_and_hyphenated_names_still_match(self):
+        assert self._m("Nike", "Nike", "nike.com") is True
+        assert self._m("Coca-Cola", "Coca-Cola", "coca-cola.com") is True
+        assert self._m("Sony", "Sony", "") is True
+
+    def test_query_side_suffix_is_also_ignored(self):
+        assert self._m("Samsung Electronics", "Samsung", "samsung.com") is True
+
+    def test_empty_query_never_matches(self):
+        assert self._m("", "Anything", "anything.com") is False

@@ -453,3 +453,64 @@ class TestTransliterationMapIsReachable:
                 f"{hindi!r} romanized to {romanize_devanagari(hindi)!r} -> {got!r}, "
                 f"expected to contain {expected!r}"
             )
+
+
+class TestItem15WikidataQuery:
+    """The old query forced a scan of every rdfs:label in every language and
+    the endpoint timed out. It also compared against normalize_text() output,
+    which turns hyphens into spaces, so WH-1000XM5 could never equal its own
+    label even when the query did return."""
+
+    def test_uses_the_search_index_not_a_label_scan(self):
+        from src.layer2.product_resolver import _SPARQL_TEMPLATE
+        q = _SPARQL_TEMPLATE.format(search="Mac Mini")
+        assert "rdfs:label ?productLabel" not in q
+        assert "EntitySearch" in q and "wikibase:mwapi" in q
+
+    def test_hyphenated_model_number_reaches_the_query_intact(self):
+        from src.layer2.product_resolver import WikidataProductLookup
+        seen = {}
+
+        def spy(url, params, timeout):
+            seen["q"] = params["query"]
+            return {"results": {"bindings": [{"makerLabel": {"value": "Sony"}}]}}
+
+        wd = WikidataProductLookup(cache_path=None, http_get=spy)
+        res = wd.lookup("WH-1000XM5")
+        assert 'mwapi:search "WH-1000XM5"' in seen["q"]
+        assert res is not None and res["brand"] == "SONY"
+
+    def test_search_term_cannot_break_out_of_the_string_literal(self):
+        from src.layer2.product_resolver import _SPARQL_TEMPLATE, _sparql_escape
+        q = _SPARQL_TEMPLATE.format(search=_sparql_escape(
+            'evil" } . ?x wdt:P176 ?y . SERVICE x {'))
+        assert q.count('mwapi:search "') == 1
+
+
+class TestItem16LeadingArticle:
+    """A sentence-initial article is not part of the product name. "The Mac
+    Mini 55,000" yielded the span "The Mac Mini", whose normalized form
+    "THE MAC MINI" matches no label, so the single most valuable span — a real
+    product next to a price — never resolved."""
+
+    def test_leading_article_is_stripped(self):
+        from src.layer2.product_resolver import ProductNameExtractor
+        e = ProductNameExtractor()
+        def first(t):
+            r = e.extract(t)
+            return r[0]["normalized"] if r else None
+        assert first("The Mac Mini 55,000") == "MAC MINI"
+        assert first("A Galaxy S24 Ultra") == "GALAXY S24 ULTRA"
+        assert first("The new OnePlus 12") == "ONEPLUS 12"
+
+    def test_article_free_text_is_unchanged(self):
+        from src.layer2.product_resolver import ProductNameExtractor
+        e = ProductNameExtractor()
+        r = e.extract("Mac Mini 55,000")
+        assert r and r[0]["normalized"] == "MAC MINI"
+
+    def test_bare_article_yields_nothing(self):
+        from src.layer2.product_resolver import ProductNameExtractor
+        e = ProductNameExtractor()
+        assert e.extract("The") == []
+        assert e.extract("A 5") == []

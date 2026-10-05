@@ -396,17 +396,28 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
     def _identification_line(text: str) -> str:
         """Extract the compact ``BRAND: <name>`` line from model output.
 
-        Falls back to the first non-empty line (truncated) so verbose prose
-        never becomes a candidate name, but a well-formatted grounded answer
-        still produces a clean, deterministic candidate.
+        Returns "" when the model did not emit the requested format. The
+        previous fallback returned the first line of whatever came back, which
+        is prose in practice: "The image appears to show a television screen
+        displaying an advertisement for..." became a ReverseImageResult title
+        and then scored as a brand. Its own docstring claimed verbose prose
+        "never becomes a candidate name", which was the opposite of what the
+        code did.
+
+        The description is not lost — it is still surfaced as a
+        ``gemini_grounded_desc`` result for a human to read. Degrading to no
+        brand claim is the correct failure mode here: this class exists to stop
+        unverified names reaching outreach, and an unparseable answer is
+        precisely the case that must not be guessed at.
         """
         if not text:
             return ""
-        match = re.search(r"\bBRAND\s*:\s*([^\n.]+)", text, re.IGNORECASE)
+        # \n-delimited, not "."-delimited: truncating on the first period turned
+        # "BRAND: Dr. Pepper" into "Dr".
+        match = re.search(r"\bBRAND\s*:[ \t]*([^\n]+)", text, re.IGNORECASE)
         if match:
-            return match.group(1).strip()[:120]
-        joined = re.sub(r"\s+", " ", text).strip()
-        return joined[:120]
+            return match.group(1).strip().rstrip(".").strip()[:120]
+        return ""
 
 
 class BrowserGroundedSearchBackend(ReverseImageSearchBackend):

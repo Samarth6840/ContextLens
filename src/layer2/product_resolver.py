@@ -251,22 +251,40 @@ _DEFAULT_WIKIDATA_ENDPOINT = "https://query.wikidata.org/sparql"
 # SPARQL: find an item whose English label matches the product name and return
 # its manufacturer (P176) / brand (P1716) / owner (P127) / developer (P178).
 # Labels can vary; we take any entity whose label equals the query.
+# Resolves a product name to its manufacturer.
+#
+# The previous query was `?item rdfs:label ?productLabel . FILTER(LCASE(...)=...)`,
+# which cannot use an index: it forces a scan of every label in every language
+# and the endpoint times out. EntitySearch goes through the MediaWiki search
+# index instead, so the label is located rather than enumerated, and only then
+# do we read the manufacturer properties for the QID it returned.
 _SPARQL_TEMPLATE = """
-SELECT DISTINCT ?item ?productLabel ?makerLabel ?maker WHERE {{
-  ?item rdfs:label ?productLabel .
-  FILTER(LCASE(?productLabel) = "{query_lc}")
-  OPTIONAL {{ ?item wdt:P176 ?maker . }}
-  OPTIONAL {{ ?item wdt:P1716 ?maker . }}
-  OPTIONAL {{ ?item wdt:P127 ?maker . }}
-  OPTIONAL {{ ?item wdt:P178 ?maker . }}
+SELECT DISTINCT ?makerLabel WHERE {{
+  SERVICE wikibase:mwapi {{
+    bd:serviceParam wikibase:endpoint "www.wikidata.org" ;
+                    wikibase:api "EntitySearch" ;
+                    mwapi:search "{search}" ;
+                    mwapi:language "en" ;
+                    mwapi:limit "5" .
+    ?item wikibase:apiOutputItem mwapi:item .
+  }}
+  VALUES ?makerProp {{ wdt:P176 wdt:P1716 }}
+  ?item ?makerProp ?maker .
   ?maker rdfs:label ?makerLabel .
   FILTER(LANG(?makerLabel) = "en")
-  SERVICE wikibase:label {{
-    bd:serviceParam wikibase:language "en" .
-  }}
 }}
-LIMIT 5
 """.strip()
+
+
+def _sparql_escape(text: str) -> str:
+    """Make arbitrary product text safe to embed in a SPARQL string literal.
+
+    The search term now comes from raw OCR/ASR text rather than the
+    normalization pass, so it can contain quotes and newlines.
+    """
+    s = str(text or "")
+    s = s.replace("\\", "\\\\").replace('"', '\\"')
+    return "".join(ch for ch in s if ch == " " or ch.isprintable()).strip()
 
 
 class WikidataProductLookup:
@@ -326,20 +344,24 @@ class WikidataProductLookup:
     def _query_wikidata(self, product: str) -> Optional[str]:
         """Live SPARQL query; returns a manufacturer string or None.
 
+        `product` is the RAW product text, not the normalized key.
+        normalize_text() turns punctuation into spaces, so "WH-1000XM5" became
+        "WH 1000XM5" and could never equal its own Wikidata label. EntitySearch
+        matches against real labels, so it needs the original spelling.
+
         Returns None only for a GENUINE empty answer. A transport failure
         raises LookupUnavailable, because "the network broke" and "Wikidata has
         no manufacturer for this" must not be cached as the same permanent
         negative.
         """
+        query = _SPARQL_TEMPLATE.format(search=_sparql_escape(product))
         if self._http_get is not None:
             # Test injection — raw response dict.
-            params = {"query": _SPARQL_TEMPLATE.format(query_lc=product.lower()),
-                      "format": "json"}
+            params = {"query": query, "format": "json"}
             data = self._http_get(self.endpoint, params=params, timeout=self.timeout_sec)
         else:
             import requests
-            params = {"query": _SPARQL_TEMPLATE.format(query_lc=product.lower()),
-                      "format": "json"}
+            params = {"query": query, "format": "json"}
             try:
                 r = requests.get(self.endpoint, params=params,
                                  timeout=self.timeout_sec,
@@ -400,7 +422,9 @@ class WikidataProductLookup:
             self._last_query_time = time.monotonic()
 
             try:
-                manufacturer = self._query_wikidata(key)
+                # Raw text, not `key`: normalization strips hyphens, so a
+                # model number like WH-1000XM5 would never match its label.
+                manufacturer = self._query_wikidata(product)
             except LookupUnavailable as exc:
                 # Transient: fail closed for this call, cache nothing.
                 self._misses += 1
@@ -532,6 +556,10 @@ class ProductNameExtractor:
             # grouped larger number ("Mac Mini 55,000") is a price, not part of
             # the product name — trim it. ("Pixel 9" has no comma, so it's kept.)
             span = _trim_trailing_price_digits(span, text, m.start(), m.end())
+            # A leading "The"/"A" belongs to the sentence, not the product.
+            # Done after the price trim so it also handles a span that is only
+            # a determiner plus digits.
+            span = _strip_leading_article(span)
             norm = normalize_text(span)
             if not norm:
                 continue
@@ -558,13 +586,34 @@ class ProductNameExtractor:
 _NOISE_RE = re.compile(r"^[A-Z0-9 ]{1,3}$")  # single letters / tiny tokens
 
 
+# Common non-product words. Used to drop a whole span that is just one of
+# these, and to strip them from the head of a longer span (a sentence-initial
+# "The"/"A" is not part of the product name).
+_NON_PRODUCT_LEADING_WORDS = frozenset({
+    "the", "a", "an", "this", "that", "these", "those", "new", "one", "with",
+    "for", "and", "pro", "max", "plus", "mini", "air", "of", "on", "at",
+})
+
+
+def _strip_leading_article(span: str) -> str:
+    """Drop sentence-initial determiners that are not part of the name.
+
+    "The Mac Mini 55,000" yielded the span "The Mac Mini", whose normalized
+    form "THE MAC MINI" matches no catalog or Wikidata label, so the one span
+    that mattered most (a real product next to a price) never resolved.
+    """
+    parts = span.split()
+    while parts and parts[0].lower() in _NON_PRODUCT_LEADING_WORDS:
+        parts.pop(0)
+    return " ".join(parts)
+
+
 def _looks_like_noise(norm: str) -> bool:
     if _NOISE_RE.match(norm):
         return True
     # A single lowercase-after-first token that is a common non-product word.
     lowered = norm.lower()
-    if lowered in {"the", "this", "that", "new", "one", "with", "for", "and",
-                   "pro", "max", "plus", "mini", "air", "of", "on", "at"}:
+    if lowered in _NON_PRODUCT_LEADING_WORDS:
         return True
     return False
 

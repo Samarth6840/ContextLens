@@ -314,9 +314,22 @@ def test_gemini_identification_line_parses_brand_format():
     assert GeminiGroundedBackend._identification_line(
         "It's a courier firm. BRAND: BestE"
     ) == "BestE"
-    assert GeminiGroundedBackend._identification_line("bestey express") == "bestey express"
+    # No BRAND: line means no brand claim. This used to return "bestey express"
+    # verbatim, i.e. an unparseable model reply became a ReverseImageResult
+    # title that then scored as a brand. The description is still surfaced
+    # separately as gemini_grounded_desc, so nothing is lost.
+    assert GeminiGroundedBackend._identification_line("bestey express") == ""
     assert GeminiGroundedBackend._identification_line("  ") == ""
     assert GeminiGroundedBackend._identification_line("BRAND:  FastShip  ") == "FastShip"
+    # A period inside the name must not truncate it.
+    assert GeminiGroundedBackend._identification_line("BRAND: Dr. Pepper") == "Dr. Pepper"
+
+
+def test_gemini_prose_response_never_becomes_a_brand_result():
+    """Item 20: verbose prose used to be returned as a brand candidate."""
+    prose = ("The image appears to show a television screen displaying an "
+             "advertisement for a well-known consumer electronics brand.")
+    assert GeminiGroundedBackend._identification_line(prose) == ""
 
 
 def test_gemini_tags_feed_candidate_name_deterministically(monkeypatch):

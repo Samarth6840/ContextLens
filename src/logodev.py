@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -222,28 +223,54 @@ class LogoDevClient:
         """Lowercase alphanumeric-only form: 'Coca-Cola' -> 'cocacola'."""
         return "".join(c for c in (s or "").lower() if c.isalnum())
 
-    @staticmethod
-    def _result_matches_query(query: str, result: dict) -> bool:
+    # Trailing words that are legal-entity or descriptive noise, not part of a
+    # brand's identity. Stripped from BOTH the query and the result name before
+    # comparing, so "Sony" matches "Sony Corporation" and "LG" matches
+    # "LG Electronics" without also letting "TEST" match "Testbook".
+    _CORPORATE_SUFFIXES = frozenset({
+        "inc", "ltd", "llc", "lc", "plc", "corp", "corporation", "co",
+        "company", "gmbh", "sa", "sas", "ag", "nv", "bv", "ab", "as", "oy",
+        "electronics", "technology", "technologies", "tech", "group",
+        "holding", "holdings", "international", "intl", "global",
+        "worldwide", "brand", "brands", "the",
+    })
+
+    @classmethod
+    def _strip_corporate_suffix(cls, name: str) -> str:
+        """Normalized form of a brand name with trailing entity words removed.
+
+        Splits on whitespace first, because _norm() erases word boundaries and
+        would turn "LG Electronics" into the unmatchable "lelectronics".
+        """
+        toks = [t.strip(".,") for t in re.split(r"[\s,]+", (name or "").lower())]
+        toks = [t for t in toks if t]
+        while len(toks) > 1 and toks[-1] in cls._CORPORATE_SUFFIXES:
+            toks.pop()
+        return "".join(c for c in "".join(toks) if c.isalnum())
+
+    @classmethod
+    def _result_matches_query(cls, query: str, result: dict) -> bool:
         """True when the fuzzy search result really corresponds to the query.
 
         logo.dev search is fuzzy, so an arbitrary query (even a non-brand string)
         usually returns *something*. A result only counts as a verification when
-        its name or domain actually matches the queried brand, otherwise a garden
+        its name or domain is the SAME brand as the query, otherwise a garden
         rake can be "verified" as a brand.
+
+        Equality is required, not a prefix: `startswith` accepted any company
+        beginning with the query, so "TEST" verified as Testbook and "BOOK"
+        as Facebook. `verified` gates outreach drafts, so a false positive here
+        means writing to the wrong company.
         """
-        q = LogoDevClient._norm(query)
+        q = cls._norm(query)
         if not q:
             return False
-        name = LogoDevClient._norm(result.get("name"))
-        domain_label = LogoDevClient._norm((result.get("domain") or "").split(".")[0])
-        # Exact equality on either field, or a prefix relationship that is
-        # meaningful (>= 3 chars) so short brands ("LG" -> "LG Electronics",
-        # leading to domain "lg.com") still match without matching "a"/"co".
-        if q == name or q == domain_label:
-            return True
-        if len(q) >= 3:
-            return name.startswith(q) or domain_label.startswith(q)
-        return False
+        # Compare against both the raw query and the suffix-stripped query, so
+        # "Samsung Electronics" still matches an entry named just "Samsung".
+        q_or_stripped = {q, cls._strip_corporate_suffix(query)}
+        name = cls._strip_corporate_suffix(result.get("name"))
+        domain_label = cls._norm((result.get("domain") or "").split(".")[0])
+        return bool(q_or_stripped & {name, domain_label})
 
     def validate_brand(self, brand: str) -> Dict[str, Any]:
         """
