@@ -55,6 +55,8 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import os
+import shutil
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -278,8 +280,12 @@ class Store:
         # correct - the UI looked fine and the file was silently wrong. Any
         # consumer counting lines or keys then disagrees with what was reviewed.
         self.rows[row["file"]] = row
-        self.path.write_text(
-            "".join(json.dumps(r) + "\n" for r in self.rows.values()))
+        payload = "".join(json.dumps(r) + "\n" for r in self.rows.values())
+        # Atomic replace: a crash mid-write on the real file truncates the whole
+        # ground-truth set. Write a sibling, then rename over it.
+        tmp = self.path.parent / (self.path.name + ".tmp")
+        tmp.write_text(payload)
+        os.replace(tmp, self.path)
 
     def labelled(self) -> set[str]:
         """Frames with a real verdict. SKIP is deliberately excluded.
@@ -400,7 +406,13 @@ def serve(args: argparse.Namespace, files: list[Path],
                 return self._send(400, b"bad verdict", "text/plain")
             row["human_drawn"] = any(b.get("src") == "human" for b in row["boxes"])
             store.put(row)
-            deferred.discard(row["file"])
+            # A SKIP stays in the queue (labelled() excludes it), so leaving it out
+            # of `deferred` makes next_frame hand the same frame straight back and
+            # the reviewer can never advance. Defer it to the back of the queue.
+            if row["verdict"] == "skip":
+                deferred.add(row["file"])
+            else:
+                deferred.discard(row["file"])
             mix: dict[str, int] = defaultdict(int)
             for r in store.rows.values():
                 if r["verdict"] != "skip":
@@ -440,6 +452,53 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
     if not rows:
         sys.exit("FATAL: nothing to export (no frames labelled non-skip yet)")
 
+    # ---- pin the training resolution BEFORE the gate: a small box's severity
+    # depends on imgsz (0.5% of frame = 3.2 px/side @640, but 4.8 px @960), so
+    # the gate must be evaluated against the actual checkpoint, not a fixed 640.
+    # est_px_per_pct = px of one box side per 1% of frame area-side; for a
+    # square-ish mark, side_px at imgsz = sqrt(area_frac) * imgsz.
+    est_px_per_pct = args.imgsz / 100.0
+
+    # ---- pre-export telemetry: hard gate, NOT a report line -----------------
+    # The previous version wrote every metric into report.json AFTER the
+    # export, so a dataset dominated by sub-1% boxes shipped fine and the
+    # pathology only surfaced later as the recall cliff nobody could explain.
+    # Compute everything first, refuse to write, name the threshold crossed.
+    pre_areas: list[float] = []
+    pre_dims: dict[str, tuple] = {}
+    for r in rows:
+        f = next((x for x in files if x.name == r["file"]), None)
+        if f is None or not f.is_file():
+            continue
+        im = cv2.imread(str(f))
+        if im is None:
+            print(f"  WARN unreadable frame {r['file']}; excluded from gate")
+        else:
+            pre_dims[r["file"]] = (im.shape[1], im.shape[0])
+            for b in r["boxes"]:
+                if b["w"] >= 1 and b["h"] >= 1:
+                    pre_areas.append(
+                        b["w"] * b["h"] / (im.shape[1] * im.shape[0]))
+    small = [a for a in pre_areas if a < 0.01]
+    frac_small = (float(len(small)) / len(pre_areas)) if pre_areas else 0.0
+    tiny = sorted(a for a in pre_areas if a > 0)
+    # est_px is side-length, not sqrt(area): a logo is judged by what the
+    # backbone actually sees per axis on a square-ish mark.
+    est_px = sorted(round(a ** 0.5 * args.imgsz, 1)
+                    for a in tiny[:10])
+    GATE_FRAC = 0.25
+    if len(pre_areas) and frac_small > GATE_FRAC:
+        sys.exit(
+            f"FATAL: {frac_small:.0%} of logo boxes are under 1% of frame area "
+            f"(gate {GATE_FRAC:.0%}). At imgsz={args.imgsz} that is ~"
+            f"{est_px_per_pct:.1f} px per 1%-side; the smallest boxes sit at "
+            f"{est_px[:3]} px/side, below the P3 stride-equals-box floor where "
+            f"YOLO regression gradients collapse.\n"
+            f"Fix: (a) crop-and-zoom the native frame so the logo lands >=1% "
+            f"of the export, or (b) relabel at a larger source resolution. "
+            f"Do NOT lower the gate to ship a set you already know is "
+            f"sub-pyramid.")
+
     videos = sorted({r["video"] for r in rows})
     order = split_order(len(videos))
     vid_split = {v: order[i % len(order)] for i, v in enumerate(videos)}
@@ -455,7 +514,10 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
         if f is None or not f.is_file():
             print(f"  WARN missing frame, skipped: {r['file']}")
             continue
-        cv2.imwrite(str(d / r["file"]), cv2.imread(str(f)))
+        # Copy the reviewed bytes verbatim. Re-encoding via cv2.imwrite changes
+        # the pixels of a human-labelled negative, so the exported frame is no
+        # longer the frame that was judged.
+        shutil.copy2(f, d / r["file"])
         if not r["boxes"]:
             (dl / f"{Path(r['file']).stem}.txt").write_text("")
             logo_free.append({"file": r["file"], "video": r["video"], "split": sp})
