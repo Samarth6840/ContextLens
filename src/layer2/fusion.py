@@ -149,6 +149,12 @@ class CrossAttentionFusion(nn.Module):
         self.audio_proj = nn.Linear(audio_dim, hidden_dim)
         self.video_proj = nn.Linear(video_dim, hidden_dim)
 
+        # The modality weight is injected as an explicit per-token feature and
+        # projected back into the token (see forward). A plain scalar multiply is
+        # erased by the encoder's per-token LayerNorm, which is why the gating
+        # signal previously had almost no effect on the fused representation.
+        self.weight_feat_proj = nn.Linear(hidden_dim + 2, hidden_dim)
+
         # Learnable [CLS] token for aggregation
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_dim) * 0.02)
 
@@ -192,11 +198,19 @@ class CrossAttentionFusion(nn.Module):
         audio_h = self.audio_proj(audio_embed)  # (batch, hidden_dim)
         video_h = self.video_proj(video_embed)  # (batch, hidden_dim)
 
-        # Apply modality weights — broadcast (batch,) to (batch, hidden_dim)
-        audio_w = audio_weight if isinstance(audio_weight, torch.Tensor) else audio_weight
-        video_w = video_weight if isinstance(video_weight, torch.Tensor) else video_weight
-        audio_h = audio_h * audio_w.unsqueeze(-1) if isinstance(audio_w, torch.Tensor) else audio_h * audio_w
-        video_h = video_h * video_w.unsqueeze(-1) if isinstance(video_w, torch.Tensor) else video_h * video_w
+        # Modality weights as explicit (batch, 1) features. Concatenated and
+        # projected, they survive the post-LN encoder; a scalar multiply would
+        # not. Each token carries both its own and the complementary weight.
+        aw = (audio_weight if isinstance(audio_weight, torch.Tensor)
+              else torch.full((batch_size,), float(audio_weight),
+                              device=audio_embed.device)).reshape(-1, 1)
+        vw = (video_weight if isinstance(video_weight, torch.Tensor)
+              else torch.full((batch_size,), float(video_weight),
+                              device=audio_embed.device)).reshape(-1, 1)
+        aw = aw.to(dtype=audio_h.dtype)
+        vw = vw.to(dtype=audio_h.dtype)
+        audio_h = self.weight_feat_proj(torch.cat([audio_h, aw, vw], dim=-1))
+        video_h = self.weight_feat_proj(torch.cat([video_h, vw, aw], dim=-1))
 
         # Stack as sequence: [audio_token, video_token]
         # Shape: (batch, seq_len=2, hidden_dim)
@@ -241,6 +255,11 @@ class QualityAwareFusion(nn.Module):
     ):
         super().__init__()
         self.use_learned_gating = use_learned_gating
+        # The sanity check below exists only to protect an UNTRAINED, random gate
+        # from emitting garbage. Once the gate has been trained it must be allowed
+        # to differ from the heuristic, or the "learned vs heuristic" ablation is
+        # vacuous. The trainer flips this to True.
+        self.gating_trained = False
 
         # Learned gating network
         self.gating_network = LearnedGatingNetwork(
@@ -333,7 +352,18 @@ class QualityAwareFusion(nn.Module):
                     invalid = disagree | magnitude_off
                     n_invalid = int(invalid.sum().cpu())
 
-                    if n_invalid > 0:
+                    if n_invalid > 0 and self.gating_trained:
+                        # Trained gate: the deviation is the signal under study,
+                        # not an error. Log it, do not override it.
+                        weight_source = "learned_gating"
+                        logger.info(
+                            "Gating sanity check: %d/%d trained-gate samples "
+                            "deviate from quality-proportional weights "
+                            "(direction=%d, magnitude=%d) — log-only.",
+                            n_invalid, batch_size,
+                            int(disagree.sum().cpu()), int((magnitude_off & ~disagree).sum().cpu()),
+                        )
+                    elif n_invalid > 0:
                         fallback_aw = prop_aw_clamped
                         fallback_vw = prop_vw_clamped
                         audio_weight = torch.where(invalid, fallback_aw, audio_weight)

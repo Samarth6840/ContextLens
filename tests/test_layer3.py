@@ -249,9 +249,12 @@ def test_affinity_model_modulates_ranking_when_fitted():
 
     aff = CreatorBrandAffinityModel(embed_dim=16, n_layers=2, lr=1e-2)
     # The creator has strong history with ADIDAS and PUMA.
+    # A second creator with a disjoint brand gives the BPR sampler real
+    # negatives; with a single creator every indexed brand is a positive, so
+    # zero optimizer steps occur and fit() now (correctly) reports unfitted.
     aff.fit(
-        ["creator", "creator", "creator", "creator"],
-        ["ADIDAS", "PUMA", "NIKE", "NIKE"],
+        ["creator", "creator", "creator", "other"],
+        ["ADIDAS", "PUMA", "NIKE", "APPLE"],
         epochs=30,
         seed=3,
     )

@@ -5,9 +5,9 @@ Downloads real pretrained model weights — no stubs or placeholders.
 Models:
 - YOLOv8x: downloaded on first use by ultralytics (auto-download)
 - YOLO-World (yolov8s-worldv2.pt): logo-detection backend; downloaded via ultralytics
-- DINOv2: from HuggingFace transformers
-- PaddleOCR: downloaded on first use by PaddleOCR (auto-download)
-- Whisper medium: primary ASR model (mlx-whisper / faster-whisper / openai-whisper fallback chain)
+- DINOv3: from HuggingFace transformers (gated — run `huggingface-cli login`)
+- PaddleOCR: downloaded here for the configured language
+- Whisper (configured size): mlx-whisper primary + openai-whisper fallback
 - BEATs: requires manual download from Microsoft UNILM repository
 
 This script triggers the auto-downloads and verifies they work.
@@ -47,33 +47,77 @@ def download_yoloworld():
     return True
 
 
+def _config() -> dict:
+    """Load config/config.yaml so downloads match what the pipeline serves."""
+    import yaml
+    path = Path(__file__).resolve().parent.parent / "config" / "config.yaml"
+    return yaml.safe_load(path.read_text()) or {}
+
+
 def download_dinov2():
-    """Trigger DINOv2 model download from HuggingFace."""
-    logger.info("Downloading DINOv2 model from HuggingFace...")
-    from transformers import AutoImageProcessor, AutoModel
-    model_name = "facebook/dinov2-base"  # matches config.yaml
-    AutoImageProcessor.from_pretrained(model_name)
+    """Trigger the shipped visual backbone download (DINOv3, see config).
+
+    DINOv3 is gated on HuggingFace, so `huggingface-cli login` (or
+    HF_TOKEN) is required before this succeeds.
+    """
+    from transformers import AutoModel, DINOv3ViTImageProcessor
+    model_name = (
+        _config().get("layer1", {}).get("visual_embeddings", {})
+        .get("model", "facebook/dinov3-vitb16-pretrain-lvd1689m")
+    )
+    logger.info("Downloading DINOv3 model '%s' from HuggingFace...", model_name)
+    DINOv3ViTImageProcessor.from_pretrained(model_name)
     AutoModel.from_pretrained(model_name)
-    logger.info(f"DINOv2 model '{model_name}' downloaded successfully.")
+    logger.info("DINOv3 model '%s' downloaded successfully.", model_name)
     return True
 
 
 def download_whisper():
-    """Trigger Whisper model download (openai-whisper fallback)."""
-    logger.info("Downloading Whisper medium (openai-whisper fallback)...")
+    """Trigger Whisper download for the configured backend/fallbacks.
+
+    mlx-whisper is primary on Apple Silicon; openai-whisper is the final
+    fallback. Both are warmed so a runtime fallback is not a cold download.
+    """
+    model = _config().get("layer1", {}).get("speech_to_text", {}).get("model", "medium")
+    try:
+        import mlx_whisper.load_models  # type: ignore
+        logger.info("Downloading Whisper '%s' (mlx-whisper, primary on MPS)...", model)
+        mlx_whisper.load_models.load_model(model)
+    except Exception as exc:  # noqa: BLE001 — mlx is Darwin-only; fallbacks below
+        logger.info("mlx-whisper unavailable (%s); continuing with fallbacks.", exc)
+    logger.info("Downloading Whisper '%s' (openai-whisper fallback)...", model)
     import whisper
-    whisper.load_model("medium")
-    logger.info("Whisper medium downloaded successfully.")
+    whisper.load_model(model)
+    logger.info("Whisper '%s' downloaded successfully.", model)
     return True
 
 
 def download_paddleocr():
-    """Trigger PaddleOCR model download."""
-    logger.info("Downloading PaddleOCR models...")
+    """Trigger PaddleOCR model download for the configured language."""
+    lang = _config().get("layer1", {}).get("ocr", {}).get("lang", "hi")
+    logger.info("Downloading PaddleOCR models (lang=%s)...", lang)
     from paddleocr import PaddleOCR
-    PaddleOCR(use_angle_cls=True, lang="en")
-    logger.info("PaddleOCR models downloaded successfully.")
+    # PaddleOCR 3.x renamed use_angle_cls -> use_textline_orientation.
+    PaddleOCR(lang=lang, use_textline_orientation=True)
+    logger.info("PaddleOCR models (lang=%s) downloaded successfully.", lang)
     return True
+
+
+# Must match src/layer1/audio.py BEATS_TRUSTED_SHA256 — the sha256 (git-lfs oid)
+# of the pinned third-party artifact that audio.py will pickle-load. Kept as a
+# literal here so this standalone script does not have to import torch.
+BEATS_TRUSTED_SHA256 = (
+    "e5815275a04b6885e7b8af63d120b29bffae2cd2225cf4915e1ec6d819d3022c"
+)
+
+
+def _sha256(path: Path) -> str:
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def check_beats():
@@ -82,6 +126,8 @@ def check_beats():
     Preferred source is the HuggingFace mirror (microsoft's Azure links have a
     history of intermittent failures — see microsoft/unilm#1492). The file is
     written to the repo root where config/layer1/audio_events.checkpoint points.
+    The download is verified against the pinned sha256 so a tampered mirror
+    cannot seed a malicious pickle into the load path.
     """
     import urllib.request
 
@@ -92,13 +138,26 @@ def check_beats():
         "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
     )
     if destination.exists():
-        logger.info(f"Fine-tuned BEATs checkpoint found at {destination}")
-        return True
+        if _sha256(destination) == BEATS_TRUSTED_SHA256:
+            logger.info(f"Fine-tuned BEATs checkpoint verified at {destination}")
+            return True
+        logger.warning(
+            "BEATs checkpoint at %s fails sha256 verification — re-downloading",
+            destination,
+        )
+        destination.unlink()
     logger.warning("Fine-tuned BEATs checkpoint missing — downloading %s", source_url)
     try:
         urllib.request.urlretrieve(source_url, destination)
+        digest = _sha256(destination)
+        if digest != BEATS_TRUSTED_SHA256:
+            destination.unlink()
+            raise ValueError(
+                f"downloaded BEATs checkpoint sha256 mismatch (got {digest}); "
+                "deleted the untrusted file"
+            )
         logger.info(
-            "Downloaded fine-tuned BEATs checkpoint (%d bytes). "
+            "Downloaded and verified fine-tuned BEATs checkpoint (%d bytes). "
             "Feature-extractor fallback BEATs_iter3_plus_AS2M.pt, if present, "
             "remains valid for the degraded path.",
             destination.stat().st_size,

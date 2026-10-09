@@ -295,6 +295,10 @@ class WikidataProductLookup:
     it must never be hand-edited to "fix" a specific video.
     """
 
+    # A negative cache entry is a stale guess about the world, not a fact; let it
+    # expire rather than pin a product as manufacturer-less forever.
+    NEGATIVE_TTL_SEC = 7 * 24 * 3600
+
     def __init__(
         self,
         endpoint: str = _DEFAULT_WIKIDATA_ENDPOINT,
@@ -363,9 +367,14 @@ class WikidataProductLookup:
             import requests
             params = {"query": query, "format": "json"}
             try:
-                r = requests.get(self.endpoint, params=params,
-                                 timeout=self.timeout_sec,
-                                 headers={"Accept": "application/sparql-results+json"})
+                r = requests.get(
+                    self.endpoint, params=params, timeout=self.timeout_sec,
+                    headers={"Accept": "application/sparql-results+json",
+                             # WDQS throttles/blocks requests with the default
+                             # python-requests User-Agent.
+                             "User-Agent": "ContextLens/1.0 "
+                                           "(https://github.com/contextlens; "
+                                           "contact: ops@contextlens.ai)"})
                 r.raise_for_status()
                 data = r.json()
             except Exception as e:  # network / parse — transient, do NOT cache
@@ -409,17 +418,27 @@ class WikidataProductLookup:
         with self._lock:
             cached = self._cache.get(key)
             if cached is not None:
-                self._hits += 1
-                return dict(cached)
+                # Negative entries expire: a product that had no Wikidata
+                # manufacturer may gain one, and a permanent negative was only
+                # sane while the cache died with the process. Positives stay.
+                expired = bool(cached.get("negative")) and (
+                    time.time() - float(cached.get("timestamp") or 0.0)
+                ) > self.NEGATIVE_TTL_SEC
+                if not expired:
+                    self._hits += 1
+                    return dict(cached)
             if not live:
                 return None  # cache-only: never spend a live query
 
-            # Rate limit external queries.
-            now = time.monotonic()
-            wait = self._last_query_time + self.min_interval_sec - now
+            # Rate limit external queries (monotonic, in-process only).
+            mono = time.monotonic()
+            wait = self._last_query_time + self.min_interval_sec - mono
             if wait > 0:
                 time.sleep(wait)
             self._last_query_time = time.monotonic()
+            # `now` is persisted, so it must be real wall-clock time. A
+            # monotonic value is meaningless in another process.
+            now = time.time()
 
             try:
                 # Raw text, not `key`: normalization strips hyphens, so a
@@ -583,16 +602,24 @@ class ProductNameExtractor:
         return out
 
 
-_NOISE_RE = re.compile(r"^[A-Z0-9 ]{1,3}$")  # single letters / tiny tokens
+# Single-character tokens are the only reliable OCR/grammar noise floor.
+# The old {1,3} bound swallowed real model codes — "A18", "S24", "M07" are
+# products, not noise, and dropping them lost the whole span.
+_NOISE_RE = re.compile(r"^[A-Z0-9]$")
 
 
-# Common non-product words. Used to drop a whole span that is just one of
-# these, and to strip them from the head of a longer span (a sentence-initial
-# "The"/"A" is not part of the product name).
+# Common non-product words. Used ONLY to drop a whole span that is just one of
+# these ("max", "plus", ... alone is not a product name).
 _NON_PRODUCT_LEADING_WORDS = frozenset({
     "the", "a", "an", "this", "that", "these", "those", "new", "one", "with",
     "for", "and", "pro", "max", "plus", "mini", "air", "of", "on", "at",
 })
+
+# A leading word is stripped from a span only if it is a determiner. The
+# product-significant words above ("Pro", "Max", "Plus", "Air", ...) must NOT
+# be stripped: "Pro Display XDR" is not "Display XDR", and "AirPods" is not
+# "Pods". Stripping them silently renamed real products into non-matches.
+_ARTICLES = frozenset({"the", "a", "an", "this", "that", "these", "those", "new", "one"})
 
 
 def _strip_leading_article(span: str) -> str:
@@ -603,7 +630,7 @@ def _strip_leading_article(span: str) -> str:
     that mattered most (a real product next to a price) never resolved.
     """
     parts = span.split()
-    while parts and parts[0].lower() in _NON_PRODUCT_LEADING_WORDS:
+    while parts and parts[0].lower() in _ARTICLES:
         parts.pop(0)
     return " ".join(parts)
 
@@ -669,6 +696,7 @@ class ProductBrandResolver:
         corroboration_fn=None,
         min_plausibility: float = 0.5,
         extractor: Optional[ProductNameExtractor] = None,
+        qwen_max_calls: int = 0,
     ):
         self.wikidata = wikidata or WikidataProductLookup()
         self.learned_lookup = learned_lookup
@@ -677,6 +705,9 @@ class ProductBrandResolver:
         self.corroboration_fn = corroboration_fn
         self.min_plausibility = min_plausibility
         self.extractor = extractor or ProductNameExtractor()
+        # Per-video Qwen budget (0 = unlimited). Previously the count was only
+        # reported, never enforced, so a dense video could spend unbounded calls.
+        self.qwen_max_calls = qwen_max_calls
         self.tier_counts: Dict[str, int] = {}
         self.qwen_calls = 0
         self.low_confidence_candidates: List[dict] = []
@@ -776,8 +807,11 @@ class ProductBrandResolver:
                 self._low_confidence_candidate(norm, wd["wikidata_manufacturer"],
                                                TIER_WIKIDATA)
 
-        # Tier 3 — Qwen3-VL (low trust). Skipped entirely on cache-only paths.
-        if self.qwen and live:
+        # Tier 3 — Qwen3-VL (low trust). Skipped entirely on cache-only paths
+        # and once the per-video call budget is exhausted.
+        if self.qwen and live and not (
+            self.qwen_max_calls and self.qwen_calls >= self.qwen_max_calls
+        ):
             qres = self.qwen(norm, frame)
             self.qwen_calls += 1
             maker = (qres or {}).get("manufacturer")
@@ -785,6 +819,12 @@ class ProductBrandResolver:
                 brand = _to_catalog_brand(maker)
                 corrob = bool(self.corroboration_fn and
                               self.corroboration_fn(norm))
+                # A brand already resolved in this scene that the VLM also names
+                # as the manufacturer is independent corroboration. This is what
+                # `scene_brands` was threaded in for; it was previously unused.
+                scene = {(str(b) or "").strip().upper() for b in scene_brands or []}
+                if brand and brand.upper() in scene:
+                    corrob = True
                 if brand and corrob:
                     self._bump(TIER_QWEN_CORROBORATED)
                     return {

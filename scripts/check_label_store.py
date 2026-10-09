@@ -79,17 +79,23 @@ def check(path: Path) -> None:
     rows = [json.loads(l) for l in path.read_text().splitlines() if l.strip()]
     keys = [r["file"] for r in rows]
 
+    # raise, not assert: `python3 -O` strips asserts and turns this gate into a
+    # silent pass, which is the exact failure it exists to prevent.
     dupes = {k for k in keys if keys.count(k) > 1}
-    assert not dupes, f"duplicate frame keys: {sorted(dupes)}"
-    assert len(keys) == len(set(keys)), "line count != unique key count"
+    if dupes:
+        raise ValueError(f"duplicate frame keys: {sorted(dupes)}")
+    if len(keys) != len(set(keys)):
+        raise ValueError("line count != unique key count")
 
     empty_logo = [r["file"] for r in rows
                   if r["verdict"] == "logo" and not r["boxes"]]
-    assert not empty_logo, f"logo verdict with zero boxes: {empty_logo}"
+    if empty_logo:
+        raise ValueError(f"logo verdict with zero boxes: {empty_logo}")
 
     boxes_on_free = [r["file"] for r in rows
                      if r["verdict"] == "free" and r["boxes"]]
-    assert not boxes_on_free, f"free verdict carrying boxes: {boxes_on_free}"
+    if boxes_on_free:
+        raise ValueError(f"free verdict carrying boxes: {boxes_on_free}")
 
     judged = [r for r in rows if r["verdict"] != "skip"]
     free = sum(1 for r in judged if r["verdict"] == "free")

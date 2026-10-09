@@ -45,6 +45,20 @@ def dhash(gray: np.ndarray) -> str:
                    for b in (small[:, 1:] > small[:, :-1]).flatten())
 
 
+# A dHash bit or two flips under re-encoding/rescaling, so exact equality misses
+# near-duplicates. Hamming <= 6 is the standard near-duplicate cut for a 64-bit
+# dHash: close enough to catch a recompressed copy, far enough not to collide.
+DHASH_HAMMING_MAX = 6
+
+
+def hamming(a: str, b: str) -> int:
+    return bin(int(a, 2) ^ int(b, 2)).count("1")
+
+
+def is_blocked(h: str, block: set) -> bool:
+    return any(hamming(h, b) <= DHASH_HAMMING_MAX for b in block)
+
+
 def eval_hashes(eval_set: Path) -> set:
     """Every dHash in the benchmark, so no split can be leaked into training."""
     out = set()
@@ -106,7 +120,7 @@ def main() -> int:
             if arr is None:
                 continue
             hh, ww = arr.shape[:2]
-            if dhash(cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)) in block:
+            if is_blocked(dhash(cv2.cvtColor(arr, cv2.COLOR_BGR2GRAY)), block):
                 dropped_contam += 1
                 continue
             try:

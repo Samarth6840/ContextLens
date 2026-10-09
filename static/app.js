@@ -1,4 +1,4 @@
-/* ADSCENE — frontend app logic (vanilla JS, hash router) */
+/* ContextLens — frontend app logic (vanilla JS, hash router) */
 
 const $ = (sel, root) => (root || document).querySelector(sel);
 const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));

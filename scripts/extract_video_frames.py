@@ -16,6 +16,7 @@ nothing here has reviewed logo ground truth yet.
 import argparse
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -126,7 +127,10 @@ def spread(n: int, budget: int) -> list[int]:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--src", default="/var/folders/dj/8w9p_2v54hzdjz60kb2ylq280000gn/T/adscene_uploads")
+    ap.add_argument("--src",
+                    default=os.environ.get("CONTEXTLENS_UPLOADS_DIR"),
+                    help="directory of source .mp4 uploads "
+                         "(default: $CONTEXTLENS_UPLOADS_DIR)")
     ap.add_argument("--out", default="benchmark/eval_video")
     ap.add_argument("--stride-train", type=int, default=8)
     ap.add_argument("--stride-test", type=int, default=40)
@@ -196,7 +200,22 @@ def main() -> int:
         manifest.append(rec)
         print(f"  {key} -> {split:5s} {w}x{h} {n} frames, stride {stride}: {kept} written")
 
-    (out / "manifest.json").write_text(__import__("json").dumps(manifest, indent=2))
+    # Merge with the existing manifest instead of overwriting. Writing only the
+    # new videos drops every previously-recorded role, so refuse_known_videos
+    # can no longer protect them on the next run and one upload silently
+    # reassigns the split protocol.
+    man_path = out / "manifest.json"
+    existing: list = []
+    if man_path.is_file():
+        try:
+            existing = json.loads(man_path.read_text())
+        except json.JSONDecodeError:
+            existing = []
+    merged = {r["video_md5"]: r for r in existing
+              if isinstance(r, dict) and r.get("video_md5")}
+    for r in manifest:
+        merged[r["video_md5"]] = r
+    man_path.write_text(json.dumps(list(merged.values()), indent=2))
     tot = sum(r["frames_written"] for r in manifest)
     by_split: dict[str, int] = {}
     for r in manifest:

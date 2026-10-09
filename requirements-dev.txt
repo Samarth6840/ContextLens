@@ -1,0 +1,16 @@
+# Development / dataset-tooling dependencies. Not needed to run the served
+# Flask API (Dockerfile installs requirements.txt only).
+-r requirements.txt
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Dataset tooling — read the LogoDet-3K parquet shards in
+# scripts/build_logo_bank.py, scripts/train_logo_detector.py,
+# scripts/build_train_bank.py, scripts/build_eval_set.py.
+pandas>=2.0.0
+pyarrow>=12.0.0
+
+# Streamlit demo UI (app.py)
+streamlit>=1.28.0

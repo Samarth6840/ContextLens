@@ -120,8 +120,10 @@ def evaluate(pred_rows, gold, iou_thr=0.5, thresholds=(0.10, 0.20, 0.30, 0.40, 0
         for rec in pred_rows:
             gts = gold.get(rec["image"], [])
             dets = [d for d in rec["dets"] if d["conf"] >= thr]
+            # Confidence order inside the image, so the strongest box claims the
+            # GT. Input order lets a low-confidence box steal it.
             used = [False] * len(gts)
-            for d in dets:
+            for d in sorted(dets, key=lambda x: -x["conf"]):
                 best, bi = 0.0, -1
                 for i, g in enumerate(gts):
                     if used[i]:

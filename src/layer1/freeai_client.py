@@ -25,18 +25,25 @@ class FreeAIClient:
     Uses a single API key for all modalities.
     """
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, base_url: Optional[str] = None):
         """
         Initialize Free.ai client.
 
         Args:
             api_key: Free.ai API key. If not provided, reads from FREE_AI_API_KEY env var.
+            base_url: API base URL override. Falls back to FREE_AI_BASE_URL env
+                      var, then the shipped default — so the configured
+                      `layer1.freeai.base_url` is actually honored instead of
+                      being silently ignored.
         """
         self.api_key = api_key or os.environ.get("FREE_AI_API_KEY")
         if not self.api_key:
             raise ValueError(
                 "Free.ai API key required. Set FREE_AI_API_KEY env var or pass api_key parameter."
             )
+        self.base_url = (
+            base_url or os.environ.get("FREE_AI_BASE_URL") or FREE_AI_BASE_URL
+        ).rstrip("/")
         self.session = requests.Session()
         self.session.headers.update({
             "Authorization": f"Bearer {self.api_key}",
@@ -71,7 +78,7 @@ class FreeAIClient:
         try:
             image_bytes = self._image_to_bytes(image)
             response = self.session.post(
-                f"{FREE_AI_BASE_URL}/ocr",
+                f"{self.base_url}/ocr",
                 files={"image": ("frame.jpg", image_bytes, "image/jpeg")},
                 data={"model": "paddleocr-vl"},
                 timeout=30,
@@ -79,18 +86,21 @@ class FreeAIClient:
             response.raise_for_status()
             result = response.json()
 
-            # Parse Free.ai OCR response format
-            ocr_results = []
+            # Parse Free.ai OCR response format. `results` (per-line) is the
+            # detailed form; the top-level `text` is a summary of the same
+            # lines, so appending both duplicates every recognized string.
+            ocr_results = [
+                {
+                    "text": item.get("text", ""),
+                    "confidence": item.get("confidence", 0.9),
+                }
+                for item in result.get("results", [])
+            ]
             text = result.get("text", "")
-            if text and not str(text).startswith("[OCR unavailable"):
+            if not ocr_results and text and not str(text).startswith("[OCR unavailable"):
                 ocr_results.append({
                     "text": text,
                     "confidence": result.get("confidence", 0.9),
-                })
-            for item in result.get("results", []):
-                ocr_results.append({
-                    "text": item.get("text", ""),
-                    "confidence": item.get("confidence", 0.9),
                 })
 
             return ocr_results
@@ -125,17 +135,20 @@ class FreeAIClient:
                 tmp_path = tmp.name
                 sf.write(tmp_path, audio, sample_rate)
 
-            with open(tmp_path, "rb") as f:
-                response = self.session.post(
-                    f"{FREE_AI_BASE_URL}/stt",
-                    files={"audio": ("audio.wav", f, "audio/wav")},
-                    data={"model": "whisper", "language": "auto"},
-                    timeout=60,
-                )
-
-            os.unlink(tmp_path)
-            response.raise_for_status()
-            result = response.json()
+            try:
+                with open(tmp_path, "rb") as f:
+                    response = self.session.post(
+                        f"{self.base_url}/stt",
+                        files={"audio": ("audio.wav", f, "audio/wav")},
+                        data={"model": "whisper", "language": "auto"},
+                        timeout=60,
+                    )
+                response.raise_for_status()
+                result = response.json()
+            finally:
+                # finally, not after the happy path: a timeout or HTTP error
+                # here previously leaked the temp WAV every failed call.
+                os.unlink(tmp_path)
 
             text = result.get("text", "")
             if text:
@@ -189,7 +202,7 @@ class FreeAIClient:
             }
 
             response = self.session.post(
-                f"{FREE_AI_BASE_URL}/chat",
+                f"{self.base_url}/chat",
                 json=payload,
                 timeout=60,
             )
@@ -220,7 +233,7 @@ class FreeAIClient:
 
         try:
             response = self.session.post(
-                f"{FREE_AI_BASE_URL}/embeddings",
+                f"{self.base_url}/embeddings",
                 json={
                     "model": "bge-m3",
                     "input": texts,
@@ -244,7 +257,7 @@ class FreeAIClient:
         return base64.b64encode(data).decode("utf-8")
 
 
-def create_freeai_client() -> Optional["FreeAIClient"]:
+def create_freeai_client(base_url: Optional[str] = None) -> Optional["FreeAIClient"]:
     """
     Create a Free.ai client if API key is available.
 
@@ -257,7 +270,7 @@ def create_freeai_client() -> Optional["FreeAIClient"]:
         return None
 
     try:
-        return FreeAIClient(api_key=api_key)
+        return FreeAIClient(api_key=api_key, base_url=base_url)
     except Exception as e:
         logger.error(f"Failed to create Free.ai client: {e}")
         return None
@@ -270,11 +283,11 @@ class FreeAIOCRExtractor:
     swap it in without changes.
     """
 
-    def __init__(self, lang: str = "en", **kwargs):
+    def __init__(self, lang: str = "en", base_url: Optional[str] = None, **kwargs):
         self.lang = lang
-        self.client = create_freeai_client()
+        self.client = create_freeai_client(base_url=base_url)
         if self.client is None:
-            raise RuntimeError("Free.aith OCR requested but FREE_AI_API_KEY not set")
+            raise RuntimeError("Free.ai OCR requested but FREE_AI_API_KEY not set")
         logger.info("Free.ai OCR extractor initialized (lang=%s)", lang)
 
     def extract_text(self, image: np.ndarray) -> List[dict]:
@@ -294,10 +307,11 @@ class FreeAISpeechToText:
 
     _backend = "freeai"
 
-    def __init__(self, model_name: str = "large-v3", device: Optional[str] = None, **kwargs):
+    def __init__(self, model_name: str = "large-v3", device: Optional[str] = None,
+                 base_url: Optional[str] = None, **kwargs):
         self.model_name = model_name
         self.device = device
-        self.client = create_freeai_client()
+        self.client = create_freeai_client(base_url=base_url)
         if self.client is None:
             raise RuntimeError("Free.ai STT requested but FREE_AI_API_KEY not set")
         logger.info("Free.ai STT initialized (model=%s)", model_name)

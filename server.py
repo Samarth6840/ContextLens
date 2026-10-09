@@ -1,5 +1,5 @@
 """
-ADSCENE API server.
+ContextLens API server.
 
 Serves the static frontend and wraps the Phase 1 pipeline
 (src.pipeline.Phase1Pipeline) behind a job queue so uploads
@@ -29,7 +29,7 @@ Usage:
     python server.py
 
 Env:
-    ADSCENE_PORT    overrides the default port (5000)
+    CONTEXTLENS_PORT    overrides the default port (5000)
 """
 
 import os
@@ -55,7 +55,7 @@ from src.outreach import generate_personalized_outreach
 ROOT = Path(__file__).parent
 sys.path.insert(0, str(ROOT))
 
-PORT = int(os.environ.get("ADSCENE_PORT", "5000"))
+PORT = int(os.environ.get("CONTEXTLENS_PORT", "5000"))
 MAX_UPLOAD_BYTES = 200 * 1024 * 1024  # 200 MB
 ALLOWED_EXT = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
 
@@ -120,17 +120,17 @@ AUTH_ENABLED = bool(_AUTH_CFG.get("enabled", False))
 SESSION_MANAGER = SessionManager(
     ttl_seconds=int(_AUTH_CFG.get("session_ttl_seconds", 8 * 3600))
 )
-_DB_PATH = os.environ.get("ADSCENE_DB_PATH")
+_DB_PATH = os.environ.get("CONTEXTLENS_DB_PATH")
 if not _DB_PATH:
     _store_db = (CFG.get("store") or {}).get("db_path")
     _DB_PATH = str(ROOT / _store_db) if _store_db else str(ROOT / "var" / "contextlens.db")
 JOB_STORE = JobStore(_DB_PATH)
 
 _ADMIN_USER = str(
-    _AUTH_CFG.get("admin_user") or os.environ.get("ADSCENE_ADMIN_USER", "admin")
+    _AUTH_CFG.get("admin_user") or os.environ.get("CONTEXTLENS_ADMIN_USER", "admin")
 )
 _ADMIN_PASSWORD = str(
-    os.environ.get("ADSCENE_ADMIN_PASSWORD") or _AUTH_CFG.get("admin_password") or ""
+    os.environ.get("CONTEXTLENS_ADMIN_PASSWORD") or _AUTH_CFG.get("admin_password") or ""
 )
 # PBKDF2-hashed admin credential; None means login is impossible (fail closed).
 ADMIN_CREDENTIALS = (
@@ -1563,7 +1563,7 @@ def outreach_generate():
         f"\n"
         f"HELLO {brand} TEAM,\n"
         f"\n"
-        f"I RUN {title}, AND I AM REACHING OUT BECAUSE THE ADSCENE\n"
+        f"I RUN {title}, AND I AM REACHING OUT BECAUSE THE CONTEXTLENS\n"
         f"PLATFORM IDENTIFIED A NATURAL PLACEMENT FOR YOUR BRAND.\n"
         f"\n"
         f"WHILE REVIEWING MY ARCHIVES, YOUR {product} APPEARED\n"
@@ -1636,5 +1636,5 @@ def outreach_approve():
 
 
 if __name__ == "__main__":
-    print(f"ADSCENE SERVER — http://127.0.0.1:{PORT}")
+    print(f"ContextLens SERVER — http://127.0.0.1:{PORT}")
     app.run(host="127.0.0.1", port=PORT, debug=False, threaded=True)

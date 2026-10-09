@@ -196,8 +196,16 @@ class LogoDevClient:
             if not results:
                 logger.warning("logo.dev has no entry for %s — UNVERIFIED", brand)
                 continue
-            # Prefer the top result whose name matches, else the first hit.
-            top = results[0]
+            # Fuzzy search returns *something* for any query, so a wrong-brand
+            # first hit would poison the CLIP reference bank. Keep only a result
+            # that actually names the brand.
+            top = next((r for r in results
+                        if self._result_matches_query(brand, r)), None)
+            if top is None:
+                logger.warning(
+                    "logo.dev results for %s match no result by name — UNVERIFIED",
+                    brand)
+                continue
             domain = top.get("domain") or top.get("id") or ""
             if not domain:
                 logger.warning("logo.dev result for %s has no domain — UNVERIFIED", brand)

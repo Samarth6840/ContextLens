@@ -56,23 +56,37 @@ def pick_frames(frames: list[Path], sheet: int, per_video: int) -> list[Path]:
     by_video: dict[str, list[Path]] = defaultdict(list)
     for f in frames:
         by_video[video_of(f.stem)].append(f)
-    picks: list[Path] = []
     order = sorted(by_video)
+
+    # Subsample each video evenly first, then INTERLEAVE one frame per video per
+    # pass. Filling video 1 to --per-video before starting video 2 let a single
+    # video flood the whole sheet whenever --per-video >= --sheet.
+    per_video_picks: dict[str, list[Path]] = {}
     for v in order:
         pool = by_video[v]
         take = min(per_video, len(pool))
-        if sheet:
-            take = min(take, max(1, sheet - len(picks)))
         if take >= len(pool):
-            chosen = pool
+            chosen = list(pool)
         elif take == 1:
-            chosen = pool[len(pool) // 2:]
+            chosen = [pool[len(pool) // 2]]
         else:
             idx = [round(i * (len(pool) - 1) / (take - 1)) for i in range(take)]
             chosen = [pool[i] for i in sorted(set(idx))]
-        picks.extend(chosen)
-        if sheet and len(picks) >= sheet:
+        per_video_picks[v] = chosen
+
+    picks: list[Path] = []
+    round_i = 0
+    while True:
+        added = False
+        for v in order:
+            if round_i < len(per_video_picks[v]):
+                picks.append(per_video_picks[v][round_i])
+                added = True
+                if sheet and len(picks) >= sheet:
+                    return picks[:sheet]
+        if not added:
             break
+        round_i += 1
     return picks[:sheet] if sheet else picks
 
 
@@ -104,14 +118,25 @@ def main() -> int:
     if not args.out and not args.apply:
         sys.exit("FATAL: pass --out (draw a sheet) or --apply (consume a review)")
 
-    picked = pick_frames(frames, args.sheet, args.per_video)
     root = Path(args.frames)
-    index_path = None
-    if args.out:
+
+    # --apply must consume the exact sidecar that was reviewed, not re-sample the
+    # pool. Re-sampling shifts every index when frames were added in between, so
+    # "3 7 12" would silently name different frames than the reviewer saw.
+    if args.apply:
+        if not args.out:
+            sys.exit("FATAL: --apply needs --out so the reviewed <out>.json sidecar "
+                     "can be loaded")
         index_path = Path(args.out).with_suffix(".json")
-        if index_path.exists():
-            known = {e["file"] for e in json.loads(index_path.read_text())}
-            picked = [f for f in picked if str(f.relative_to(root)) in known]
+        if not index_path.exists():
+            sys.exit(f"FATAL: no sidecar {index_path}; refusing to re-sample frames")
+        index = json.loads(index_path.read_text())
+        apply_review(index, {int(x) for x in args.apply.split()},
+                     Path(args.dataset) if args.dataset else root.parent / "labelled",
+                     root)
+        return 0
+
+    picked = pick_frames(frames, args.sheet, args.per_video)
 
     predictor = None
     if args.weights:
@@ -167,11 +192,7 @@ def main() -> int:
             print("        boxes cannot be checked against the detector - re-run with")
             print("        --weights before reviewing.")
 
-    if args.apply:
-        apply_review(index, {int(x) for x in args.apply.split()},
-                     Path(args.dataset) if args.dataset else Path(args.frames).parent / "labelled",
-                     Path(args.frames))
-    elif not args.weights:
+    if not args.weights:
         print("\nReview and reply with the indices that are LOGO-FREE, e.g. "
               "'negatives: 3 7 12 19 24'.")
     return 0

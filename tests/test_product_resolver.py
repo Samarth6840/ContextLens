@@ -216,7 +216,7 @@ class _FakeQwen:
 class TestQwenTier:
     def test_qwen_corroborated_accepts_brand(self):
         r = ProductBrandResolver(
-            wikidata=None,
+            wikidata=_make_wd(),
             qwen=_FakeQwen("Sony"),
             corroboration_fn=lambda span: True,
         )
@@ -228,7 +228,7 @@ class TestQwenTier:
         # Tier 3 WITHOUT independent corroboration must NOT resolve at full
         # confidence; it is logged as a low-confidence candidate instead.
         r = ProductBrandResolver(
-            wikidata=None,
+            wikidata=_make_wd(),
             qwen=_FakeQwen("Sony"),
             corroboration_fn=lambda span: False,
         )
@@ -239,7 +239,7 @@ class TestQwenTier:
 
     def test_qwen_unknown_returns_nothing(self):
         r = ProductBrandResolver(
-            wikidata=None,
+            wikidata=_make_wd(),
             qwen=lambda span, frame=None: {"manufacturer": None},
         )
         assert r.resolve("WH-1000XM5 55,000") == []
@@ -253,7 +253,7 @@ class TestQwenTier:
             called.append(span)
             return {"manufacturer": "Sony"}
         r = ProductBrandResolver(
-            wikidata=None,
+            wikidata=_make_wd(),
             qwen=qwen,
             corroboration_fn=lambda span: True,
         )
@@ -287,7 +287,7 @@ class TestTier4Learned:
         mem = ProductResolutionMemory(min_distinct_videos=3)
         for v in ("v1", "v2", "v3"):
             mem.record("AirPods Pro", "APPLE", v)
-        r = ProductBrandResolver(wikidata=None, learned_lookup=mem.lookup)
+        r = ProductBrandResolver(wikidata=_make_wd(), learned_lookup=mem.lookup)
         res = r.resolve("AirPods Pro 25,000")
         assert res and res[0]["brand"] == "APPLE"
         assert res[0]["resolution_tier"] == 4
@@ -299,7 +299,7 @@ class TestTier4Learned:
             mem.record("Galaxy Buds", "SAMSUNG", v)
         # learned memory wins over Wikidata (Tier 4 checked first)
         r = ProductBrandResolver(
-            wikidata=None, learned_lookup=mem.lookup,
+            wikidata=_make_wd(), learned_lookup=mem.lookup,
             add_brand_resolution=mem.record,
         )
         res = r.resolve("Galaxy Buds 15,000")
@@ -366,7 +366,7 @@ class TestMacMiniResolutionEndToEnd:
         mem = ProductResolutionMemory(min_distinct_videos=3)
         for v in ("v1", "v2", "v3"):
             mem.record("Mac Mini", "APPLE", v)
-        res = ProductBrandResolver(wikidata=None, learned_lookup=mem.lookup)
+        res = ProductBrandResolver(wikidata=_make_wd(), learned_lookup=mem.lookup)
         out = res.resolve("Mac Mini", live=False)
         assert len(out) == 1
         r = out[0]
@@ -382,7 +382,7 @@ class TestMacMiniResolutionEndToEnd:
         mem = ProductResolutionMemory(min_distinct_videos=3)
         for v in ("v1", "v2"):
             mem.record("Mac Mini", "APPLE", v)
-        res = ProductBrandResolver(wikidata=None, learned_lookup=mem.lookup)
+        res = ProductBrandResolver(wikidata=_make_wd(), learned_lookup=mem.lookup)
         assert res.resolve("Mac Mini", live=False) == []
 
     def test_mac_mini_to_apple_via_wikidata_live_chain(self):

@@ -396,8 +396,22 @@ def fuse_candidates(
     margin = top["prob"] - (second["prob"] if second else 0.0)
     conflict = round(1.0 - min(1.0, margin), 4)
 
+    # Corroboration requirement for accept. `prob = net / active_sum` cancels the
+    # weight out for a single supporting family, so a lone low-weight modality
+    # (audio at 0.10) at strength 0.9 also scores prob 0.9. A single-modality
+    # winner may lead but must not be accepted as "confident" without a second
+    # independent family backing it.
+    top_families = top.get("families") or {}
+    corroborated = len(top_families) >= 2
+
     if top["prob"] < accept:
         verdict, reason = "low_support", f"top candidate {top['candidate']} below accept threshold ({top['prob']} < {accept})"
+    elif not corroborated:
+        verdict, reason = "ambiguous", (
+            f"{top['candidate']} carries single-modality evidence "
+            f"({', '.join(sorted(top_families)) or 'none'}) at {top['prob']}; "
+            "needs corroboration from a second family to accept"
+        )
     elif second and margin < margin_min:
         verdict, reason = "ambiguous", (
             f"top candidates {top['candidate']} ({top['prob']}) vs "

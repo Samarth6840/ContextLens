@@ -106,6 +106,10 @@ layer1:
     backend: "yolo"  # "yolo" (trained) | "yolo_world" (zero-shot)
     model: "weights/logo_detector/train/weights/best.pt"
     confidence_threshold: 0.25
+    # Must match the loaded checkpoint's training resolution, or mAP drops
+    # (a 640 model evaluated at 960 lost ~30% mAP50 here). The current best.pt
+    # was trained at imgsz=640; bump this to 960 only alongside a 960 retrain.
+    imgsz: 640
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with
@@ -419,7 +423,7 @@ layer2b:
       status: implemented  # product-index cosine similarity (fails closed to 0)
     # Audio-event branding cue (Phase 2.6) — BEATs jingle/ad-cue mapping
     audio_event:
-      weight: 0.10
+      weight: 0.09
       status: implemented  # BEATs audio-event -> brand-cue mapping
     # Scene context evidence — derived from audio-event RMS energy and event
     # density. When BEATs detects non-speech audio activity (music, jingles,
@@ -700,16 +704,16 @@ auth:
   # and existing tests behave exactly as before. When enabled, the /api/jobs,
   # /api/pipeline/<id>, and /api/outreach/* routes require a session token
   # obtained from POST /api/login. The admin password is PBKDF2-hashed in memory
-  # and should be supplied via the ADSCENE_ADMIN_PASSWORD env var (or
+  # and should be supplied via the CONTEXTLENS_ADMIN_PASSWORD env var (or
   # admin_password here — prefer env for secrets, never commit a real one).
   enabled: false
   admin_user: "admin"
-  admin_password: ""            # prefer ADSCENE_ADMIN_PASSWORD env var
+  admin_password: ""            # prefer CONTEXTLENS_ADMIN_PASSWORD env var
   session_ttl_seconds: 28800    # 8 hours
 
 store:
   # Phase 3 SQLite persistence for completed jobs (survives server restart).
-  # Override at runtime with ADSCENE_DB_PATH.
+  # Override at runtime with CONTEXTLENS_DB_PATH.
   db_path: "var/contextlens.db"
 
 

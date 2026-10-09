@@ -25,7 +25,10 @@ import threading
 import time
 from typing import Dict, Optional, Tuple
 
-_PBKDF2_ITERATIONS = 120_000
+# OWASP recommends 600k for PBKDF2-HMAC-SHA256. Existing records store their own
+# iteration count, so raising this does not invalidate old hashes — verify()
+# reads iterations from each record.
+_PBKDF2_ITERATIONS = 600_000
 _SALT_BYTES = 16
 _DIGEST_BYTES = 32
 

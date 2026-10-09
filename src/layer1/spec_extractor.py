@@ -31,28 +31,33 @@ logger = logging.getLogger(__name__)
 # within a larger OCR line (e.g. "8 Inches Inner Display").
 
 _SPEC_PATTERNS = [
-    # Screen / display size — "<N> inch(es)" (case-insensitive)
+    # Screen / display size — "<N> inch(es)". The trailing (?!\s*\d) stops
+    # "2 in 1" (two-in-one) from reading as 2 inches.
     {
         "field": "screen_size",
-        "regex": re.compile(r"(\d+(?:\.\d+)?)\s*(?:inch|inches|in\b)", re.I),
+        "regex": re.compile(
+            r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*(?:inch(?:es)?|in\b)(?!\s*\d)",
+            re.I),
         "unit": "in",
     },
     # Thickness / dimensions — "<N> mm"
     {
         "field": "thickness",
-        "regex": re.compile(r"(\d+(?:\.\d+)?)\s*mm\b", re.I),
+        "regex": re.compile(r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*mm\b", re.I),
         "unit": "mm",
     },
     # Battery capacity — "<N> mAh"
     {
         "field": "battery",
-        "regex": re.compile(r"(\d+(?:\.\d+)?)\s*mah\b", re.I),
+        "regex": re.compile(r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*mah\b", re.I),
         "unit": "mAh",
     },
-    # Weight — "<N> g" or "<N> grams"
+    # Weight — "<N> g" or "<N> grams". Case-SENSITIVE lowercase: with re.I,
+    # "5G" (connectivity) was read as a 5 gram weight.
     {
         "field": "weight",
-        "regex": re.compile(r"(\d+(?:\.\d+)?)\s*(?:g|grams?)\b", re.I),
+        "regex": re.compile(
+            r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)\s*(?:g|grams?)\b"),
         "unit": "g",
     },
     # Storage / RAM — "<N> GB" / "<N> TB"
@@ -147,17 +152,22 @@ def extract_price(text: str) -> Dict:
             else ("USD" if "$" in raw else ("EUR" if "€" in raw else "USD"))
         return {"value": round(value, 2), "currency": currency, "raw": raw, "suffix": ""}
     # Bare Indian-style grouped number with a lakh/cr/k suffix: "1.2 lakh", "55K".
-    m = _PRICE_BARE_RE.search(norm_text)
-    if m:
+    # "4K"/"8K" are resolutions, not 4000/8000 rupees, so they are not prices.
+    for m in _PRICE_BARE_RE.finditer(norm_text):
+        suffix = m.group(2).lower()
         try:
             value = float(m.group(1).replace(",", ""))
         except ValueError:
-            value = 0.0
+            continue
+        if suffix in ("k", "thousand"):
+            after = norm_text[m.end():m.end() + 10].lower()
+            if value in (4.0, 8.0) or re.match(r"\s*(tv|video|uhd|display|screen)", after):
+                continue
         return {
-            "value": round(_expand_price(value, m.group(2)), 2),
+            "value": round(_expand_price(value, suffix), 2),
             "currency": "USD",
             "raw": m.group(0).strip(),
-            "suffix": m.group(2).lower(),
+            "suffix": suffix,
         }
     # Bare Indian grouped price with no suffix: "55,000", "1,29,999".
     m = _PRICE_GROUPED_RE.search(norm_text)
@@ -177,7 +187,9 @@ def extract_price(text: str) -> Dict:
 
 
 # "@<handle>" anywhere; follower counts like "4.3m followers" / "1.2M followers".
-_HANDLE_RE = re.compile(r"@([A-Za-z0-9_.]{1,30})", re.I)
+# The lookbehind keeps the "@" in "user@gmail.com" from being read as a handle
+# (which yielded "gmail.com").
+_HANDLE_RE = re.compile(r"(?<![\w.])@([A-Za-z0-9_.]{1,30})", re.I)
 _FOLLOWERS_RE = re.compile(
     r"(\d+(?:\.\d+)?)\s*([km]?)\s*followers?", re.I
 )

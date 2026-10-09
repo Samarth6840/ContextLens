@@ -31,7 +31,7 @@ import json
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -201,20 +201,57 @@ def _extract_json_emails(text: str) -> Optional[List[dict]]:
     return None
 
 
-def _grounding(urls: List[str], supports: List[dict]) -> Set[str]:
-    """Collect real retrieved URLs from groundingMetadata."""
-    found = set(urls)
-    for s in supports or []:
-        uris = (s.get("groundingChunks") or [])
-        for chunk in uris or []:
-            uri = ((chunk or {}).get("web") or {}).get("uri") or ""
-            if uri:
-                found.add(uri)
-    return {u for u in found if u.startswith("http")}
+def _host(url: str) -> str:
+    m = re.match(r"https?://([^/]+)", (url or "").strip().lower())
+    return (m.group(1) if m else "").removeprefix("www.").rstrip(".")
+
+
+def _grounding(urls: List[str], supports: List[dict],
+               chunks: Optional[List[dict]] = None) -> Tuple[Set[str], Set[str]]:
+    """Collect real retrieved URLs and chunk titles from groundingMetadata.
+
+    Grounding chunks live at the top level of groundingMetadata, not inside
+    groundingSupports — reading them from `supports` (as this used to) found
+    nothing. `chunks` carries the redirect URI plus the source page title, which
+    is what lets a model-cited real page URL be matched even though the API only
+    returns a vertexaisearch redirect.
+    """
+    found = {u for u in urls if (u or "").startswith("http")}
+    titles: Set[str] = set()
+    for c in chunks or []:
+        web = (c or {}).get("web") or {}
+        uri = web.get("uri") or ""
+        if uri.startswith("http"):
+            found.add(uri)
+        title = _host(web.get("title") or "") or (web.get("title") or "").strip().lower()
+        if title:
+            titles.add(title)
+    return found, titles
+
+
+def _source_is_grounded(source: str, grounded: Set[str], titles: Set[str]) -> bool:
+    """True when the model's cited `source` traces to a returned grounding chunk.
+
+    Exact URI membership covers direct citations (including the redirect URL
+    itself). A model that cites the real page URL while the API only returned a
+    redirect is accepted when the source host matches a chunk title/domain.
+    """
+    if not source:
+        return False
+    if source in grounded:
+        return True
+    host = _host(source)
+    if not host:
+        return False
+    if any(_host(u) == host for u in grounded):
+        return True
+    return any(t and (host == t or host.endswith("." + t) or t.endswith("." + host))
+               for t in titles)
 
 
 def parse_brand_emails(text: str, urls: List[str], supports: List[dict],
-                       brand_domain: str = "") -> List[dict]:
+                       brand_domain: str = "",
+                       chunks: Optional[List[dict]] = None) -> List[dict]:
     """Deterministic, offline-testable parser for a Gemini grounded answer.
 
     Keeps only validated addresses that cite a real grounding URI. An answer
@@ -224,7 +261,7 @@ def parse_brand_emails(text: str, urls: List[str], supports: List[dict],
     attributing it to whichever page sorted first fabricates provenance for an
     address that may not appear on that page at all.
     """
-    grounded = _grounding(urls, supports)
+    grounded, titles = _grounding(urls, supports, chunks)
 
     items = _extract_json_emails(text)
     if items is None:
@@ -239,14 +276,12 @@ def parse_brand_emails(text: str, urls: List[str], supports: List[dict],
         if not _is_valid_email(address, brand_domain) or address in seen:
             continue
         # `source` comes from the model's own JSON, so it is untrusted input.
-        # It is honoured only when it is a URI the API actually returned in
-        # groundingMetadata. Matching a *prefix* is not enough: a fabricated
-        # "https://vertexaisearch.cloud.google.com/grounding-api-redirect/xyz"
-        # would otherwise pass and give a fabricated address a plausible-looking
-        # provenance. Real redirect URLs are present in `urls` when Google emits
-        # them, so exact membership still covers that citation format.
+        # It is honoured only when it traces to a URI/title the API returned in
+        # groundingMetadata. Exact membership alone rejected every real citation:
+        # the API returns vertexaisearch redirect URLs while the model cites the
+        # real page URL, so the source host is also matched against chunk titles.
         source = (item.get("source") or "").strip()
-        if not source or source not in grounded:
+        if not _source_is_grounded(source, grounded, titles):
             continue
         seen.add(address)
         out.append({
@@ -267,9 +302,10 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
 
     api_key = _api_key()
     if not api_key:
-        result = {"status": "unavailable", "reason": "no GEMINI_API_KEY", "emails": []}
-        _EMAIL_CACHE[key] = result
-        return result
+        # Deliberately NOT cached: a key added later (or a key file that appears
+        # after boot) must take effect without a process restart. Caching this
+        # pinned every brand to "unavailable" for the life of the process.
+        return {"status": "unavailable", "reason": "no GEMINI_API_KEY", "emails": []}
 
     model = model or _env("GEMINI_MODEL") or "gemini-2.0-flash"
     payload = {
@@ -286,7 +322,8 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
         try:
             resp = requests.post(
                 GEMINI_API_URL.format(model=model),
-                params={"key": api_key},
+                # Header, not ?key=: a query param lands in proxy/server logs.
+                headers={"x-goog-api-key": api_key},
                 json=payload,
                 timeout=timeout,
             )
@@ -318,14 +355,16 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
             p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
         )
         metadata = cand.get("groundingMetadata") or {}
+        chunks = metadata.get("groundingChunks") or []
         urls = [
             ((chunk or {}).get("web") or {}).get("uri", "")
-            for chunk in metadata.get("groundingChunks") or []
+            for chunk in chunks
         ]
         supports = metadata.get("groundingSupports") or []
 
         emails = parse_brand_emails(text, urls, supports,
-                                    brand_domain=_brand_domain(key))
+                                    brand_domain=_brand_domain(key),
+                                    chunks=chunks)
         evidence_urls = {
             u for u in urls if u.startswith("http")
         } | {e["source"] for e in emails}

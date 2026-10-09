@@ -21,6 +21,7 @@ taxonomy.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import List, Optional
@@ -69,7 +70,10 @@ def _compose(bg: np.ndarray, logo: np.ndarray, scale: float, blur: int) -> np.nd
 
 
 def _synthesize(entry: dict, bank_root: str, out_dir: str) -> str:
-    rng = np.random.default_rng(abs(hash(entry["video_id"])) % 2**32)
+    # Python str hash is salted per process, so the background/motion for a given
+    # video_id changed every run. A stable digest keeps synthesis reproducible.
+    seed = int(hashlib.sha1(entry["video_id"].encode()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(seed % 2**32)
     bg = _noise_bg(rng)
     frames: List[np.ndarray] = []
     if entry["difficulty"] == "negative":
@@ -123,6 +127,7 @@ def build_dataset(bank_root: str, out_dir: str, budget: int = 8, seed: int = 7) 
             "logo": gt is not None, "ocr": gt is not None,
             "speech": False, "product": gt is not None, "audio_event": False,
             "timestamps": [[0.0, FRAMES / FPS]],
+            "conflict_brand": conflict,
             "video_path": "",
         })
 

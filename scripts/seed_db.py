@@ -123,7 +123,7 @@ def build_job(job_id, title, video_path, creator_id, handle, followers,
 def _resolve_db_path():
     import os
 
-    custom = os.environ.get("ADSCENE_DB_PATH")
+    custom = os.environ.get("CONTEXTLENS_DB_PATH")
     if custom:
         return custom
     try:

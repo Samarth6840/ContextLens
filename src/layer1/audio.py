@@ -5,6 +5,7 @@ and audio events via BEATs.
 Both load real model weights — no mock/stub/placeholder inference.
 """
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
@@ -12,9 +13,27 @@ from typing import Callable, List, Optional, Tuple
 import numpy as np
 import torch
 
-from src.layer1.audioset_labels import AUDIOSET_LABELS
 
 logger = logging.getLogger(__name__)
+
+# The fine-tuned BEATs checkpoint comes from a third-party HuggingFace user
+# (WeiChihChen), not Microsoft. It is loaded with `weights_only=False`, i.e. a
+# full pickle: if that repo is ever replaced or tampered with, loading it runs
+# arbitrary code. Pin the artifact by sha256 (the git-lfs oid of the HF file)
+# and refuse to deserialize anything else.
+BEATS_PINNED_NAME = "BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt"
+BEATS_TRUSTED_SHA256 = (
+    "e5815275a04b6885e7b8af63d120b29bffae2cd2225cf4915e1ec6d819d3022c"
+)
+
+
+def file_sha256(path) -> str:
+    """Streaming sha256 of a file (constant memory for multi-hundred-MB weights)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 class SpeechToText:
@@ -88,16 +107,20 @@ class SpeechToText:
         if fw_cached:
             try:
                 from faster_whisper import WhisperModel as FasterWhisperModel
+                # ctranslate2 (faster-whisper's backend) has no MPS device. When
+                # mlx-whisper failed on an MPS host, device is still "mps" here
+                # and ctranslate2 would raise — map it to CPU.
+                fw_device = "cpu" if device == "mps" else device
                 compute_type = compute_dtype if compute_dtype else (
-                    "int8" if device == "cpu" else "float16"
+                    "int8" if fw_device == "cpu" else "float16"
                 )
                 logger.info(
                     "Loading faster-whisper model '%s' on %s (compute_type=%s)",
-                    model_name, device, compute_type,
+                    model_name, fw_device, compute_type,
                 )
                 self.model = FasterWhisperModel(
                     model_name,
-                    device=device,
+                    device=fw_device,
                     compute_type=compute_type,
                 )
                 self._backend = "faster"
@@ -400,12 +423,20 @@ class AudioEventDetector:
             raise FileNotFoundError(f"BEATs checkpoint not found: {checkpoint_path}")
         if not resolved.is_file():
             raise ValueError(f"BEATs checkpoint path is not a file: {checkpoint_path}")
-        # Local .pt files are trusted artifacts shipped with the repo or downloaded
-        # by scripts/download_models.py. Full pickle deserialization (weights_only=False)
-        # is required because BEATs checkpoints use a non-standard format that
-        # PyTorch's safe serialization cannot parse.
+        # Full pickle deserialization (weights_only=False) is required because
+        # BEATs checkpoints use a non-standard format PyTorch's safe loader
+        # cannot parse. For the third-party mirror, verify the pinned sha256
+        # first so a swapped file cannot execute code at load time.
+        if resolved.name == BEATS_PINNED_NAME:
+            digest = file_sha256(resolved)
+            if digest != BEATS_TRUSTED_SHA256:
+                raise ValueError(
+                    f"BEATs checkpoint {resolved.name} sha256 mismatch "
+                    f"(got {digest}, expected {BEATS_TRUSTED_SHA256}); refusing "
+                    "to pickle-load an unverified artifact."
+                )
         logger.info(
-            "Loading BEATs checkpoint (trusted local artifact: %s)", resolved
+            "Loading BEATs checkpoint (verified local artifact: %s)", resolved
         )
         checkpoint = torch.load(
             str(resolved), map_location=device, weights_only=False
@@ -530,12 +561,13 @@ class AudioEventDetector:
                     or getattr(self.model, "label_set", None)
                     or getattr(self.model, "labels", None)
                     or getattr(self.model, "id2label", None)
-                    # Fall back to the canonical AudioSet ontology (527 classes
-                    # in model output order) when the model heads carries no
-                    # explicit label map but emits AudioSet probabilities
-                    # (fine-tuned BEATs tagging head).
-                    or AUDIOSET_LABELS
                 )
+                # No AUDIOSET_LABELS fallback. A fine-tuned BEATs tagging head
+                # emits probabilities in its own label_dict index order, so the
+                # canonical CSV order would attach the WRONG class name to every
+                # index. Fail closed to event_{i} with no cue mapping rather than
+                # emit a confidently mislabelled event.
+                has_label_map = labels is not None
                 for i, prob in enumerate(probs):
                     if prob > 0.5:
                         if isinstance(labels, dict):
@@ -549,17 +581,9 @@ class AudioEventDetector:
                             "confidence": float(prob),
                             "start_time": t_start,
                             "end_time": t_end,
-                            # Real BEATs class label from the model's own map
-                            # (or the standard AudioSet ontology fallback).
                             "mode": "classified",
-                            "source": (
-                                "model_label_map"
-                                if getattr(self.model, "label_map", None)
-                                or getattr(self.model, "label_set", None)
-                                or getattr(self.model, "labels", None)
-                                or getattr(self.model, "id2label", None)
-                                else "audioset_ontology"
-                            ),
+                            "source": ("model_label_map" if has_label_map
+                                       else "unlabeled"),
                         })
 
             elif features.dim() == 3:

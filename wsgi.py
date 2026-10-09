@@ -2,8 +2,9 @@
 WSGI entrypoint for production serving.
 
 Run with:  gunicorn wsgi:application -c gunicorn.conf.py
-(The heavy ML models load lazily inside each worker on first job, so multiple
-workers each own an independent pipeline copy — see server.get_pipeline.)
+The heavy ML models load lazily on first job. gunicorn.conf.py pins workers=1
+(server.JOBS is process-local — see its comment), so one worker owns the single
+pipeline copy; concurrency comes from its gthread threads.
 """
 
 import sys

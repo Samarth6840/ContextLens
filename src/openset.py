@@ -310,7 +310,7 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
 
     def __init__(self, timeout: float = 60.0, model: Optional[str] = None):
         self.timeout = timeout
-        self.model = model or _env("GEMINI_MODEL") or "gemini-2.0-flash"
+        self.model = model or _env("GEMINI_MODEL") or "gemini-2.5-flash"
         self._key = _env("GEMINI_API_KEY")
         if not self._key:
             key_path = Path.home() / ".gemini_key"

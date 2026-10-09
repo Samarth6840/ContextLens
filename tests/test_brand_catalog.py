@@ -246,8 +246,23 @@ class TestBrandCatalog:
         )
         brands = {m["brand"] for m in mentions}
         assert "OPPO" in brands
-        assert "VIVO" in brands
         assert "XIAOMI" in brands
+        # 'vivo' is also the ordinary phrase "in vivo", so the speech matcher
+        # defers it to OCR (see _ASR_AMBIGUOUS_ALIASES); match_brand still
+        # resolves it.
+        assert "VIVO" not in brands
+        assert match_brand("vivo") == "VIVO"
+
+    def test_find_mentions_ambiguous_aliases_deferred_to_ocr(self):
+        brands = {m["brand"] for m in find_brand_mentions(
+            "a meta analysis of the in vivo study, then a travel visa"
+        )}
+        assert brands.isdisjoint({"META", "VIVO", "VISA"})
+        assert "APPLE" not in {m["brand"] for m in find_brand_mentions(
+            "apple juice and apple pie")}
+        # OCR text (verbatim wordmark) still resolves them.
+        assert match_brand("Apple") == "APPLE"
+        assert match_brand("Meta") == "META"
 
     def test_fuzzy_off_by_default_no_phonetic_variant(self):
         # 'सैमसं' (missing trailing ग) is distance-1 from 'सैमसंग' but is NOT

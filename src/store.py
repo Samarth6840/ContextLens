@@ -41,7 +41,7 @@ def _now_iso() -> str:
 
 
 def _default_db_path() -> str:
-    base = os.environ.get("ADSCENE_DATA_DIR") or os.path.join(
+    base = os.environ.get("CONTEXTLENS_DATA_DIR") or os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "var"
     )
     os.makedirs(base, exist_ok=True)

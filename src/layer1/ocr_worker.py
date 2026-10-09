@@ -22,17 +22,26 @@ import cv2
 import numpy as np
 
 
-def _init_ocr(lang: str):
+def _init_ocr(lang: str, cfg: dict | None = None):
     import paddle  # noqa: F401  (must load before PaddleOCR; default CPU thread pool)
 
     from paddleocr import PaddleOCR as _PaddleOCR
 
-    return _PaddleOCR(
-        use_angle_cls=True,
-        lang=lang,
-        det_db_thresh=0.3,
-        text_recognition_batch_size=6,
-    )
+    cfg = cfg or {}
+    # The parent sends its configured values as JSON (see OCRExtractor); the
+    # app keeps the historical config keys and they are mapped here onto the
+    # PaddleOCR 3.x argument names (use_textline_orientation / text_det_thresh /
+    # text_recognition_batch_size), which replaced the 2.x ones.
+    kwargs = {
+        "lang": lang,
+        "use_textline_orientation": bool(cfg.get("use_angle_cls", True)),
+        "text_det_thresh": float(cfg.get("det_db_thresh", 0.3)),
+        "text_recognition_batch_size": int(cfg.get("rec_batch_num", 6)),
+    }
+    cpu_threads = int(cfg.get("cpu_threads", 0) or 0)
+    if cpu_threads > 0:
+        kwargs["cpu_threads"] = cpu_threads
+    return _PaddleOCR(**kwargs)
 
 
 def _parse_result(result) -> list:
@@ -57,7 +66,7 @@ def _parse_result(result) -> list:
     return out
 
 
-def main(lang: str = "en") -> None:
+def main(lang: str = "en", cfg_json: str = "") -> None:
     # Claim a private duplicate of the real stdout for the protocol, then point
     # fd 1 at stderr. Paddle, cv2 and friends print progress bars and warnings to
     # stdout, and the parent reads this pipe line-by-line and json.loads it — one
@@ -67,7 +76,7 @@ def main(lang: str = "en") -> None:
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
 
-    ocr = _init_ocr(lang)
+    ocr = _init_ocr(lang, json.loads(cfg_json) if cfg_json else {})
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -94,4 +103,7 @@ def main(lang: str = "en") -> None:
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else "en")
+    main(
+        sys.argv[1] if len(sys.argv) > 1 else "en",
+        sys.argv[2] if len(sys.argv) > 2 else "",
+    )

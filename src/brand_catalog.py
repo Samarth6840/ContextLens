@@ -353,6 +353,17 @@ def normalize_text(text: str) -> str:
     return s
 
 
+# Aliases that are also ordinary words/phrases. Exact word-boundary matching
+# cannot tell "in vivo" / "meta analysis" / "travel visa" from the brands, so on
+# free speech (ASR) these inflate evidence. `find_brand_mentions` (the speech
+# matcher) skips them; `match_brand` (OCR text, where a logo wordmark appears
+# verbatim) still resolves them, so the signal stays available OCR-only.
+_ASR_AMBIGUOUS_ALIASES = frozenset({
+    "meta", "visa", "supreme", "apple", "puma", "yeti", "vivo", "zara",
+    "stanley",
+})
+
+
 _ALIAS_PATTERNS: Dict[str, re.Pattern] = {}
 
 
@@ -459,6 +470,8 @@ def _fuzzy_token_match(
             alias_norm = normalize_text(alias)
             if len(alias_norm) < 4:
                 continue
+            if alias_norm.lower() in _ASR_AMBIGUOUS_ALIASES:
+                continue
             if alias_norm[:1] != token_norm[:1]:
                 continue
             d = _levenshtein_bounded(token_norm, alias_norm, max_distance)
@@ -501,8 +514,13 @@ def find_brand_mentions(
             alias_norm = normalize_text(alias)
             if len(alias_norm) < 2:
                 continue
+            if alias_norm.lower() in _ASR_AMBIGUOUS_ALIASES:
+                continue
+            # Bound by Devanagari too: with an ASCII-only guard, सोनी (SONY)
+            # matched inside सोनीपत in speech (match_brand already guarded this).
             raw_pattern = re.compile(
-                rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])",
+                rf"(?<![A-Za-z0-9\u0900-\u097f]){re.escape(alias)}"
+                rf"(?![A-Za-z0-9\u0900-\u097f])",
                 re.IGNORECASE,
             )
             for m in raw_pattern.finditer(text):

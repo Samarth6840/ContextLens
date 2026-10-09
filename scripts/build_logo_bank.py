@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -99,7 +100,10 @@ def main():
         if not brand:
             continue
         brand_counts[brand] = brand_counts.get(brand, 0) + 1
-        side = "reference" if (abs(hash(path)) % 7) < 5 else "test"  # ~5:2 split
+        # Stable digest, not str hash: the per-process salt changed the split
+        # every run, so run 2 could put run 1's test crops in the reference bank.
+        digest = int(hashlib.sha1(path.encode()).hexdigest()[:8], 16)
+        side = "reference" if (digest % 7) < 5 else "test"  # ~5:2 split
         image_side[path] = (brand, side)
 
     usable = {b for b, c in brand_counts.items() if c >= args.min_crops_per_brand}

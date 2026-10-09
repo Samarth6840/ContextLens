@@ -33,7 +33,7 @@ _CONFIG_LANG = "en"
 # minutes on CPU, so this is generous — it exists to turn a wedged worker into a
 # clean retry instead of an indefinite block.
 _WORKER_READ_TIMEOUT_SEC = float(
-    os.environ.get("ADSCENE_OCR_WORKER_TIMEOUT", "600")
+    os.environ.get("CONTEXTLENS_OCR_WORKER_TIMEOUT", "600")
 )
 # The worker sends its stdout chatter here rather than to DEVNULL, so a crash
 # or a Paddle warning is actually diagnosable after the fact.
@@ -68,9 +68,15 @@ class OCRExtractor:
         cpu_threads: int = 0,
     ):
         self.lang = lang
-        # Ignored — retained for config compatibility; thread/process resources
-        # are governed inside the worker.
-        del use_angle_cls, det_db_thresh, rec_batch_num, cpu_threads
+        # Forwarded to the worker (as JSON, see _ensure_worker) instead of being
+        # dropped: the worker is a separate interpreter, so config that never
+        # crosses the process boundary did nothing.
+        self.config = {
+            "use_angle_cls": use_angle_cls,
+            "det_db_thresh": det_db_thresh,
+            "rec_batch_num": rec_batch_num,
+            "cpu_threads": cpu_threads,
+        }
         self._proc: "subprocess.Popen | None" = None
         self._req_id = 0
         self._lock = threading.Lock()
@@ -91,6 +97,7 @@ class OCRExtractor:
             [
                 sys.executable, "-u",
                 "-m", "src.layer1.ocr_worker", self.lang,
+                json.dumps(self.config),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
@@ -101,6 +108,10 @@ class OCRExtractor:
             # to the repo root or the worker dies with ModuleNotFoundError.
             cwd=str(Path(__file__).resolve().parents[2]),
         )
+        # The child holds its own dup of the fd, so close the parent's copy.
+        # Leaving it open leaked one descriptor per worker respawn (a crash
+        # loop burned through the process FD limit).
+        err_log.close()
         logger.info("Started PaddleOCR worker pid=%s (stderr -> %s)",
                     self._proc.pid, err_log.name)
 

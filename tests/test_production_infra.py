@@ -62,17 +62,17 @@ def test_gunicorn_refuses_more_than_one_worker():
     and the results are unrecoverable, so booting with >1 must fail loudly
     rather than silently dropping jobs."""
     assert _exec_gunicorn_conf()["workers"] == 1
-    assert _exec_gunicorn_conf({"ADSCENE_WORKERS": "1"})["workers"] == 1
+    assert _exec_gunicorn_conf({"CONTEXTLENS_WORKERS": "1"})["workers"] == 1
     # Concurrency still available through threads.
-    assert _exec_gunicorn_conf({"ADSCENE_THREADS": "8"})["threads"] == 8
+    assert _exec_gunicorn_conf({"CONTEXTLENS_THREADS": "8"})["threads"] == 8
 
     for bad in ("2", "4", "16"):
         try:
-            _exec_gunicorn_conf({"ADSCENE_WORKERS": bad})
+            _exec_gunicorn_conf({"CONTEXTLENS_WORKERS": bad})
         except RuntimeError as exc:
             assert "process-local" in str(exc)
-            assert "ADSCENE_THREADS" in str(exc)
+            assert "CONTEXTLENS_THREADS" in str(exc)
         else:
             raise AssertionError(
-                f"ADSCENE_WORKERS={bad} booted instead of refusing: jobs submitted "
+                f"CONTEXTLENS_WORKERS={bad} booted instead of refusing: jobs submitted "
                 f"to one worker would 404 on another")

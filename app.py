@@ -4,10 +4,8 @@ Upload a video and see the pipeline results in real time.
 """
 
 import os
-import signal
 import sys
 import tempfile
-import threading
 from pathlib import Path
 
 # Force torchvision transforms to fully initialize before Streamlit's import
@@ -24,16 +22,6 @@ import torch
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.pipeline import Phase1Pipeline
-
-# Suppress Streamlit's SIGINT handler during interpreter shutdown.
-# Streamlit registers a signal handler at import time that tries to stop
-# its server. During Python's atexit phase (threading cleanup), the asyncio
-# event loop is already closed, so Streamlit's handler crashes with
-# "RuntimeError: Event loop is closed". We restore the default handler
-# after Streamlit's import so Ctrl+C during shutdown is handled cleanly.
-_original_sigint = signal.getsignal(signal.SIGINT)
-if threading.current_thread() is threading.main_thread():
-    signal.signal(signal.SIGINT, signal.default_int_handler)
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
@@ -77,20 +65,27 @@ show_raw = st.sidebar.checkbox(
     help="Display the full pipeline output dict.",
 )
 
+# Outside the @st.cache_resource loader — a widget inside a cached function
+# re-emits on every hit and triggers Streamlit's replay warning.
+st.sidebar.info(f"Pipeline device: {resolve_device(device_choice)}")
+
 # ── Load pipeline (cached) ───────────────────────────────────────────────────
+
+def resolve_device(device: str) -> str:
+    """Map the sidebar choice to a concrete torch device."""
+    if device != "auto":
+        return device
+    if torch.backends.mps.is_available():
+        return "mps"
+    if torch.cuda.is_available():
+        return "cuda"
+    return "cpu"
+
 
 @st.cache_resource
 def load_pipeline(device: str):
     """Load the Phase 1 pipeline (cached across reruns)."""
-    if device == "auto":
-        if torch.backends.mps.is_available():
-            device = "mps"
-        elif torch.cuda.is_available():
-            device = "cuda"
-        else:
-            device = "cpu"
-    st.sidebar.info(f"Pipeline device: {device}")
-    return Phase1Pipeline(device_override=device)
+    return Phase1Pipeline(device_override=resolve_device(device))
 
 
 # ── Upload ───────────────────────────────────────────────────────────────────

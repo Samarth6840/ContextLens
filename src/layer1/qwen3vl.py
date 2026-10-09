@@ -2,9 +2,13 @@
 Layer 1 — Qwen3-VL 32B Multimodal Understanding Module
 
 Qwen3-VL 32B handles video, OCR, and reasoning in one pass.
-This is the central understanding model for the stack.
 
-All inference is real — no mock/stub/placeholder.
+Status: OPTIONAL and OFF by default (config layer1.central_vision_model
+.enable_qwen=false). Frame analysis (`analyze_frame`) is deliberately
+fail-closed — the image path is not wired, so it returns fallback dicts rather
+than an ungrounded text-only answer. `resolve_product_manufacturer` (text) is
+the only supported inference path. Nothing downstream treats a fallback as a
+brand signal.
 """
 
 import logging
@@ -117,45 +121,29 @@ class Qwen3VL32B(Qwen3VLAbstract):
             self._initialized = True
             return
 
-        # Try mlx-first approach for Apple Silicon
+        # transformers only. mlx_lm is a TEXT-ONLY loader — it cannot take a
+        # frame, and mlx_lm.load() accepts neither device= nor quantization=, so
+        # the previous mlx-first branch was both wrong and non-functional.
         try:
-            import mlx_lm
+            from transformers import AutoModelForVision2Seq, AutoProcessor
 
-            self.model, self.tokenizer = mlx_lm.load(
-                self.model_name,
-                device=self.device,
-                quantization="int8" if self.load_8bit else None,
-            )
-            logger.info("Qwen3-VL 32B loaded via mlx with int8 quantization")
-        except ImportError:
-            logger.warning("mlx_lm not available, trying transformers fallback")
-        except Exception as e:
-            logger.warning("mlx_lm load failed: %s", e)
-
-        # If mlx succeeded, we're done
-        if self.model is not None:
-            self._initialized = True
-            return
-
-        # Fallback to transformers
-        try:
-            from transformers import AutoModelForVision2Seq, AutoTokenizer
-
-            model_id = "Qwen/Qwen3-VL-32B" if not self.model_name.startswith("Qwen") else self.model_name
-
-            self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+            model_id = (self.model_name if self.model_name.startswith("Qwen")
+                        else "Qwen/Qwen3-VL-32B")
+            self.tokenizer = AutoProcessor.from_pretrained(
+                model_id, trust_remote_code=True)
+            # 8-bit quantization (bitsandbytes) has no MPS backend; only ask for
+            # it on CUDA, otherwise load the model in its native dtype.
+            use_8bit = bool(self.load_8bit) and self.device == "cuda"
             self.model = AutoModelForVision2Seq.from_pretrained(
                 model_id,
                 trust_remote_code=True,
                 device_map=self.device,
-                load_in_8bit=self.load_8bit,
-                torch_dtype="float16" if self.load_8bit else "float32",
+                load_in_8bit=use_8bit,
+                torch_dtype="float16" if use_8bit else "float32",
             )
-            logger.info("Qwen3-VL 32B loaded via transformers")
-            self._initialized = True
-            return
+            logger.info("Qwen3-VL 32B loaded via transformers (8bit=%s)", use_8bit)
         except ImportError:
-            logger.warning("transformers not available for Qwen3-VL fallback")
+            logger.warning("transformers not available for Qwen3-VL")
         except Exception as e:
             logger.warning("transformers load failed: %s", e)
 
@@ -221,56 +209,22 @@ class Qwen3VL32B(Qwen3VLAbstract):
                 "fallback": True,
             }
 
-        try:
-            # Prepare conversation prompt
-            if text_prompt:
-                prompt = f"<|image|>{text_prompt}<|end|>"
-            else:
-                prompt = "<|image|>"
-
-            # Tokenize and generate
-            if hasattr(self.tokenizer, 'apply_chat_template'):
-                messages = [
-                    {"role": "user", "content": [{"type": "image"}, {"type": "text", "text": text_prompt}]}
-                ]
-                input_text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-            else:
-                input_text = prompt
-
-            # Tokenize
-            inputs = self.tokenizer(
-                input_text,
-                return_tensors="pt",
-                padding=True,
-            ).to(self.model.device)
-
-            # Generate
-            with __import__("torch").no_grad():
-                generated = self.model.generate(
-                    **inputs,
-                    max_new_tokens=128,
-                    temperature=0.7,
-                    do_sample=self.load_8bit,
-                )
-
-            # Decode output
-            output_tokens = self.tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
-
-            return {
-                "tokens": output_tokens,
-                "embeddings": np.array([]),
-                "detections": [],
-                "fallback": False,
-            }
-
-        except Exception as e:
-            logger.error("Qwen3-VL frame analysis failed: %s", e)
-            return {
-                "tokens": "",
-                "embeddings": np.array([]),
-                "detections": [],
-                "fallback": True,
-            }
+        # Frame analysis is intentionally NOT wired: the previous body fed only a
+        # literal "<|image|>" string to the tokenizer and never passed `frame`,
+        # so it ran text-only and returned fabricated "tokens". Until a real
+        # processor path (pixel_values via AutoProcessor) is implemented, fail
+        # closed rather than emit an ungrounded result. resolve_product_
+        # manufacturer() below remains the supported (text) Qwen path.
+        logger.warning(
+            "Qwen3-VL frame analysis is unavailable (image path not implemented); "
+            "returning fallback. enable_qwen stays off."
+        )
+        return {
+            "tokens": "",
+            "embeddings": np.array([]),
+            "detections": [],
+            "fallback": True,
+        }
 
     def analyze_batch(
         self,

@@ -1,9 +1,9 @@
 # Model weights & datasets are large and gitignored — do NOT copy into the
-# image; mount them at runtime via the ADSCENE_MODEL_DIR volume.
+# image; mount them at runtime via the CONTEXTLENS_MODEL_DIR volume.
 *.pt
 *.pth
 *.pkl
-BEATs_iter3_plus_AS2M.pt
+BEATs_iter3_plus_AS2M*.pt
 weights/
 models/
 

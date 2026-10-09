@@ -311,6 +311,11 @@ class SceneConsistencyResolver:
 
             for i, det in enumerate(frame_dets):
                 cls = det.get("class_name", "")
+                # An open-vocab label ("wristwatch", "earbuds") is a deliberate
+                # correction of the COCO detector; rewriting it back to the
+                # brand's primary COCO label undoes that pass. Leave it alone.
+                if det.get("detection_source") == "open_vocab":
+                    continue
                 if det.get("brand_context") != best_brand:
                     continue
                 if cls in plausible:

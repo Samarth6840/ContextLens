@@ -132,8 +132,12 @@ def build_profile_from_results(
     for res in results:
         categories: Dict[str, int] = {}
         brands: Dict[str, int] = {}
-        # Accumulate from DIRECT recommendations / brand evidence if present.
-        recs = res.get("recommendations") or []
+        # The compiled pipeline output nests recommendations under `layer3`;
+        # a bare top-level `recommendations` is only a convenience for callers
+        # passing the raw recommender list. Reading only the top-level key left
+        # every real profile with no categories, so niche suppression never fired.
+        recs = (res.get("layer3") or {}).get("recommendations") or \
+            res.get("recommendations") or []
         for rec in recs:
             brand = rec.get("brand")
             if not brand:
@@ -201,6 +205,12 @@ def apply_niche_suppression(
             rec["niche_suppressed"] = True
             rec["_original_score"] = rec["score"]
             rec["score"] = round(rec["score"] * suppress_factor, 3)
+            # `confidence` is the field the UI/outreach shows, so damp it too:
+            # downweighting only `score` leaves the displayed confidence asserting
+            # a strong fit the niche gate just rejected.
+            if rec.get("confidence") is not None:
+                rec["confidence"] = round(
+                    rec["confidence"] * suppress_factor, 3)
         else:
             rec["niche_suppressed"] = False
     return recommendations

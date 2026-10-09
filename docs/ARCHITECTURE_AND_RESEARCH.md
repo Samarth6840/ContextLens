@@ -1,4 +1,4 @@
-# ADSCENE — Architecture & Research Deliverables
+# ContextLens — Architecture & Research Deliverables
 
 Companion to `multimodal-brand-collab-research-prompt-v3.md`. This file maps every
 numbered deliverable in prompt §15 to the concrete design and implementation in
@@ -158,9 +158,11 @@ in the confidence computation.
 
 Not a single number: `evidence_breakdown` exposes per-source `{strength, weight,
 modulated_weight, contribution, status}` so a low score can be traced to its
-cause. Weights (config): logo 0.45, speech 0.20, ocr 0.15, scene 0.10, product
-0.10; `min_evidence_threshold 0.55`. Speech weighting is implemented end-to-end
-(mention evidence flows through the modulation path).
+cause. Weights (config `layer2b`): logo_detected 0.30, speech_mention 0.20,
+ocr_hit 0.18, visual_product_match 0.18, audio_event 0.09, scene_context 0.05;
+`min_evidence_threshold 0.55`. Implemented-source weights are renormalized and
+scaffolded sources (product_retrieval) contribute zero. Speech weighting is
+implemented end-to-end (mention evidence flows through the modulation path).
 
 ### Layer 2c — Temporal memory / cross-scene reasoning
 
@@ -342,11 +344,11 @@ re-plumbing.
    in Phase 1.
 2. **Unresolved logos** (crop-OCR misses): dropped rather than guessed — favors
    precision over recall; acknowledged trade-off.
-3. **Catalog coverage:** 34 hand-curated brands; everything else silently
+3. **Catalog coverage:** 39 hand-curated brands; everything else silently
    unmatched. LLM-assisted mining is the planned fix.
-4. **Contact emails are placeholders** (`contact_verified: False`): a generated
-   draft to a wrong address is a real harm; the UI flags "UNVERIFIED — CONFIRM
-   BEFORE SENDING" and outreach requires an explicit target.
+4. **Contact data is a public website only** (no verified email field): a
+   generated draft to a wrong address is a real harm, so outreach requires an
+   explicit target and the UI flags contacts as unverified.
 5. **Generic `text logo` still produces an unlabeled red box** in scene
    thumbnails — correct (no fabricated name) but visually noisy; a future
    `UNKNOWN BRAND` merge step could group them.
@@ -366,8 +368,8 @@ re-plumbing.
    the results table.
 3. Calibrate `quality_estimator` thresholds against a small held-out hand-labeled
    quality set.
-4. Extend `brand_catalog` contacts with verified public points of contact;
-   flip `contact_verified` where confirmed.
+4. Extend `brand_catalog` contacts with verified public points of contact
+   (currently `contact_website` only).
 5. Add scene-thumbnail "UNKNOWN BRAND" grouping and a quality note on the
    recommend panel.
 6. Adopt the DCI (Document-Compare-Integrate) review loop for the fusion module

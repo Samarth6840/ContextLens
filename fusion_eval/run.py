@@ -52,6 +52,10 @@ def _pred_from(entry: dict, result: dict, timing_total: float) -> dict:
         "top3": top3,
         "latency_layer1": round(timing_total, 3),
         "gpu_mem_mb": 0.0,
+        # Layer-2a gate path (learned_gating / fixed_heuristic / equal /
+        # quality_proportional_fallback) so the report can show how often the
+        # learned gate was actually used vs overridden.
+        "weight_source": (result.get("layer2a") or {}).get("weight_source", "unknown"),
         # Which modalities actually carried GT evidence for this entry — drives
         # the accuracy-vs-modality-availability breakdown.
         "modalities": {

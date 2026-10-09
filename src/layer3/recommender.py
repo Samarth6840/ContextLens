@@ -214,7 +214,12 @@ class BrandRecommender:
             })
 
         # ── SUGGESTED — brands adjacent to detected ones (never on screen) ─
-        for brand in self.graph.suggest_for(detected):
+        # Iterate the TYPED relations, not the flat adjacency list: a
+        # complementary brand (weight 0.55) scores below a direct
+        # same-category competitor (1.0) instead of every neighbour being
+        # treated as an equally strong match.
+        for brand, edges in self.graph.suggested_with_relation(detected).items():
+            rel_weight = max((w for _rel, w, _det in edges), default=0.0)
             info = self.graph.catalog.get(brand, {})
             cats = info.get("categories") or [info.get("category", "GENERAL")]
             primary_cats = set(cats[:1])
@@ -238,7 +243,7 @@ class BrandRecommender:
             ev = 0.0
             for d in drivers:
                 ev = max(ev, _evidence(d))
-            base = ev * self.category_affinity
+            base = ev * self.category_affinity * rel_weight
             if base < 0.15:
                 base = 0.15  # category-affinity baseline for cold start
 

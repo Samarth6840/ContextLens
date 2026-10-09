@@ -10,6 +10,7 @@ Conventions
 """
 from __future__ import annotations
 
+from collections import Counter
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -94,6 +95,11 @@ def compute_metrics(preds: List[dict]) -> Dict[str, float]:
         "brier": round(brier, 4),
         "latency_layer1_mean_s": round(float(np.mean(lat)) if lat else 0.0, 3),
         "gpu_mem_mean_mb": round(float(np.mean(mem)) if mem else 0.0, 1),
+        # Which Layer-2a weighting path actually ran per row. The
+        # "learned vs heuristic" claim is only meaningful if learned_gating
+        # dominates; a large fallback count means the gate is being overridden.
+        "weight_source_counts": dict(Counter(
+            str(p.get("weight_source", "unknown")) for p in preds)),
     })
     return out
 

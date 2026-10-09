@@ -11,7 +11,7 @@ Under the guidance of Dr. Vikas Khare
 
 September 2026
 
-> Note: the codebase uses the working codename **ADSCENE** (`server.py`, `config/config.yaml`). "ContextLens" is the project name used throughout this report. Sections 3 and 4 describe the system as actually implemented in this repository; every claim maps to a file.
+> Note: the codebase uses the single name **ContextLens** throughout — the product name, module docstrings, and the `CONTEXTLENS_*` environment-variable namespace. Sections 3 and 4 describe the system as actually implemented in this repository; every claim maps to a file.
 
 ---
 
@@ -127,11 +127,11 @@ One model per task, each kept frozen (none retrained in Phase 1):
 | --- | --- | --- |
 | Scene object detection | YOLOv8x (COCO, `yolov8x.pt`) + YOLO-World `yolov8s-worldv2.pt` open-vocab pass | Open-vocab promotes curated product labels (wristwatch, earbuds, sneaker …) that COCO cannot represent; curated label wins region on high IoU; every detection tagged `detection_source` |
 | Logo detection | YOLO-World zero-shot | Catalog-generated `<BRAND> logo` text queries merged with generic fallbacks; scene-change keyframe sampling |
-| OCR | PaddleOCR (PP-OCRv3) | `lang=hi` covers Devanagari + Latin wordmarks; logo crops upscaled ×2.0; full-frame OCR for products |
+| OCR | PaddleOCR (3.x) | `lang=hi` covers Devanagari + Latin wordmarks; logo crops upscaled ×2.0; full-frame OCR for products |
 | Speech-to-text | mlx-whisper (MPS) → faster-whisper (INT8 CPU) → openai-whisper | Brand mention detection from shared catalog, exact word-boundary matching any script; fuzzy off by default |
-| Audio events | BEATs (`BEATs_iter3_plus_AS2M.pt`) | 256-dim event summaries; ad/jingle cue evidence |
+| Audio events | BEATs (`BEATs_iter3_plus_AS2M_finetuned_on_AS2M_cpt2.pt`, SHA-256 pinned) | 256-dim event summaries; ad/jingle cue evidence |
 | Visual embeddings | DINOv3 (frozen, 768-dim) | Stride-sampled ≤30 frames |
-| Product match | DINOv2 NN vs reference logo bank | Cosine NN; fails closed to 0 with empty bank |
+| Product match | DINOv3 NN vs product-catalog index | Cosine NN; fails closed to 0 with empty index |
 | Logo classification | CLIP ViT-B/32 vs per-brand reference bank | Primary classifier for icon-only marks; requires `min_similarity 0.22` and `min_margin 0.10` |
 | Central vision | Qwen3-VL 32B (gated, 8-bit) | Frame-filtered; loader fails closed until 32B weights wired |
 | Cloud fallback | Free.ai | OCR/STT fallback when local models unavailable |
@@ -147,17 +147,17 @@ Audio and video features first get a **measured** quality estimate, computed fro
 
 These feed `LearnedGatingNetwork` — a small MLP (audio 2-dim → 64 → 64, video 3-dim → 64 → 64, concatenated → MLP → 2 logits, softmax) that outputs per-modality weights. The weighted representations then pass through `CrossAttentionFusion` (project both to 512-dim, prepend a learnable `[CLS]` token, 3-layer / 8-head transformer encoder, `[CLS]` output projection). A `FixedHeuristicWeighting` baseline (trust the modality above 0.3, equal otherwise) and an equal-weighting path provide the ablation controls.
 
-Two design points matter. First, the gate's output is **sanity-checked per sample**: the direction and magnitude of its weights must agree with the measured quality; where the (initially untrained) gate disagrees, the code falls back to quality-proportional weighting rather than trusting random gating output. Second, all three weighting policies use the *same* fusion transformer, so the weight policy — and only the weight policy — is what differs between the compared arms.
+Two design points matter. First, the gate's output is **sanity-checked per sample**: the direction and magnitude of its weights must agree with the measured quality; where the (initially untrained) gate disagrees, the code falls back to quality-proportional weighting rather than trusting random gating output. `scripts/train_gating.py` produces a checkpoint (`weights/fusion_gating.pt`) that sets `gating_trained=True` on load, at which point the learned gate is trusted and the check only logs deviations. Second, all three weighting policies use the *same* fusion transformer, so the weight policy — and only the weight policy — is what differs between the compared arms.
 
 *Figure 3.2: quality → weight → weighted cross-attention → fused representation*
 
 ## 3.4 Layer 2b — Evidence-Based, Decomposed Confidence
 
-Confidence is not a single number. `evidence_breakdown` exposes per-source `{strength, weight, modulated_weight, contribution, status}`. Weights (config `layer2b`): logo 0.30, speech 0.20, OCR 0.18, visual product match 0.18, audio event 0.10; scene-context (0.04) and product-retrieval (0.0) are scaffolded and contribute zero. Weighted-sum aggregation with `min_evidence_threshold 0.55`: below it, the output is "no confident evidence" rather than a low-confidence guess. Speech evidence is modulated by estimated audio quality, so a speech-only mention counts for less when the audio is noisy.
+Confidence is not a single number. `evidence_breakdown` exposes per-source `{strength, weight, modulated_weight, contribution, status}`. Weights (config `layer2b`): logo 0.30, speech 0.20, OCR 0.18, visual product match 0.18, audio event 0.09, scene-context 0.05; product-retrieval (0.0) is scaffolded and contributes zero (weights renormalize over implemented sources). Weighted-sum aggregation with `min_evidence_threshold 0.55`: below it, the output is "no confident evidence" rather than a low-confidence guess. Speech evidence is modulated by estimated audio quality, so a speech-only mention counts for less when the audio is noisy.
 
 ## 3.5 Layer 2c — Brand Resolution and Temporal Memory
 
-`BrandResolver` (`src/layer2/brand_resolver.py`, 990 lines) asserts a brand only through corroborated routes, in priority order:
+`BrandResolver` (`src/layer2/brand_resolver.py`) asserts a brand only through corroborated routes, in priority order:
 
 1. **OCR on the logo crop / padded superset** — reads a real wordmark, matched against catalog aliases (any script); a multi-line brand card that splits across the box is retried on an upscaled superset.
 2. **CLIP retrieval** — icon-only marks with no readable text are matched against the per-brand reference bank (from LogoDet-3K via `scripts/build_train_bank.py`), requiring similarity *and* top-1/top-2 margin floors.
@@ -177,7 +177,7 @@ A per-creator niche distribution is built from recurring content (scene evidence
 
 ## 3.8 Platform Integration and Safety
 
-The trained pipeline feeds a Flask application (`server.py`, 1540 lines): upload → queued job → pipeline → dashboard JSON, annotated scene thumbnails, clip seek, ranked opportunities, open-set evidence cards, and outreach drafts. Draft email generation (`src/outreach.py`, 3 tones, grounded reasons) and Gemini-grounded brand contact lookup are **hard-gated**: a draft is only produced for a brand that a real logo.dev verification returns as `verified`, and the route fails closed without `LOGO_DEV_SECRET_KEY`; a brand never verified externally cannot reach a draft. Every draft is reviewed by the creator before anything is sent — the platform never emails a brand automatically. Jobs persist in SQLite; a PBKDF2-auth session layer protects the dashboard; deployment ships Docker, gunicorn and WSGI.
+The trained pipeline feeds a Flask application (`server.py`): upload → queued job → pipeline → dashboard JSON, annotated scene thumbnails, clip seek, ranked opportunities, open-set evidence cards, and outreach drafts. Draft email generation (`src/outreach.py`, 3 tones, grounded reasons) and Gemini-grounded brand contact lookup are **hard-gated**: a draft is only produced for a brand that a real logo.dev verification returns as `verified`, and the route fails closed without `LOGO_DEV_SECRET_KEY`; a brand never verified externally cannot reach a draft. Every draft is reviewed by the creator before anything is sent — the platform never emails a brand automatically. Jobs persist in SQLite; a PBKDF2-auth session layer protects the dashboard; deployment ships Docker, gunicorn and WSGI.
 
 # 4. Implementation Status and Preliminary Results
 
@@ -185,12 +185,12 @@ The trained pipeline feeds a Flask application (`server.py`, 1540 lines): upload
 
 The full three-layer pipeline is implemented in code (`src/`), with a working server, frontend, infrastructure and tests:
 
-- **Layer 1** — all perception modules implemented and wired through a concurrent pipeline (`src/pipeline.py`, 2347 lines): YOLOv8x + YOLO-World detection, logo detection with scene-change keyframe sampling, PaddleOCR, Whisper-family ASR, BEATs audio events, DINOv3 embeddings, DINOv2 product index, CLIP logo retrieval, Qwen3-VL (gated, fail-closed), Free.ai fallback. Frozen encoders: DINOv3, BEATs, YOLO, PaddleOCR, CLIP.
-- **Layer 2** — modality-quality-aware fusion (`src/layer2/fusion.py`, 404 lines) and quality estimators (224 lines); evidence-decomposed confidence; brand resolution with temporal smoothing and the full fail-closed guard set; cross-video brand memory; tiered product→brand resolution; creator profiling + niche suppression.
+- **Layer 1** — all perception modules implemented and wired through a concurrent pipeline (`src/pipeline.py`): YOLOv8x + YOLO-World detection, logo detection with scene-change keyframe sampling, PaddleOCR, Whisper-family ASR, BEATs audio events, DINOv3 embeddings, DINOv3 product index, CLIP logo retrieval, Qwen3-VL (gated, fail-closed), Free.ai fallback. Frozen encoders: DINOv3, BEATs, YOLO, PaddleOCR, CLIP.
+- **Layer 2** — modality-quality-aware fusion (`src/layer2/fusion.py`) and quality estimators; evidence-decomposed confidence; brand resolution with temporal smoothing and the full fail-closed guard set; cross-video brand memory; tiered product→brand resolution; creator profiling + niche suppression.
 - **Layer 3** — knowledge graph, explainable recommender, LightGCN affinity model with a training pathway and a demo seed database (`scripts/seed_db.py`).
 - **Platform** — Flask server with job queue, SQLite persistence, auth, dashboard and insights APIs; outreach generation/forward (fail-closed); open-set identification with audited crops; vanilla-JS frontend ("Editorial Archival" design system); Docker/gunicorn/WSGI/Procfile; environment template `.env.example` (secrets never committed).
-- **Brand catalog** — ~36 hand-curated brands with products, categories, per-language aliases (including Devanagari) and contact metadata (placeholders flagged `contact_verified: False`).
-- **Tests** — 30 test modules covering auth, store, server jobs/draft-email/products/affinity, dashboard bounds, insights fallback, outreach persistence, pipeline, brand catalog (856+ lines), brand memory, temporal smoothing, spatial labeling, creator profiling, product resolution, embedding-version mismatch, open-set, logo.dev guard, email lookup, affinity training, layer-3, spec extraction, seed DB, and production infra.
+- **Brand catalog** — 39 hand-curated brands with products, categories, per-language aliases (including Devanagari) and a public `contact_website` per brand.
+- **Tests** — 56 test modules covering auth, store, server jobs/draft-email/products/affinity, dashboard bounds, insights fallback, outreach persistence, pipeline, brand catalog, brand memory, temporal smoothing, spatial labeling, creator profiling, product resolution, embedding-version mismatch, open-set, logo.dev guard, email lookup, affinity training, layer-3, spec extraction, seed DB, and production infra.
 
 ## 4.2 Pipeline Validation Results
 
@@ -221,7 +221,7 @@ The infrastructure, code and verification are in place; what remains is executio
 | Robustness suite: injected noise / blur / sync drift, measuring Δ confidence and Δ recommendation quality per arm | Final month |
 | Qwen3-VL 32B weight wiring (currently fail-closed) and Tier-3 product resolution activation | Final month |
 | Full heavy-model test-suite run (30 modules; two suites executed today) | Before Review 3 |
-| Catalog scale-up, verified public brand contacts (`contact_verified`), closed first round of drafts | Final month |
+| Catalog scale-up, verified public brand contacts, closed first round of drafts | Final month |
 
 *Table 4.2: Remaining work and target timeline*
 
@@ -247,7 +247,7 @@ The infrastructure, code and verification are in place; what remains is executio
 
 - **Run the Layer 2a ablation** on real creator video across seeds with bootstrap confidence intervals, plus the degradation suite (noise, blur, sync shift) that quantifies whether the quality gate helps most exactly where it is designed to.
 - **Train and ship the fusion gate checkpoint**, then wire Qwen3-VL 32B and activate Tier-3 product resolution with real budgets.
-- **Scale the catalog** beyond ~36 curated brands using LLM-assisted mining, with verified public contacts.
+- **Scale the catalog** beyond 39 curated brands using LLM-assisted mining, with verified public contacts.
 - **Creator archive mode**: aggregate many videos per creator into a true layer-2d profile + affinity graph for long-horizon outreach targeting.
 - **Graduate outreach** from reviewed drafts to a documented human-in-the-loop approval workflow with a real email/CRM integration.
 - **Package the Layer 2a fusion result** for a research write-up alongside the final capstone report.

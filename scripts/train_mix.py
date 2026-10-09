@@ -43,7 +43,10 @@ def main() -> int:
                          "substitutes lr_fit = 0.002*5/(4+nc), which is 0.002 for "
                          "this 1-class mix: a 10x miss that only the log reveals.")
     ap.add_argument("--freeze", type=int, default=10)
-    ap.add_argument("--imgsz", type=int, default=640)
+    # Must match the 960 the detector is evaluated and served at: training the
+    # fine-tune at 640 while grading/deploying at 960 is a scale mismatch that
+    # shows up as small-logo recall loss, not as a crash.
+    ap.add_argument("--imgsz", type=int, default=960)
     ap.add_argument("--batch", type=int, default=16)
     ap.add_argument("--device", default=None)
     args = ap.parse_args()

@@ -6,8 +6,6 @@ FP_* (wrong accept) / FN_* (missed) labels below mirror the design brief.
 
 from __future__ import annotations
 
-from typing import Any, Dict
-
 from .metrics import ABSTAIN_VERDICTS
 
 
@@ -39,8 +37,3 @@ def classify(pred: dict) -> str:
     if diff == "blur":
         return "FN_BLUR"
     return "FP_WRONG_CANDIDATE"
-
-
-def _families(pred: dict) -> Dict[str, Any]:
-    fam = pred.get("families", {})
-    return fam if isinstance(fam, dict) else {}

@@ -183,7 +183,10 @@ def merge_open_vocab_detections(
     Every detection is tagged `detection_source` ("coco" or "open_vocab"); the
     tag is informational provenance and never influences matching.
     """
-    merged = [list(d) for d in all_detections]
+    # Deep-copy the inner dicts too: mutating `best` below used to reach back
+    # into the caller's detection dicts (a `list(d)` only copies the outer list),
+    # so a later re-merge saw already-overwritten labels.
+    merged = [[dict(d) for d in frame] for frame in all_detections]
     for idx, ov_dets in (open_vocab_by_index or {}).items():
         idx = int(idx)
         if idx < 0 or idx >= len(merged) or not ov_dets:

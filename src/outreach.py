@@ -1,7 +1,7 @@
 """
 Layer 4 — Personalized outreach automation (Phase 3).
 
-The ADSCENE review flagged that the original outreach draft was a static
+The ContextLens review flagged that the original outreach draft was a static
 uppercase template keyed only to "a brand appeared on screen". This module turns
 outreach generation into a data-driven, explainable step that consumes the full
 Phase 1 + Phase 2 pipeline output:
@@ -135,6 +135,9 @@ def _tone_templates(tone: str) -> Dict[str, str]:
 
 def _subject(tone, brand, creator, rec_type):
     prefix, _, _ = _tone_templates(tone)
+    # creator_voice / data_driven prefixes carry literal {brand}/{creator}
+    # placeholders; without this they ship in the subject line as raw braces.
+    prefix = prefix.format(brand=brand, creator=creator)
     kind = "DIRECT PLACEMENT" if rec_type == "DIRECT" else "CONTENT-FIT OPPORTUNITY"
     return f"{prefix} — {kind}: {brand} × {creator}"
 

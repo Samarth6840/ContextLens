@@ -123,6 +123,12 @@ def build_tracks(
     counter = 0
 
     for frame_idx, dets in enumerate(per_frame_detections):
+        # One track may absorb at most one detection per frame. Without this,
+        # two boxes in the same frame both match the same track (the first
+        # updates last_frame to frame_idx, so `frame_idx - last_frame` is 0 for
+        # the second and still passes), collapsing a whole swarm into a few
+        # tracks and inflating persistence.
+        claimed: set[str] = set()
         for det in dets:
             box = _as_box(det.get("bbox"))
             if box is None:
@@ -131,6 +137,8 @@ def build_tracks(
             best_score = -1.0
             for entry in active:
                 tr, last_frame, last_box = entry
+                if tr.track_id in claimed:
+                    continue
                 if frame_idx - last_frame > max_gap:
                     continue
                 iou = _iou(box, last_box)
@@ -152,6 +160,7 @@ def build_tracks(
                 tr.strengths.append(float(det.get("confidence", 0.0) or 0.0))
                 tracks.append(tr)
                 active.append((tr, frame_idx, box))
+                claimed.add(tr.track_id)
             else:
                 tr, _, _ = best
                 tr.frames.append(frame_idx)
@@ -160,6 +169,7 @@ def build_tracks(
                 tr.strengths.append(float(det.get("confidence", 0.0) or 0.0))
                 idx = active.index(best)
                 active[idx] = (tr, frame_idx, box)
+                claimed.add(tr.track_id)
         # Drop tracks that have gone silent for longer than max_gap.
         active = [e for e in active if frame_idx - e[1] <= max_gap]
 

@@ -15,6 +15,12 @@ breakdowns that a single aggregate hides:
     and the pooled number averages that away;
   * per object size - ContextLens frames are full of small on-screen marks, so
     tiny-logo recall is the number that decides whether this detector is usable.
+
+The `--split` value is injected into a throwaway data.yaml (below) because
+`model.val()` otherwise always reads `images/val`. The earlier
+`benchmark/results/mix_stress_*.json` were produced before that fix and were
+invalid (their stress metrics were the val metrics); they were deleted. Regenerate
+them with `--split stress` once `benchmark/train_mix` is rebuilt.
 """
 
 import argparse
@@ -143,6 +149,9 @@ def main() -> int:
     ap.add_argument("--split", default="val")
     ap.add_argument("--out", default=None)
     ap.add_argument("--device", default=None)
+    # Evaluate at the checkpoint's training resolution. Ultralytics defaults to
+    # 640; grading a 640-trained model at 960 understates it.
+    ap.add_argument("--imgsz", type=int, default=640)
     args = ap.parse_args()
 
     from ultralytics import YOLO
@@ -163,7 +172,7 @@ def main() -> int:
     tmp_yaml = root / f".data_{args.split}.yaml"
     tmp_yaml.write_text(val_yaml)
     try:
-        v = model.val(data=str(tmp_yaml), imgsz=960, device=args.device,
+        v = model.val(data=str(tmp_yaml), imgsz=args.imgsz, device=args.device,
                       verbose=False)
     finally:
         tmp_yaml.unlink(missing_ok=True)
@@ -182,7 +191,7 @@ def main() -> int:
         img = root / sub / sp / f"{stem}.jpg"
         if not img.exists():
             continue
-        r = model.predict(str(img), imgsz=960, conf=0.001, device=args.device,
+        r = model.predict(str(img), imgsz=args.imgsz, conf=0.001, device=args.device,
                           verbose=False)[0]
         d = r.boxes
         xyxy = d.xyxy.cpu().numpy() if d is not None and len(d) else np.zeros((0, 4))
@@ -210,20 +219,24 @@ def main() -> int:
     # empty slice is nan or an IndexError, and the separation numbers are then
     # undefined rather than zero. Say so instead of printing a number.
     n_pos, n_neg = int(is_logo.sum()), int((~is_logo).sum())
-    if not n_neg:
-        print("\n=== confidence separation (val) ===")
-        print(f"  logo images     n={n_pos:>3}  max-conf mean {maxc[is_logo].mean():.4f} "
-              f"median {np.median(maxc[is_logo]):.4f}  p90 {np.percentile(maxc[is_logo],90):.4f}")
-        print("  NON-logo images n=  0  — no negatives in this root, so AUROC /")
-        print("                       FP-per-nonlogo are undefined. Run")
-        print("                       scripts/mine_logo_negatives.py first.")
+    if not n_pos or not n_neg:
+        # Either class empty makes percentile/mean on the empty slice nan or an
+        # IndexError; separation is undefined, not zero.
+        print(f"\n=== confidence separation ({args.split}) ===")
+        if not n_pos:
+            print("  logo images     n=  0  — no positives in this root, so")
+            print("                       recall / AUROC are undefined.")
+        if not n_neg:
+            print("  NON-logo images n=  0  — no negatives in this root, so AUROC /")
+            print("                       FP-per-nonlogo are undefined. Run")
+            print("                       scripts/mine_logo_negatives.py first.")
     else:
         print(f"\n=== confidence separation ({args.split}) ===")
         print(f"  logo images     n={n_pos:>3}  max-conf mean {maxc[is_logo].mean():.4f} "
               f"median {np.median(maxc[is_logo]):.4f}  p90 {np.percentile(maxc[is_logo],90):.4f}")
         print(f"  NON-logo images n={n_neg:>3}  max-conf mean {maxc[~is_logo].mean():.4f} "
               f"median {np.median(maxc[~is_logo]):.4f}  p90 {np.percentile(maxc[~is_logo],90):.4f}")
-    auc = _auroc(maxc, is_logo) if n_neg else None
+    auc = _auroc(maxc, is_logo) if (n_neg and n_pos) else None
     print(f"  AUROC (logo vs non-logo, per-image max conf) = "
           f"{'undefined (no negatives)' if auc is None else auc}")
 

@@ -129,7 +129,7 @@ class CreatorBrandAffinityModel:
         self,
         embed_dim: int = 64,
         n_layers: int = 3,
-        lr: float = 1e-3,
+        lr: float = 1e-2,
         device: Optional[str] = None,
     ):
         if not _TORCH_AVAILABLE:
@@ -155,7 +155,7 @@ class CreatorBrandAffinityModel:
         creator_ids: List[str],
         brand_ids: List[str],
         weights: Optional[List[float]] = None,
-        epochs: int = 30,
+        epochs: int = 100,
         seed: int = 0,
     ) -> Dict:
         """Train the model on a list of (creator, brand[, weight]) co-interactions.
@@ -201,7 +201,12 @@ class CreatorBrandAffinityModel:
         self._model = LightGCNModule(
             n_creators, n_brands, embed_dim=self.embed_dim, n_layers=self.n_layers
         ).to(self.device)
-        opt = torch.optim.Adam(self._model.parameters(), lr=self.lr)
+        # L2 reg on the embedding parameters (LightGCN's standard regularizer),
+        # and a real lr: at 1e-3 with one full-batch step/epoch the embeddings
+        # never left their std=0.1 init, so "trained" was indistinguishable from
+        # random.
+        opt = torch.optim.Adam(self._model.parameters(), lr=self.lr,
+                               weight_decay=1e-4)
 
         # Build training triples (creator, pos_brand, neg_brand) via sampling.
         pos_pairs = [(i, j) for i, j in zip(
@@ -211,6 +216,7 @@ class CreatorBrandAffinityModel:
         pos_set = set(pos_pairs)
 
         loss_val = 0.0
+        steps = 0
         self._model.train()
         for _ in range(epochs):
             opt.zero_grad()
@@ -238,13 +244,17 @@ class CreatorBrandAffinityModel:
             batch = torch.stack(losses).mean()
             batch.backward()
             opt.step()
+            steps += 1
             loss_val = float(batch.detach().cpu())
 
-        self.fitted = True
+        # fitted only if the optimizer actually took a step; otherwise the model
+        # is still at random init and predict_affinity must fail closed.
+        self.fitted = steps > 0
         return {
             "creators": n_creators,
             "brands": n_brands,
             "epochs": epochs,
+            "steps": steps,
             "loss": loss_val,
         }
 

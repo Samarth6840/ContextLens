@@ -88,11 +88,19 @@ class QualityAlignmentLoss(nn.Module):
         Returns:
             Scalar loss
         """
-        # Expected audio weight derived from quality signals
-        expected_audio = torch.clamp(audio_quality[:, 0], 0.1, 0.9)
-        expected_video = torch.clamp(video_quality[:, 0], 0.1, 0.9)
-        total = expected_audio + expected_video
-        expected_audio = expected_audio / (total + 1e-8)
+        # Target must match the inference-time quality blend in
+        # QualityAwareFusion, or the gate is trained toward a different
+        # objective than the one it is scored against. That blend is a mean of
+        # the audio dims and a 0.3/0.3/0.4 mix of the video dims, clamped after
+        # the ratio.
+        per_sample_audio_q = 0.5 * audio_quality[:, 0] + 0.5 * audio_quality[:, 1]
+        per_sample_video_q = (
+            0.3 * video_quality[:, 0]
+            + 0.3 * video_quality[:, 1]
+            + 0.4 * video_quality[:, 2]
+        )
+        total = per_sample_audio_q + per_sample_video_q + 1e-8
+        expected_audio = torch.clamp(per_sample_audio_q / total, 0.1, 0.9)
 
         return self.mse(audio_weight, expected_audio)
 

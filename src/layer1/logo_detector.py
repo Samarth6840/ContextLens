@@ -183,9 +183,10 @@ class YOLOLogoDetector(LogoDetectionBackend):
     A trained class name is a category ("logo"), never a brand verdict.
     """
 
-    # Class-level default so the attribute exists on any instance, including
+    # Class-level defaults so the attributes exist on any instance, including
     # one built via __new__ in tests that skip the model load.
     max_detections: int = 100
+    imgsz: int = 640
 
     def __init__(
         self,
@@ -194,11 +195,18 @@ class YOLOLogoDetector(LogoDetectionBackend):
         device: Optional[str] = None,
         text_queries: Optional[List[str]] = None,
         max_detections: int = 100,
+        imgsz: int = 640,
     ):
         import torch
         from ultralytics import YOLO
 
         self.confidence_threshold = confidence_threshold
+        # Serve at the checkpoint's OWN training resolution. The current
+        # best.pt was trained at imgsz=640; evaluating/serving it at 960 costs
+        # mAP (val mAP50 0.067 -> 0.048 in a controlled comparison). Keep this
+        # equal to config.yaml's logo_detector.imgsz, and bump both together
+        # with a retrained 960 model.
+        self.imgsz = imgsz
         # Bound the candidate set per frame. Ultralytics defaults to 300, and
         # the nested-label pathology in the training data makes this detector
         # emit boxes densely enough that the count reaches the NMS clock and
@@ -225,6 +233,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
         results = self.model(
             image[:, :, ::-1],  # pipeline frames are RGB; Ultralytics wants BGR
             conf=self.confidence_threshold,
+            imgsz=self.imgsz,
             device=self.device,
             max_det=self.max_detections,
             verbose=False,
@@ -251,6 +260,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
             results = self.model(
                 [f[:, :, ::-1] for f in frames[i : i + batch_size]],  # RGB in -> BGR for YOLO
                 conf=self.confidence_threshold,
+                imgsz=self.imgsz,
                 device=self.device,
                 max_det=self.max_detections,
                 verbose=False,
@@ -290,6 +300,7 @@ def create_logo_detector(
     confidence_threshold: float = 0.30,
     device: Optional[str] = None,
     text_queries: Optional[List[str]] = None,
+    imgsz: int = 640,
     **kwargs,
 ) -> LogoDetectionBackend:
     """
@@ -317,6 +328,7 @@ def create_logo_detector(
             model_name=model_name,
             confidence_threshold=confidence_threshold,
             device=device,
+            imgsz=imgsz,
         )
     raise ValueError(
         f"Unknown logo detection backend: '{backend}'. "

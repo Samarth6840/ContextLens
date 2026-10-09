@@ -45,11 +45,10 @@ from src.layer2.brand_resolver import (
     group_unknown_logo_regions,
 )
 
-VIDEO = sys.argv[1] if len(sys.argv) > 1 else os.environ.get(
-    "DIAG_VIDEO",
-    "/var/folders/dj/8w9p_2v54hzdjz60kb2ylq280000gn/T/adscene_uploads/"
-    "K02ESBCO-U1K27_vidssave.com Last Chance to Buy a Smartphone _ 360P.mp4",
-)
+VIDEO = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("DIAG_VIDEO")
+if not VIDEO:
+    sys.exit("usage: python3 scripts/diag_job_defects.py <video> "
+             "(or set DIAG_VIDEO)")
 CFG = yaml.safe_load(open("config/config.yaml"))
 
 

@@ -750,6 +750,7 @@ class Phase1Pipeline:
             confidence_threshold=logo_cfg.get("confidence_threshold", 0.30),
             device=self.device,
             text_queries=queries,
+            imgsz=logo_cfg.get("imgsz", 640),
         )
 
     def _embedding_extractor_factory(self):
@@ -781,7 +782,8 @@ class Phase1Pipeline:
                     "PaddleOCR failed to load (%s) — falling back to Free.ai cloud OCR", e
                 )
                 from src.layer1.freeai_client import FreeAIOCRExtractor
-                return FreeAIOCRExtractor(lang=ocr_cfg["lang"])
+                return FreeAIOCRExtractor(
+                    lang=ocr_cfg["lang"], base_url=freeai_cfg.get("base_url"))
             raise
 
     def _stt_factory(self):
@@ -801,7 +803,9 @@ class Phase1Pipeline:
                     "Local Whisper failed to load (%s) — falling back to Free.ai cloud STT", e
                 )
                 from src.layer1.freeai_client import FreeAISpeechToText
-                return FreeAISpeechToText(model_name="large-v3", device=self.device)
+                return FreeAISpeechToText(
+                    model_name="large-v3", device=self.device,
+                    base_url=freeai_cfg.get("base_url"))
             raise
 
     def _audio_events_factory(self):
@@ -979,6 +983,10 @@ class Phase1Pipeline:
                             "Fusion checkpoint: %d missing key(s): %s",
                             len(result.missing_keys), result.missing_keys,
                         )
+                    # A loaded checkpoint means the gate is trained, so the
+                    # sanity check must stop overriding it and only log
+                    # deviations (see QualityAwareFusion.gating_trained).
+                    model.gating_trained = True
                     logger.info("Loaded fusion checkpoint from %s", ckpt_path)
             return model
         return self._get_or_create("_fusion", _create)
@@ -1149,7 +1157,8 @@ class Phase1Pipeline:
         """Free.ai API client for OCR, STT, Vision (optional, requires API key)."""
         def _create():
             from src.layer1.freeai_client import create_freeai_client
-            return create_freeai_client()
+            base_url = (self.cfg["layer1"].get("freeai") or {}).get("base_url")
+            return create_freeai_client(base_url=base_url)
         return self._get_or_create("_freeai_client", _create)
 
     def _product_resolver_factory(self):
@@ -1179,6 +1188,7 @@ class Phase1Pipeline:
             add_brand_resolution=memory.record,
             qwen=qwen,
             min_plausibility=float(pr_cfg.get("min_plausibility", 0.5)),
+            qwen_max_calls=int(pr_cfg.get("qwen_max_calls_per_video", 0)),
         )
         resolver.memory = memory
         return resolver
@@ -1935,10 +1945,16 @@ class Phase1Pipeline:
         )
         # Blur: clamp to [0, 1] (Laplacian variance / 500, capped)
         blur_norm = min(1.0, video_quality.get("mean_blur_score", 0.0) / 500.0)
+        # Exposure as a QUALITY scalar peaked at mid-gray, matching
+        # VideoQualityEstimator. Passing mean_pixel/255 fed raw brightness to
+        # fusion, so a blown-out frame scored as "high quality" and the gating
+        # prior was inverted.
+        mean_px = video_quality.get("mean_pixel", 127.0)
+        exposure_norm = max(0.0, min(1.0, 1.0 - abs(mean_px - 127.0) / 127.0))
         video_quality_tensor = torch.tensor(
             [[
                 blur_norm,
-                video_quality.get("mean_pixel", 127.0) / 255.0,
+                exposure_norm,
                 video_quality.get("detection_stability", 1.0),
             ]],
             dtype=torch.float32,
