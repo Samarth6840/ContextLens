@@ -114,17 +114,50 @@ def main() -> int:
     ap.add_argument("--frac", type=float, default=0.35)
     ap.add_argument("--min-px", type=int, default=64)
     ap.add_argument("--max-per-image", type=int, default=4)
+    # ---------- target negative ratio ----------------------------------------
+    # The old split mined EVERYTHING it could find and the result mimicked the
+    # split's own availability, not a design choice: 59% blank in val vs 0% in
+    # test. For anchor-free detectors 10-20% pure negative frames is the sweet
+    # spot - enough to suppress the 1.00 FP/frame background pathology without
+    # starving the positive gradient. stop at the ratio cap, never under it.
+    ap.add_argument("--target-neg-ratio", type=float, default=0.10,
+                    help="negatives/positives per split; 0 = mine all found")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     root = Path(args.root)
+
+    def pos_count(split: str) -> int:
+        d = root / "images" / split
+        return len(list(d.glob("*.jpg"))) if d.is_dir() else 0
+
+    budget = {}
+    for s in ("train", "val"):
+        p, negs = pos_count(s), len(list((root / "negatives" / s).glob("*.jpg"))) \
+            if (root / "negatives" / s).is_dir() else 0
+        cap = int(p * args.target_neg_ratio) if args.target_neg_ratio > 0 else 10**12
+        budget[s] = max(0, cap - negs)
+        over = ""
+        if args.target_neg_ratio > 0 and negs > cap:
+            over = ("WARNING: already OVER the target ratio; "
+                    "prune negatives/<split> by hand if that is not intended")
+        print(f"  split={s}: positives={p} existing_negatives={negs} "
+              f"target_ratio={args.target_neg_ratio:.0%} -> budget={budget[s]} {over}")
+
     counts: dict[str, int] = defaultdict(int)
     made: dict[str, int] = defaultdict(int)
     for path, (arr, boxes) in sorted(full_annotation(Path(args.parquet), {"train", "val"}).items()):
+        if all(budget[s] <= 0 for s in ("train", "val")):
+            print("  negative budget reached in every split; stopping early")
+            break
         wins = clean_windows(arr, boxes, args.frac, args.min_px, args.max_per_image)
         if not wins:
             continue
         split = _tld.split_for(path, 0.15, 0.25)
+        if counts[split] + len(wins) > budget[split]:
+            wins = wins[: max(0, budget[split] - counts[split])]
+            if not wins:
+                continue
         counts[split] += len(wins)
         if args.dry_run:
             continue
@@ -144,11 +177,19 @@ def main() -> int:
 
     found = dict(counts)
     if args.dry_run:
-        print(f"clean {args.frac:.0%} window available: {found}")
+        print(f"clean {args.frac:.0%} window available (budget-capped): {found}")
         print(f"would write (test excluded): {dict(made)}")
     else:
-        print(f"clean {args.frac:.0%} window available: {found}")
+        print(f"clean {args.frac:.0%} window available (budget-capped): {found}")
         print(f"wrote negatives: {dict(made)}")
+        final_negs = {s: len(list((root / "negatives" / s).glob("*.jpg")))
+                      for s in ("train", "val")}
+        for s in ("train", "val"):
+            p = pos_count(s)
+            r = final_negs[s] / p if p else float('inf')
+            flag = "OK" if (args.target_neg_ratio <= 0
+                            or 0.10 <= r <= 0.20) else "WARNING: outside 10-20%"
+            print(f"  final {s}: {final_negs[s]}/{p} = {r:.1%} {flag}")
         _wire_data_yaml(root)
     return 0
 
