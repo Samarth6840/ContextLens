@@ -136,7 +136,10 @@ def test_model_prelabelled_frames_are_flagged(tmp_path):
     frames must be separable from hand-drawn ones at export time."""
     frames = _pool(tmp_path / "f", {"aaaaaaaaaa": 2})
     store = lf.Store(tmp_path / "l.jsonl")
-    b = [{"x": 10, "y": 10, "w": 20, "h": 20, "src": "model"}]
+    # 120x80 on a 400x200 frame = 12% of frame area: comfortably above the
+    # small-box export gate, so this test exercises circularity flagging and
+    # not the scale gate (which has its own test below).
+    b = [{"x": 10, "y": 10, "w": 120, "h": 80, "src": "model"}]
     store.put({"file": frames[0].name, "video": "aaaaaaaaaa", "frame_index": 0,
                "verdict": "logo", "boxes": b, "human_drawn": False})
     store.put({"file": frames[1].name, "video": "aaaaaaaaaa",
@@ -218,3 +221,45 @@ def test_proposal_cache_never_loads_on_its_own(tmp_path, monkeypatch, capsys):
                                        "--use-cache"])
     assert lf.main() == 0
     assert served["props"], "--use-cache must still be able to load it deliberately"
+
+
+def test_export_gates_on_small_box_ratio(tmp_path, capsys):
+    """A dataset whose logos sit below the P3 stride floor must not ship: the
+    export is refused BEFORE any file is written, naming the est. px/side."""
+    frames = _pool(tmp_path / "f", {"aaaaaaaaaa": 2})
+    store = lf.Store(tmp_path / "l.jsonl")
+    # 20x20 on a 400x200 frame = 0.5% of frame area -> ~14 px/side @640.
+    # Both frames sub-1%: frac_small = 1.0, far past the 0.25 gate.
+    for f in frames:
+        store.put({"file": f.name, "video": "aaaaaaaaaa",
+                   "frame_index": lf.frame_index_of(f.stem),
+                   "verdict": "logo",
+                   "boxes": [{"x": 10, "y": 10, "w": 20, "h": 20, "src": "human"}],
+                   "human_drawn": True})
+    out = tmp_path / "ds"
+    try:
+        lf.export(argparse.Namespace(export=str(out)), frames, store)
+    except SystemExit as e:
+        assert "under 1% of frame area" in str(e)
+        assert "gate 25%" in str(e)
+    else:
+        raise AssertionError("export shipped a sub-pyramid dataset")
+    assert not out.exists(), "gate fired but files were still written"
+    err = capsys.readouterr().out
+    assert "est. px" not in err  # est-px detail lives in the exit message only
+
+
+def test_export_gate_passes_normal_sized_boxes(tmp_path):
+    """Boxes above 1% of frame area export normally; the gate stays silent."""
+    frames = _pool(tmp_path / "f", {"aaaaaaaaaa": 1})
+    store = lf.Store(tmp_path / "l.jsonl")
+    # 200x100 on 400x200 = 25% of frame area.
+    store.put({"file": frames[0].name, "video": "aaaaaaaaaa", "frame_index": 0,
+               "verdict": "logo",
+               "boxes": [{"x": 50, "y": 50, "w": 200, "h": 100, "src": "human"}],
+               "human_drawn": True})
+    out = tmp_path / "ds"
+    lf.export(argparse.Namespace(export=str(out)), frames, store)
+    rep = json.loads((out / "report.json").read_text())
+    assert rep["frac_boxes_under_1pct_frame"] == 0.0
+    assert (out / "images" / "train" / frames[0].name).exists()

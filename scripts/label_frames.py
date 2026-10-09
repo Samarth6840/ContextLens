@@ -457,7 +457,10 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
     # the gate must be evaluated against the actual checkpoint, not a fixed 640.
     # est_px_per_pct = px of one box side per 1% of frame area-side; for a
     # square-ish mark, side_px at imgsz = sqrt(area_frac) * imgsz.
-    est_px_per_pct = args.imgsz / 100.0
+    # getattr default mirrors the CLI: export() is also called from tests and
+    # tooling with a minimal Namespace that carries only the export path.
+    imgsz = getattr(args, "imgsz", 640)
+    est_px_per_pct = imgsz / 100.0
 
     # ---- pre-export telemetry: hard gate, NOT a report line -----------------
     # The previous version wrote every metric into report.json AFTER the
@@ -484,13 +487,13 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
     tiny = sorted(a for a in pre_areas if a > 0)
     # est_px is side-length, not sqrt(area): a logo is judged by what the
     # backbone actually sees per axis on a square-ish mark.
-    est_px = sorted(round(a ** 0.5 * args.imgsz, 1)
+    est_px = sorted(round(a ** 0.5 * imgsz, 1)
                     for a in tiny[:10])
     GATE_FRAC = 0.25
     if len(pre_areas) and frac_small > GATE_FRAC:
         sys.exit(
             f"FATAL: {frac_small:.0%} of logo boxes are under 1% of frame area "
-            f"(gate {GATE_FRAC:.0%}). At imgsz={args.imgsz} that is ~"
+            f"(gate {GATE_FRAC:.0%}). At imgsz={imgsz} that is ~"
             f"{est_px_per_pct:.1f} px per 1%-side; the smallest boxes sit at "
             f"{est_px[:3]} px/side, below the P3 stride-equals-box floor where "
             f"YOLO regression gradients collapse.\n"
