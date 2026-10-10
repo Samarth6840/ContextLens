@@ -116,6 +116,7 @@ class BrandResolver:
         class_require_corroboration: bool = True,
         max_logo_area_fraction: float = 0.50,
         superset_margin_ratio: float = 0.45,
+        max_unknown_per_frame: Optional[int] = None,
         product_resolver=None,
         progress: Optional[Callable[[str], None]] = None,
     ):
@@ -173,6 +174,14 @@ class BrandResolver:
         # title text resolved to GOOGLE). When the box is oversized it is
         # suppressed fail-closed (brand stays None) and tagged for audit.
         self.max_logo_area_fraction = float(max_logo_area_fraction)
+        # Unknown-brand density suppression (post-filter). When a single frame
+        # generates an implausible number of unresolved logo boxes, treat the
+        # frame as background texture / detector noise and stop feeding the rest
+        # of that frame's unresolved boxes into the UNKNOWN BRAND grouping pass.
+        # This is a frame-level safety valve, not a per-box classifier.
+        self.max_unknown_per_frame = int(
+            max_unknown_per_frame if max_unknown_per_frame is not None else 10
+        )
         # Optional tiered product→brand resolver (Layer 2b). When OCR reads a
         # product name but no catalog brand (e.g. "Mac Mini"), this fallback
         # resolves the product to its parent brand via Wikidata / learned
@@ -1071,8 +1080,10 @@ def build_brand_timeline(
 
 def group_unknown_logo_regions(
     resolved_logos: List[List[dict]],
+    frame_size: Optional[Tuple[int, int]] = None,
     merge_iou: float = 0.3,
     max_frame_gap: int = 2,
+    max_unknown_per_frame: int = 10,
 ) -> List[dict]:
     """Group unresolved logo detections into distinct 'UNKNOWN BRAND' regions.
 
@@ -1100,10 +1111,16 @@ def group_unknown_logo_regions(
              appearance_count, first_frame, last_frame}
     """
     regions: List[dict] = []
+    if frame_size is None:
+        frame_size = (0, 0)
     for idx, frame_dets in enumerate(resolved_logos):
+        unknown_count = 0
         for det in frame_dets:
             if det.get("brand"):
                 continue  # resolved brands are already attributed; not unknown
+            unknown_count += 1
+            if unknown_count > max_unknown_per_frame:
+                continue  # background texture / noisy frame — suppress the rest
             bbox = det.get("bbox")
             if not bbox:
                 continue

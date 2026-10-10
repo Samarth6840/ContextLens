@@ -150,7 +150,7 @@ layer1:
     # Below it the label is treated as a possible false positive (YOLOv8s-World
     # emits spurious low-confidence brand hits, e.g. 'SUPREME logo' on Samsung/
     # Sony/Apple logos) and resolution falls through to crop-OCR for proof.
-    class_confidence: 0.40
+    class_confidence: 0.55
     # Class-label corroboration gate (Phase 1 precision fix, third trust-class
     # alongside the CLIP margin guard and the OCR screen-content gate). A brand
     # asserted from YOLO-World's zero-shot class label ALONE (small spurious
@@ -212,6 +212,7 @@ layer1:
       # recommendations.
       merge_iou: 0.3   # IoU a detection needs for a region to absorb it
       max_frame_gap: 2 # max skipped frames a detection may still join a region
+      max_unknown_per_frame: 10  # suppress unresolved logo boxes past this per-frame density
 
   # CLIP logo-retrieval index (Phase 1/2 — the brand-resolution precision fix).
   # YOLO-World is weak on icon-only / stylized marks where there is no text for
@@ -229,7 +230,7 @@ layer1:
     # <BRAND>_N.png filename). Fail-closed: no bank => no retrieval.
     # Built from the LogoDet-3K train split by scripts/build_train_bank.py.
     reference_dir: "benchmark/reference_logos_bank/reference"
-    min_similarity: 0.22   # min CLIP cosine to accept a retrieval candidate (absolute floor)
+    min_similarity: 0.65   # min CLIP cosine to accept a retrieval candidate (absolute floor)
     # min_margin: top-1 vs top-2 (distinct-brand) similarity gap required to trust
     # the top retrieval as a genuine match. Tuned on a real 65s foldable-video run:
     # ALL 124 noise hits had margin <= 0.052 (86/124 <= 0.02) — random brand

@@ -1688,14 +1688,15 @@ class Phase1Pipeline:
         _lr_cfg = self.cfg["layer1"].get("logo_retrieval", {})
         resolver = BrandResolver(
             ocr_extractor=self.ocr,
-            class_confidence=_br_cfg.get("class_confidence", 0.40),
+            class_confidence=_br_cfg.get("class_confidence", 0.55),
             crop_scale=_br_cfg.get("crop_scale", 2.0),
             retrieval_index=self.logo_retrieval if _lr_cfg.get("enabled", True) else None,
-            retrieval_min_similarity=_lr_cfg.get("min_similarity", 0.22),
+            retrieval_min_similarity=_lr_cfg.get("min_similarity", 0.65),
             retrieval_min_margin=_lr_cfg.get("min_margin", 0.10),
             screen_content_filter=_br_cfg.get("screen_content_filter", {}).get("enabled", True),
             class_require_corroboration=_br_cfg.get("class_require_corroboration", True),
             max_logo_area_fraction=_br_cfg.get("max_logo_area_fraction", 0.50),
+            max_unknown_per_frame=_br_cfg.get("max_unknown_per_frame", 10),
             superset_margin_ratio=_br_cfg.get("superset_margin_ratio", 0.45),
             progress=progress,
         )
@@ -1738,8 +1739,10 @@ class Phase1Pipeline:
         # separate from brand_timeline so it never becomes evidence or a rec.
         unknown_brand_regions = group_unknown_logo_regions(
             all_logo_detections,
+            frame_size=(frames[0].shape[1], frames[0].shape[0]) if frames else None,
             merge_iou=float(_ts_cfg.get("merge_iou", 0.3)),
             max_frame_gap=int(_ts_cfg.get("max_frame_gap", 2)),
+            max_unknown_per_frame=int(_br_cfg.get("max_unknown_per_frame", 10)),
         )
 
         # ── Spatial / temporal label stabilization (secondary remediation) ────
