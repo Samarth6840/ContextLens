@@ -29,6 +29,25 @@ benchmark/*
 !benchmark/results/
 benchmark/results/*
 !benchmark/results/*.json
+# realvideo_v1: the durable record (manifest/splits/README/labels) is tracked;
+# source videos and sampled frames stay ignored (gitignored benchmark/* is how
+# video_labelled was lost — see realvideo_v1/README.md for the backup rule).
+!benchmark/realvideo_v1/
+benchmark/realvideo_v1/*
+!benchmark/realvideo_v1/MANIFEST.sha256
+!benchmark/realvideo_v1/splits.json
+!benchmark/realvideo_v1/README.md
+!benchmark/realvideo_v1/labels.jsonl
+!benchmark/realvideo_v1/labels.proposals.json
+!benchmark/realvideo_v1/export/
+benchmark/realvideo_v1/export/*
+!benchmark/realvideo_v1/export/report.json
+!benchmark/realvideo_v1/export/logo_free.json
+!benchmark/realvideo_v1/export/model_prelabelled.json
+!benchmark/realvideo_v1/export/data.yaml
+!benchmark/realvideo_v1/export/labels/
+benchmark/realvideo_v1/export/labels/*
+!benchmark/realvideo_v1/export/labels/**/*.txt
 
 # Open-set candidate crops (runtime evidence images, regenerated per run)
 static/openset_crops/

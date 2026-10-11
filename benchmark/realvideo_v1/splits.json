@@ -1,0 +1,15 @@
+{
+  "set": "realvideo_v1",
+  "frozen_at": "2026-10-11",
+  "split_by": "video (whole video in exactly one split; adjacent frames are near-duplicates, so random frame splits leak)",
+  "note": "Old benchmark/frozen_test guarantee died with its lost data (benchmark/* gitignored). This is the fresh frozen holdout: val+test below are held OUT of every run performed before this file was committed. Re-running any arm on these videos afterwards is fine for reporting frozen dets, but their split assignment must not change.",
+  "videos": {
+    "88b0502222": {"split": "val",  "source": "vidssave.com 5 Best Smartphones Under Rs20,000 - 360P.mp4", "frames": 80},
+    "df01d5a843": {"split": "test", "source": "vidssave.com Last Chance to Buy a Smartphone - 360P.mp4", "frames": 80},
+    "63fb2ac4d1": {"split": "train", "source": "Samsung's thinnest foldable phone.mp4", "frames": 80},
+    "7864fa1c52": {"split": "train", "source": "vidssave.com Famous Tech Companies  Their Founders.mp4", "frames": 80}
+  },
+  "frames_total": 320,
+  "held_out": ["val", "test"],
+  "held_out_frames": 160
+}
