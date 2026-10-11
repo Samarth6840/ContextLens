@@ -110,22 +110,6 @@ layer1:
     # (a 640 model evaluated at 960 lost ~30% mAP50 here). The current best.pt
     # was trained at imgsz=640; bump this to 960 only alongside a 960 retrain.
     imgsz: 640
-    # Duplicate/nested-box suppression before resolution (logo_detector.py).
-    # One on-screen mark otherwise yields several boxes: YOLO-World gives every
-    # prompt its own class and Ultralytics NMS is class-aware, and the trained
-    # detector emits LogoDet's nested container boxes (low mutual IoU, so NMS
-    # keeps both). Boxes overlapping above dedupe_iou, or contained above
-    # dedupe_containment, collapse to the highest-confidence box — less visual
-    # noise on a frame and proportionally fewer crop-OCR calls. Set dedupe_iou
-    # to 1.0 to disable.
-    dedupe_iou: 0.55
-    dedupe_containment: 0.80
-    # "iou" = hard NMS-style keep of the highest-confidence box per cluster.
-    # "wbf" = Weighted Box Fusion: confidence-weighted average of each cluster's
-    # coordinates, which tracks a jittering mark better than dropping the
-    # losers. Both are class-agnostic; both run before crop-OCR so duplicates
-    # never multiply OCR work.
-    dedupe_method: "iou"
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with
