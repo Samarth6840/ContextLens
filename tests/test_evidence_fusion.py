@@ -22,6 +22,30 @@ def test_temporal_agreement_bonus():
     assert fuse_candidates({"N": two})["ranking"][0]["prob"] > fuse_candidates({"N": SOLO})["ranking"][0]["prob"]
 
 
+def test_speech_segment_start_reaches_logo_across_long_segment():
+    # Real case (Phase 0.4): a 30 s STT segment starts at t=0 and names the
+    # brand; its logo is on screen at t=12. The old 2 s correlation window can
+    # never co-bucket them, so the cross-modal agreement bonus never fires.
+    ledger = {"BMW": [
+        {"family": "logo", "strength": 0.9, "quality": 1.0, "timestamp": 12.0},
+        {"family": "speech", "strength": 1.0, "quality": 1.0, "timestamp": 0.0},
+    ]}
+    old = fuse_candidates(ledger, time_bucket=2.0)["ranking"][0]
+    new = fuse_candidates(ledger, time_bucket=15.0)["ranking"][0]
+    assert old["temporal_agreement"] == 0.0
+    assert new["temporal_agreement"] > 0.0
+    assert new["prob"] > old["prob"]
+
+
+def test_agreement_window_stays_bounded():
+    # Widening to 15 s must not turn genuinely distant evidence into agreement.
+    ledger = {"BMW": [
+        {"family": "logo", "strength": 0.9, "quality": 1.0, "timestamp": 0.0},
+        {"family": "speech", "strength": 1.0, "quality": 1.0, "timestamp": 40.0},
+    ]}
+    assert fuse_candidates(ledger, time_bucket=15.0)["ranking"][0]["temporal_agreement"] == 0.0
+
+
 def test_ambiguous_on_close_margin():
     rival = [{"family": "logo", "strength": 0.88, "quality": 1.0, "timestamp": 0.0}]
     assert fuse_candidates({"N": SOLO, "A": rival})["verdict"] == "ambiguous"

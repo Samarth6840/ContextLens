@@ -546,6 +546,14 @@ class BrandResolver:
                             )
                             joined_ocr = superset_joined
                             out["superset_ocr"] = True
+                            # Adopt a DIRECT catalog match read off the padded
+                            # crop. Without this the superset read was dead: only
+                            # its text reached the product resolver below, so a
+                            # superset that plainly named a brand (e.g. a split
+                            # wordmark line) stayed unresolved unless some other
+                            # tier also happened to resolve it.
+                            if superset_brand:
+                                ocr_brand = superset_brand
             # No outer is_empty guard: _retrieval_query reports a missing bank
             # as "no_retrieval_index" instead of silently skipping the call.
             retrieval_candidates, retrieval_diag = self._retrieval_query(crop)
@@ -563,10 +571,14 @@ class BrandResolver:
         #    Instagram") is the device's screen CONTENT — not a brand appearance.
         #    We suppress it fail-closed (brand stays None) so it never becomes
         #    brand evidence / a direct recommendation, and tag it for audit.
-        ocr_screen_content = (
-            ocr_brand and self._is_screen_content_text(joined_ocr)
-        )
-        if ocr_brand and not ocr_screen_content:
+        # OCR-context gate: a crop whose OCR reads phone-screen/app-drawer UI
+        # text (e.g. "Play Store / Gaming Hub / Instagram") is the device's
+        # screen CONTENT — not a brand appearance. Computed independent of
+        # whether OCR named a catalog brand so it can also gate the product
+        # fallback below (a UI read like "Play Store" must not resolve to a
+        # brand just because it matched no catalog alias directly).
+        screen_content = self._is_screen_content_text(joined_ocr)
+        if ocr_brand and not screen_content:
             out["brand"] = ocr_brand
             out["class_name"] = ocr_brand
             out["class_confirmed"] = False
@@ -589,9 +601,13 @@ class BrandResolver:
             )
             return out
 
-        if ocr_screen_content:
+        if screen_content:
             # On-screen app/UI text masquerading as a brand — suppress. Keep the
             # raw class + reason for audit; never promote to a brand appearance.
+            # This fires regardless of whether OCR named a catalog brand, so a
+            # UI read that only the product/retrieval/class tiers would have
+            # resolved ("Play Store") is still gated off, not just the
+            # direct-OCR match.
             out["screen_content"] = True
             out["screen_content_reason"] = "ocr_text_reads_phone_ui"
             out["unresolved_reason"] = "screen_content"
@@ -1115,15 +1131,21 @@ def group_unknown_logo_regions(
         frame_size = (0, 0)
     for idx, frame_dets in enumerate(resolved_logos):
         unknown_count = 0
-        for det in frame_dets:
+        for di, det in enumerate(frame_dets):
             if det.get("brand"):
                 continue  # resolved brands are already attributed; not unknown
-            unknown_count += 1
-            if unknown_count > max_unknown_per_frame:
-                continue  # background texture / noisy frame — suppress the rest
             bbox = det.get("bbox")
             if not bbox:
                 continue
+            if unknown_count >= max_unknown_per_frame:
+                # Background texture / noisy frame. Tag the suppressed box for
+                # audit (so a dense frame is explainable instead of silently
+                # short) and stop feeding the rest of this frame's unresolved
+                # boxes into the UNKNOWN BRAND grouping pass.
+                if not det.get("density_suppressed"):
+                    frame_dets[di] = {**det, "density_suppressed": True}
+                continue
+            unknown_count += 1
             bbox = tuple(float(v) for v in bbox)
             chosen = None
             for r in regions:

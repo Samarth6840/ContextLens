@@ -476,7 +476,21 @@ layer2b:
     # the reported confidence. 1.0 = identity; fusion_eval/calibration.py fits
     # a value but nothing writes it back here, so serving is uncalibrated.
     temperature: 1.0
-    time_bucket_seconds: 2.0  # correlation window for the dependency discount
+    # Correlation window for the dependency discount AND the cross-modal
+    # agreement bonus (fuse_candidates buckets logo/ocr/speech/product evidence
+    # by timestamp). Speech evidence carries the STT *segment* start timestamp
+    # and segments span up to 30 s (see _vad_split max_segment_s in
+    # src/layer1/audio.py), so a 2 s window almost never co-buckets a spoken
+    # brand with its on-screen logo at second 12 of the segment — the agreement
+    # bonus silently never fires for the most common real case (talking about
+    # the product while showing it). 15.0 covers half a segment.
+    # Acceptance (fusion_eval/run.py, A/B 2.0 vs 15.0 on the same ledgers):
+    # metrics and every per-video verdict are identical — no regression
+    # (fpr 0.0, ambiguous 0.333, abstain 0.333 unchanged). NOTE: that harness's
+    # synthetic videos are silent, so it has zero speech items and cannot
+    # exercise the speech path; the fix itself is covered by
+    # tests/test_evidence_fusion.py (speech-at-segment-start agreement).
+    time_bucket_seconds: 15.0  # was 2.0; see note above
     agreement_bonus: 0.30   # bonus on cross-modal temporal agreement
     accept: 0.30            # below this, top candidate -> low_support verdict
     margin_min: 0.15        # top-vs-2nd margin below this -> ambiguous verdict

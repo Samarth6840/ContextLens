@@ -751,6 +751,9 @@ class Phase1Pipeline:
             device=self.device,
             text_queries=queries,
             imgsz=logo_cfg.get("imgsz", 640),
+            dedupe_iou=float(logo_cfg.get("dedupe_iou", 0.55)),
+            dedupe_containment=float(logo_cfg.get("dedupe_containment", 0.80)),
+            dedupe_method=str(logo_cfg.get("dedupe_method", "iou")),
         )
 
     def _embedding_extractor_factory(self):
@@ -1517,7 +1520,7 @@ class Phase1Pipeline:
                 elif modality == "stt":
                     if isinstance(result, list):
                         _stt_segments = [
-                            s for s in result if s.get("text")
+                            s for s in result if (s.get("text") or "").strip()
                         ]
                         transcript = " ".join(
                             s["text"].strip() for s in _stt_segments
@@ -2485,7 +2488,26 @@ class Phase1Pipeline:
         #   (2) the per-logo crop-OCR text already computed by BrandResolver
         #       (attached to each resolved detection as its `ocr_text`).
         ocr_strength = 0.0
-        ocr_confidences = []
+        # De-duplicated per brand: the SAME wordmark is usually read twice — once
+        # by the full-frame/object-region OCR pass and once by the logo crop-OCR
+        # attached to the resolved detection — and appending both would count one
+        # sighting as two corroborating OCR votes. Keep the strongest read per
+        # brand so ocr_hit reflects distinct evidence, not repetition.
+        # Phase 0.3 note: this is intentionally stricter than deduping by
+        # (frame_idx, text). Frame indices do not line up between
+        # logo_detections/det_idx_map and ocr_results (different sampling), so a
+        # frame-indexed key would usually fail to match the duplicate. Keying the
+        # strongest read per brand collapses repeats regardless of alignment.
+        ocr_conf_by_brand: Dict[str, float] = {}
+
+        def _note_ocr(brand, confidence: float) -> None:
+            if not brand:
+                return
+            key = str(brand).strip().upper()
+            prev = ocr_conf_by_brand.get(key)
+            if prev is None or confidence > prev:
+                ocr_conf_by_brand[key] = float(confidence)
+
         ocr_ev_cfg = self.cfg["layer1"].get("product_resolution", {})
         ocr_evidence_enabled = bool(
             ocr_ev_cfg.get("enable_ocr_evidence", True)
@@ -2493,7 +2515,8 @@ class Phase1Pipeline:
         for frame_ocr in ocr_results:
             for result in frame_ocr:
                 text = result.get("text", "")
-                if match_brand(text):
+                brand = match_brand(text)
+                if brand:
                     # Direct brand-alias OCR read. Raw OCR box confidence must
                     # still be GATED by the documented OCR resolution quality
                     # ceiling (0.90 — the same tier quality the resolver stamps
@@ -2501,8 +2524,9 @@ class Phase1Pipeline:
                     # enforces below). A confident read of incidental ticker
                     # text can never outrank the attribution-quality ceiling,
                     # so ocr_hit can't be inflated by raw optical confidence.
-                    ocr_confidences.append(
-                        min(float(result["confidence"]), _OCR_RESOLUTION_QUALITY)
+                    _note_ocr(
+                        brand,
+                        min(float(result["confidence"]), _OCR_RESOLUTION_QUALITY),
                     )
                 elif ocr_evidence_enabled:
                     # Product names (e.g. "Mac Mini") that don't directly name a
@@ -2524,18 +2548,28 @@ class Phase1Pipeline:
                         strength = max(
                             r["resolution_quality"] for r in resolutions
                         )
-                        ocr_confidences.append(
-                            min(float(result["confidence"]), strength)
+                        _note_ocr(
+                            resolutions[0].get("brand"),
+                            min(float(result["confidence"]), strength),
                         )
         for frame_logos in logo_detections:
             for det in frame_logos:
                 ocr_text = det.get("ocr_text")
-                if ocr_text and match_brand(ocr_text):
-                    # Crop-OCR confidence isn't stored per-detection; use the
-                    # detection's own confidence as a reasonable proxy.
-                    ocr_confidences.append(det.get("confidence", 0.5))
-        if ocr_confidences:
-            ocr_strength = float(np.mean(ocr_confidences))
+                brand = match_brand(ocr_text) if ocr_text else None
+                if brand:
+                    # Crop-OCR confidence isn't stored per-detection; the
+                    # detection's RESOLUTION quality is the honest proxy (a raw
+                    # box score would understate a correctly read wordmark and
+                    # drag the aggregate down). Deduping above collapses it with
+                    # the same brand's full-frame read.
+                    q = det.get("resolution_quality")
+                    _note_ocr(
+                        brand,
+                        float(q) if q is not None
+                        else float(det.get("confidence", 0.5)),
+                    )
+        if ocr_conf_by_brand:
+            ocr_strength = float(np.mean(list(ocr_conf_by_brand.values())))
 
         # Scene context evidence (from audio events)
         # Uses mean detection confidence scaled by event count: a single high-confidence

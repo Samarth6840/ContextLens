@@ -41,6 +41,7 @@ import threading
 import time
 import uuid
 import functools
+from collections import OrderedDict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Dict, Optional
@@ -49,6 +50,7 @@ import yaml
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
 
 from src.layer1.spec_extractor import extract_creator, extract_specs
+from src.layer2.brand_resolver import UNKNOWN_BRAND
 from src.logodev import LogoDevClient
 from src.outreach import generate_personalized_outreach
 
@@ -62,7 +64,17 @@ ALLOWED_EXT = {".mp4", ".mov", ".webm", ".avi", ".mkv", ".m4v"}
 UPLOAD_DIR = Path(tempfile.gettempdir()) / "adscene_uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
+# Bounded LRU cache of rendered scene thumbnails. Re-rendering means re-seeking
+# the source video and re-drawing every annotation, and the Scenes tab requests
+# the same frames repeatedly (paging, filters, re-mounts). Cache the encoded
+# JPEG keyed by (job_id, frame_index) and serve it with a private cache header.
+_SCENE_THUMB_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
+_SCENE_THUMB_CACHE_LOCK = threading.Lock()
+MAX_SCENE_THUMBS = 256
+
 app = Flask(__name__, static_folder="static", static_url_path="")
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES  # fail-closed on oversized uploads
+
 
 JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
@@ -182,6 +194,17 @@ def _normalize_brand(name: str) -> str:
     return name.strip().upper()
 
 
+# Unresolved-brand sentinels: the resolver emits UNKNOWN_BRAND ("__UNKNOWN__")
+# on grouped unknown regions, while scene display uses the human-readable
+# "UNKNOWN BRAND". Both must be treated as "not a real brand" everywhere so a
+# grouped unknown region can never slip through as a fabricated brand.
+_UNKNOWN_BRAND_STRINGS = frozenset({UNKNOWN_BRAND, "UNKNOWN BRAND"})
+
+
+def _is_unknown_brand(name) -> bool:
+    return not name or _normalize_brand(name) in _UNKNOWN_BRAND_STRINGS
+
+
 def _catalog_lookup(brand: str):
     from src.brand_catalog import BRAND_CATALOG
     return BRAND_CATALOG.get(_normalize_brand(brand))
@@ -276,8 +299,11 @@ def _lookup_brand_emails(products: list) -> dict:
             try:
                 entry = email_lookup.lookup_brand_emails(brand)
             except Exception:  # fail closed — never let email lookup break a build
-                entry = {"status": "error"}
-            _EMAIL_LOOKUP_CACHE[key] = entry
+                entry = {"status": "error", "transient": True}
+            # Never memoise a transient failure: one network blip would remove
+            # the brand's contact for the life of the process.
+            if not entry.get("transient"):
+                _EMAIL_LOOKUP_CACHE[key] = entry
         if entry.get("status") == "ok" and entry.get("emails"):
             found[key] = entry
     return found
@@ -516,7 +542,7 @@ def _scene_caption(objects, logos, ocr_texts,
     brand_names = list(dict.fromkeys(
         str(o.get("brand", "")).strip()
         for o in (logos or [])
-        if o.get("brand") and _normalize_brand(o.get("brand")) != "UNKNOWN BRAND"
+        if not _is_unknown_brand(o.get("brand"))
     ))
     if brand_names:
         parts.append(" · ".join(brand_names[:max_brands]))
@@ -639,21 +665,21 @@ def _build_dashboard(result: dict, job: dict) -> dict:
             # boxes we failed to resolve).
             "logos": [
                 {
-                    "class_name": o.get("brand") or "UNKNOWN BRAND",
-                    "confidence": (
-                        o["resolution_quality"]
-                        if o.get("brand") and o.get("resolution_quality") is not None
-                        else o["confidence"]
-                    ),
-                    # Canonical metric name for this number (design principle:
-                    # "one number, one meaning"). RESOLVED brands always show
-                    # resolution_quality — how much we trust the brand
-                    # attribution itself. UNKNOWN boxes keep the raw detector
-                    # box confidence (the only honest number for unresolved).
-                    "confidence_metric": "resolution_quality"
-                    if o.get("brand")
-                    else "detector_box_confidence",
-                }
+            "class_name": o.get("brand") or "UNKNOWN BRAND",
+                "confidence": (
+                    o["resolution_quality"]
+                    if o.get("brand") and o.get("resolution_quality") is not None
+                    else o["confidence"]
+                ),
+                # Canonical metric name for this number (design principle:
+                # "one number, one meaning"). RESOLVED brands always show
+                # resolution_quality — how much we trust the brand
+                # attribution itself. UNKNOWN boxes keep the raw detector
+                # box confidence (the only honest number for unresolved).
+                "confidence_metric": "resolution_quality"
+                if o.get("brand") and not _is_unknown_brand(o.get("brand"))
+                else "detector_box_confidence",
+            }
                 for o in logos
             ],
             # Deterministic, real-detection caption line (objects + resolved
@@ -682,7 +708,7 @@ def _build_dashboard(result: dict, job: dict) -> dict:
             # attribution; a logo the resolver could not name stays "UNKNOWN
             # BRAND" and must never be asserted as a real brand.
             brand = det.get("brand")
-            if not brand or _normalize_brand(brand) == "UNKNOWN BRAND":
+            if _is_unknown_brand(brand):
                 continue
             key = _normalize_brand(brand)
             if key not in product_map:
@@ -1034,11 +1060,21 @@ def _prune_memory_jobs() -> None:
                 if job:
                     to_delete.append(job.get("video_path"))
     for path in to_delete:
-        if path:
-            try:
-                Path(path).unlink(missing_ok=True)
-            except Exception as exc:  # noqa: BLE001
-                app.logger.warning("Failed to remove uploaded video %s: %s", path, exc)
+        if not path:
+            continue
+        # Safety: never delete a file still referenced by a job in memory. Two
+        # job ids could point at the same temp file, and a path that is still
+        # live must not be reclaimed just because a sibling job was pruned.
+        with JOBS_LOCK:
+            still_referenced = any(
+                j.get("video_path") == path for j in JOBS.values()
+            )
+        if still_referenced:
+            continue
+        try:
+            Path(path).unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001
+            app.logger.warning("Failed to remove uploaded video %s: %s", path, exc)
 
 
 def _job_feed_push(job: dict) -> Callable[[str], None]:
@@ -1072,8 +1108,10 @@ def _run_job(job_id: str) -> None:
         if "error" in result:
             raise RuntimeError(result["error"])
         job["stage"] = "COMPILING INTELLIGENCE"
-        job["result"] = result
+        # Build the dashboard BEFORE publishing the result: if _build_dashboard
+        # raises, the job must not persist a result with no dashboard.
         job["dashboard"] = _build_dashboard(result, job)
+        job["result"] = result
         job["status"] = "done"
         job["stage"] = "COMPLETE"
     except Exception as exc:  # noqa: BLE001
@@ -1381,6 +1419,14 @@ def scene_image(job_id: str, frame_index: int):
     if frame_index >= num_frames:
         return jsonify({"error": "FRAME OUT OF RANGE"}), 404
 
+    cache_key = (job_id, frame_index)
+    with _SCENE_THUMB_CACHE_LOCK:
+        cached = _SCENE_THUMB_CACHE.get(cache_key)
+    if cached is not None:
+        return Response(cached, mimetype="image/jpeg", headers={
+            "Cache-Control": "private, max-age=3600",
+        })
+
     frame = _read_video_frame(job["video_path"], frame_index, video_stride)
     if frame is None:
         return jsonify({"error": "FRAME NOT FOUND"}), 404
@@ -1422,16 +1468,28 @@ def scene_image(job_id: str, frame_index: int):
     ok, buf = cv2.imencode(".jpg", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
     if not ok:
         return jsonify({"error": "FRAME ENCODE FAILED"}), 500
-    return Response(buf.tobytes(), mimetype="image/jpeg")
+    jpeg = buf.tobytes()
+    with _SCENE_THUMB_CACHE_LOCK:
+        _SCENE_THUMB_CACHE[cache_key] = jpeg
+        _SCENE_THUMB_CACHE.move_to_end(cache_key)
+        while len(_SCENE_THUMB_CACHE) > MAX_SCENE_THUMBS:
+            _SCENE_THUMB_CACHE.popitem(last=False)
+    return Response(jpeg, mimetype="image/jpeg", headers={
+        "Cache-Control": "private, max-age=3600",
+    })
 
 
 @app.get("/api/crop/<crop_hash>")
+@login_required
 def crop_image(crop_hash: str):
     """Open-set candidate crop evidence image (static/openset_crops/<hash>.png)."""
     crop_path = OPEN_SET_CROP_DIR / f"{crop_hash}.png"
     if not crop_path.is_file():
         return jsonify({"error": "CROP NOT FOUND"}), 404
-    return send_from_directory(str(OPEN_SET_CROP_DIR), f"{crop_hash}.png")
+    response = send_from_directory(str(OPEN_SET_CROP_DIR), f"{crop_hash}.png")
+    # Content-addressed (hash filename): safe for the browser to reuse.
+    response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
 
 
 @app.get("/api/video/<job_id>")
