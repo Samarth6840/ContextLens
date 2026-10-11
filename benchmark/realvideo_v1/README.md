@@ -30,20 +30,87 @@ split authority; `splits.json` is the human-readable copy.
 - Labels (`labels.jsonl` + the exported YOLO set) are committed once review is
   done.
 
+One-command backup (run once a drive is mounted, or add `HF_TOKEN`):
+
+    rsync -a benchmark/realvideo_v1/source/ \
+        /Volumes/<YOUR_DRIVE>/contextlens/realvideo_v1/source/
+    cp benchmark/realvideo_v1/MANIFEST.sha256 /Volumes/<YOUR_DRIVE>/contextlens/
+
+    # private HF dataset (huggingface_hub is already installed):
+    HF_TOKEN=hf_xxx python3 - <<'EOF'
+    from huggingface_hub import HfApi
+    api = HfApi()
+    api.create_repo("contextlens-realvideo-v1", private=True, repo_type="dataset")
+    api.upload_folder(folder_path="benchmark/realvideo_v1/source",
+                      repo_id="<user>/contextlens-realvideo-v1",
+                      repo_type="dataset")
+    api.upload_file(path_or_fileobj="benchmark/realvideo_v1/MANIFEST.sha256",
+                    path_in_repo="MANIFEST.sha256",
+                    repo_id="<user>/contextlens-realvideo-v1",
+                    repo_type="dataset")
+    EOF
+
 ## Ground truth flow (scripts/label_frames.py)
 
 Frames land in `extract/images/{split}/<video_md5>_<frame_index>.jpg`, unlabelled.
 One review pass decides per frame: LOGO (boxes) or NO LOGO (free) or SKIP.
 
-    python3 scripts/label_frames.py \
-        --frames benchmark/realvideo_v1/extract/images \
-        --out benchmark/realvideo_v1/labels.jsonl \
-        --propose weights/logo_detector/train/weights/best.pt \
-        --port 8765
-    # open http://127.0.0.1:8765, label; then:
-    python3 scripts/label_frames.py --frames ... --out ... --export benchmark/realvideo_v1/export
+### Label protocol (frozen — read before labeling)
 
-The detector's proposals are review accelerators, never ground truth; confirmed
-model-only frames land in `model_prelabelled.json` and are excluded when grading
-that detector (circular). NO LOGO is a first-class verdict and is the only source
+- **Hero box** = the largest *clearly visible* brand logo or wordmark on a
+  product, packaging, or the presenter's device. Billboards, background posters
+  and UI overlays ARE labelled as logo boxes but are NOT hero candidates.
+- **Top-1** means a detection matching the hero box under that definition —
+  NOT the largest box by area (that definition is retired: in 1.4b a big
+  background billboard could beat the small hero product mark).
+- Frames with no readable logo are labelled **logo-free** (key `k` in the UI).
+  The count matters: the holdout needs at least ~30 logo-free frames out of
+  the 160, or FP/free-frame is a poor denominator. VERDICT SPLIT IS REPORTED
+  TO THE LEAD EVERY TIME LABELING STOPS.
+- SKIP (double-`s`) is reserved for genuinely unjudgeable frames (unreadable,
+  truncated, ambiguous). A frame with no logo is NOT a skip.
+
+### Blind holdout review (the 160 held-out frames — val+test)
+
+Reviewer starts BLANK. No detector proposals are shown for the holdout: a box
+already drawn on screen anchors the reviewer, and labels produced from the
+detector's own boxes favor the detector arm even when edited (the circular-
+frame exclusion only catches exact copies). Run the server per holdout video in
+zero-circularity mode (no `--propose`, no `--use-cache`; the cached
+`labels.proposals.json` is for the train videos only):
+
+    python3 scripts/label_frames.py --frames benchmark/realvideo_v1/extract/images \
+        --out benchmark/realvideo_v1/labels.jsonl \
+        --only-video 88b0502222 --port 8765      # 5 Best Smartphones (old frozen_test)
+    # label all 80, ctrl-C, then:
+    python3 scripts/label_frames.py --frames benchmark/realvideo_v1/extract/images \
+        --out benchmark/realvideo_v1/labels.jsonl \
+        --only-video df01d5a843 --port 8765      # Last Chance (old val video)
+    # label all 80, ctrl-C.
+
+Exact-copy circularity cannot creep in: zero-circularity mode draws nothing and
+the holdout frames are never pre-labelled. The train videos MAY be pre-labelled
+(`--use-cache`) later for Phase 3.
+
+Then export + grade pooled val+test:
+
+    python3 scripts/label_frames.py --frames benchmark/realvideo_v1/extract/images \
+        --out benchmark/realvideo_v1/labels.jsonl --export benchmark/realvideo_v1/export
+    python3 scripts/owlv2_1p7_grade.py --frames benchmark/realvideo_v1/extract/images \
+        --export benchmark/realvideo_v1/export
+
+The export's detector proposals are never ground truth; confirmed model-only
+frames land in `model_prelabelled.json` and are excluded when grading that
+detector (circular). NO LOGO is a first-class verdict and is the only source
 of FP/free-frame denominators.
+
+### The 1.7 decision pools val+test (160 frames)
+
+Neither arm is fit on this data (OWLv2 zero-shot, YOLO already trained), and one
+80-frame video is too small AND too correlated to carry a pass/fail. Decision is
+on the pooled val+test with per-video numbers reported alongside. Selection
+bias: thresholds are swept on the same frames, which flatters both arms about
+equally — stated in the decision note, not hidden. Contamination: `df01d5a843`
+was the OLD val video and `88b0502222` the OLD frozen_test, so both were seen in
+earlier decisions; this holdout is fresh-SPLIT, not unseen. Phase 2.5 reserves
+one video for confirmation when it gets there.

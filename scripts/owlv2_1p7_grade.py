@@ -121,10 +121,21 @@ def main():
     print(f"export: {len(items_exp)} reviewed frames "
           f"({sum(1 for i in items_exp if len(i[1]))} logo)")
 
-    def grade(dets: dict, skip: set[str]):
+    # Pass/fail runs on the POOLED holdout (val+test videos); per-video numbers
+    # ride alongside because two 80-frame videos are too small each to carry a
+    # call. Holdout identity is the video md5 (frozen in splits.json), NOT the
+    # export dir name: exporting a val-only subset makes split_order(2) hand the
+    # val video a "train" dir, so filtering by dir would silently drop it.
+    HOLDOUT_MD5 = ("88b0502222", "df01d5a843")  # val + test, per splits.json
+
+    def in_holdout(stem: str) -> bool:
+        return stem.split("_", 1)[0] in HOLDOUT_MD5
+
+    def grade(dets: dict, skip: set[str], holdout: bool = True):
         logo = [r for r in items_exp if len(r[1]) and r[0] not in skip and
-                r[0] in dets]
-        free = [r for r in items_exp if not len(r[1]) and r[0] in dets]
+                r[0] in dets and (not holdout or in_holdout(r[0]))]
+        free = [r for r in items_exp if not len(r[1]) and r[0] in dets and
+                (not holdout or in_holdout(r[0]))]
         out = {}
         for thr in THRS:
             hits = 0
@@ -145,10 +156,37 @@ def main():
                         "fp": fp, "n_free": len(free)}
         return out
 
+    # per-video (== per-md5) tables, then the pooled decision
+    def grade_video(dets: dict, skip: set[str], vid: str):
+        lg = [r for r in items_exp if len(r[1]) and r[0] not in skip and
+              r[0] in dets and r[0].startswith(vid)]
+        fr = [r for r in items_exp if not len(r[1]) and r[0] in dets and
+              r[0].startswith(vid)]
+        t = {}
+        for thr in THRS:
+            hits = 0
+            for r in lg:
+                hero = r[1][((r[1][:, 2] - r[1][:, 0]) *
+                             (r[1][:, 3] - r[1][:, 1])).argmax()]
+                d = np.asarray(dets[r[0]])
+                d = d[d[:, 4] >= thr] if len(d) else d
+                if any(ev._iou(x[:4], hero) >= 0.5 for x in d):
+                    hits += 1
+            fp = sum(int((np.asarray(dets[r[0]])[:, 4] >= thr).sum())
+                     if len(dets[r[0]]) else 0 for r in fr)
+            t[thr] = {"top1_hit_rate": round(hits / len(lg), 4) if lg else None,
+                      "hits": hits, "n_logo": len(lg),
+                      "fp_per_free_frame": round(fp / len(fr), 4) if fr else None,
+                      "fp": fp, "n_free": len(fr)}
+        return t
+
+    per_split = {vid: {"owlv2": grade_video(owl_dets, set(), vid),
+                       "yolo": grade_video(yolo_dets, excl, vid)}
+                 for vid in HOLDOUT_MD5}
     mo = grade(owl_dets, set())
     my = grade(yolo_dets, excl)
     n_l, n_f = mo[THRS[0]]["n_logo"], mo[THRS[0]]["n_free"]
-    print(f"\n=== matched-recall (IoU 0.5) — logo frames n={n_l}, "
+    print(f"\n=== held-out pooled = val+test: logo frames n={n_l}, "
           f"free frames n={n_f} ===")
     print(f"  {'conf':>6} | {'OWLv2 top1':>11} {'FP/free':>8} | "
           f"{'YOLO top1':>10} {'FP/free':>8}")
@@ -156,9 +194,19 @@ def main():
         print(f"  {t:>6.2f} | {mo[t]['top1_hit_rate']!s:>11} "
               f"{mo[t]['fp_per_free_frame']!s:>8} | "
               f"{my[t]['top1_hit_rate']!s:>10} {my[t]['fp_per_free_frame']!s:>8}")
+    for vid in HOLDOUT_MD5:
+        a, b = per_split[vid]["owlv2"], per_split[vid]["yolo"]
+        print(f"  [{vid}] logo n={a[THRS[0]]['n_logo']} free n="
+              f"{a[THRS[0]]['n_free']}")
+        for t in (0.05, 0.10, 0.25):
+            print(f"    {t:>5.2f} OWLv2 {a[t]['top1_hit_rate']!s}/"
+                  f"{a[t]['fp_per_free_frame']!s}   "
+                  f"YOLO {b[t]['top1_hit_rate']!s}/{b[t]['fp_per_free_frame']!s}")
     # criterion: some OWLv2 threshold with top1>=0.3, FP/free below detector's at
-    # matched top-1 recall (nearest threshold the detector reaches or exceeds).
+    # matched top-1 recall (nearest threshold the detector reaches or exceeds),
+    # by MORE THAN 10 FRAMES on the pooled 160. Ties fail.
     best = next((t for t in THRS if (mo[t]["top1_hit_rate"] or 0) >= 0.3), None)
+    margin_frames = None
     if best is not None:
         det_match = next((t for t in THRS
                           if (my[t]["top1_hit_rate"] or 0) >= mo[best]["top1_hit_rate"]),
@@ -169,16 +217,29 @@ def main():
               f"FP/free {mo[best]['fp_per_free_frame']} "
               f"({mo[best]['fp']}/{mo[best]['n_free']})")
         if md is not None:
+            margin_frames = md["fp"] - mo[best]["fp"]
             print(f"  YOLO at matched top1 (conf {det_match}): "
-                  f"FP/free {md['fp_per_free_frame']}")
+                  f"FP/free {md['fp_per_free_frame']} "
+                  f"({md['fp']}/{md['n_free']})")
+            print(f"  FP margin (YOLO - OWLv2): {margin_frames} FRAMES "
+                  f"({'PASS' if margin_frames > 10 else 'FAIL: <=10, tie'})")
         else:
             print(f"  YOLO never reaches top1 {mo[best]['top1_hit_rate']} "
                   f"(best {my[THRS[0]]['top1_hit_rate']} at conf {THRS[0]})")
     else:
         print(f"\n  NO OWLv2 threshold reaches top-1 >= 0.3 "
-              f"({mo[THRS[0]]['n_logo']} logo frames reviewed)")
-    out = {"owlv2": mo, "yolo": my, "excluded_circular_for_yolo": len(excl),
-           "chosen_owlv2_conf": best}
+              f"({mo[THRS[0]]['n_logo']} logo frames reviewed) "
+              f"-> FAIL")
+    out = {"pooled": {"owlv2": mo, "yolo": my}, "per_split": per_split,
+           "excluded_circular_for_yolo": len(excl),
+           "chosen_owlv2_conf": best,
+           "fp_margin_frames": margin_frames,
+           "pass": best is not None and margin_frames is not None
+                   and margin_frames > 10,
+           "note": "thresholds swept on the same frames flatter both arms about "
+                   "equally (selection bias); df01d5a843 was the old val video "
+                   "and 88b0502222 the old frozen_test, so both were seen in "
+                   "earlier decisions - holdout is fresh-split, not unseen."}
     Path(args.yolo_dets).with_suffix(".grade.json").write_text(
         json.dumps(out, indent=2))
     print(f"  -> {Path(args.yolo_dets).with_suffix('.grade.json')}")
