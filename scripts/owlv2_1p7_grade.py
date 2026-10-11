@@ -131,6 +131,19 @@ def main():
     def in_holdout(stem: str) -> bool:
         return stem.split("_", 1)[0] in HOLDOUT_MD5
 
+    # OWLv2 persists per-frame {"split":..., "dets":[...]}; YOLO persists the
+    # bare numeric list. Normalize to the (N,5) matrix once per frame.
+    def det_rows(dets: dict, stem: str) -> np.ndarray:
+        if stem not in dets:
+            return np.zeros((0, 5), dtype=float)
+        v = dets[stem]
+        if isinstance(v, dict):
+            v = v.get("dets") or []
+        a = np.asarray(v, dtype=float)
+        if a.ndim == 1:
+            a = a.reshape(-1, 5)
+        return a
+
     def grade(dets: dict, skip: set[str], holdout: bool = True):
         logo = [r for r in items_exp if len(r[1]) and r[0] not in skip and
                 r[0] in dets and (not holdout or in_holdout(r[0]))]
@@ -142,12 +155,12 @@ def main():
             for r in logo:
                 g = r[1]
                 hero = g[((g[:, 2] - g[:, 0]) * (g[:, 3] - g[:, 1])).argmax()]
-                d = np.asarray(dets[r[0]])
+                d = det_rows(dets, r[0])
                 d = d[d[:, 4] >= thr] if len(d) else d
                 if any(ev._iou(x[:4], hero) >= 0.5 for x in d):
                     hits += 1
-            fp = sum(int((np.asarray(dets[r[0]])[:, 4] >= thr).sum())
-                     if len(dets[r[0]]) else 0 for r in free)
+            fp = sum(int((det_rows(dets, r[0])[:, 4] >= thr).sum())
+                     for r in free)
             out[thr] = {"top1_hit_rate": round(hits / len(logo), 4) if logo
                         else None,
                         "hits": hits, "n_logo": len(logo),
@@ -168,12 +181,12 @@ def main():
             for r in lg:
                 hero = r[1][((r[1][:, 2] - r[1][:, 0]) *
                              (r[1][:, 3] - r[1][:, 1])).argmax()]
-                d = np.asarray(dets[r[0]])
+                d = det_rows(dets, r[0])
                 d = d[d[:, 4] >= thr] if len(d) else d
                 if any(ev._iou(x[:4], hero) >= 0.5 for x in d):
                     hits += 1
-            fp = sum(int((np.asarray(dets[r[0]])[:, 4] >= thr).sum())
-                     if len(dets[r[0]]) else 0 for r in fr)
+            fp = sum(int((det_rows(dets, r[0])[:, 4] >= thr).sum())
+                     for r in fr)
             t[thr] = {"top1_hit_rate": round(hits / len(lg), 4) if lg else None,
                       "hits": hits, "n_logo": len(lg),
                       "fp_per_free_frame": round(fp / len(fr), 4) if fr else None,

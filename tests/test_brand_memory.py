@@ -75,6 +75,17 @@ def test_resolve_reference_refuses_mismatched_embedding_version():
     assert bank.resolve_reference("this phone", embedding=[0.1, 0.1], ref_clock=1)
 
 
+def test_resolve_reference_fails_closed_on_untagged_embedded_row():
+    # an embedded row with no embedding_model_version cannot be validated
+    # against the live space -> raise (the shipped bank must be untagged-free).
+    bank = BrandMemoryBank(recency_decay=1.0)
+    bank.record("APPLE", confidence=0.9, embedding=[0.1, 0.1], wall_time=0)
+    import pytest
+    with pytest.raises(ValueError, match="untagged embedded"):
+        bank.resolve_reference("this phone", embedding=[0.1, 0.1],
+                               ref_clock=1, embedding_version="embed:dinov3-vitb16")
+
+
 def test_reference_excludes_returned_products():
     bank = BrandMemoryBank(recency_decay=1.0)
     bank.record("APPLE", confidence=0.9, wall_time=0)

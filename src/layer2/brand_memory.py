@@ -30,6 +30,8 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 logger = logging.getLogger(__name__)
 
+_untagged_warned = False
+
 
 def _cosine(a: List[float], b: List[float]) -> float:
     if not a or not b:
@@ -220,8 +222,9 @@ class BrandMemoryBank:
         is compared against: brand_memory.json persists reference vectors across
         processes, so a vector cached under DINO v2 but queried from DINO v3
         (different space, same dims) would silently corrupt the cosine ranking.
-        Entities without a stored version tag are legacy rows and skipped by the
-        guard (fail-open only where there is no tag to check).
+        Rows tagged with a DIFFERENT version and rows carrying an embedding with
+        NO version tag both fail closed (raise), so the cosine ranking never
+        mixes spaces.
 
         The returned dict always includes the decision's explanation as
         "reason" so the system is auditable (no silent inference).
@@ -234,6 +237,25 @@ class BrandMemoryBank:
         excluded = {b.strip().upper() for b in returned_products}
 
         if ref_embed is not None and embedding_version:
+            untagged = [ent.get("brand") for ent in self._entities.values()
+                        if ent.get("embedding")
+                        and not ent.get("embedding_model_version")]
+            if untagged:
+                global _untagged_warned
+                if not _untagged_warned:
+                    _untagged_warned = True
+                    logger.warning(
+                        "BrandMemoryBank: %d stored row(s) carry an embedding "
+                        "without an embedding_model_version tag (%r) and cannot "
+                        "be validated against the live space — retag them under "
+                        "the active embedder or drop the bank before querying "
+                        "with embeddings.", len(untagged), untagged[:5])
+                raise ValueError(
+                    "BrandMemoryBank: untagged embedded row(s) %r — a persisted "
+                    "vector with no embedding_model_version cannot be compared "
+                    "against live space '%s' safely. Rebuild the bank under the "
+                    "active embedding model." % (untagged, embedding_version)
+                )
             for ent in self._entities.values():
                 stored = ent.get("embedding_model_version")
                 if stored and stored != embedding_version:
