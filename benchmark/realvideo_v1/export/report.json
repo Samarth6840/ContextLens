@@ -1,0 +1,33 @@
+{
+  "frames_reviewed": 239,
+  "frames_exported": 197,
+  "split_frames": {
+    "val": 80,
+    "train": 38,
+    "test": 79
+  },
+  "videos": {
+    "7864fa1c52": "train",
+    "88b0502222": "val",
+    "df01d5a843": "test"
+  },
+  "logo_free_frames": 137,
+  "logo_free_per_split": {
+    "val": 69,
+    "train": 2,
+    "test": 66
+  },
+  "logo_frames": 60,
+  "boxes": 171,
+  "boxes_per_positive_frame": 2.85,
+  "frac_frames_with_a_logo": 0.3046,
+  "area_frac_p10": 0.02063,
+  "area_frac_p50": 0.05436,
+  "area_frac_p90": 0.07201,
+  "frac_boxes_under_1pct_frame": 0.0468,
+  "aspect_p50": 1.34,
+  "logo_frames_model_prelabelled": 0,
+  "logo_frames_human_drawn": 60,
+  "frames_with_named_brand": 0,
+  "named_brands": []
+}

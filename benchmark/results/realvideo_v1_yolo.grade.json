@@ -1,0 +1,507 @@
+{
+  "pooled": {
+    "owlv2": {
+      "0.05": {
+        "top1_hit_rate": 0.25,
+        "hits": 6,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 1.0889,
+        "fp": 147,
+        "n_free": 135
+      },
+      "0.1": {
+        "top1_hit_rate": 0.125,
+        "hits": 3,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.2,
+        "fp": 27,
+        "n_free": 135
+      },
+      "0.15": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0815,
+        "fp": 11,
+        "n_free": 135
+      },
+      "0.2": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0519,
+        "fp": 7,
+        "n_free": 135
+      },
+      "0.25": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0444,
+        "fp": 6,
+        "n_free": 135
+      },
+      "0.3": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0,
+        "fp": 0,
+        "n_free": 135
+      },
+      "0.4": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0,
+        "fp": 0,
+        "n_free": 135
+      },
+      "0.5": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.0,
+        "fp": 0,
+        "n_free": 135
+      }
+    },
+    "yolo": {
+      "0.05": {
+        "top1_hit_rate": 0.375,
+        "hits": 9,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 238.963,
+        "fp": 32260,
+        "n_free": 135
+      },
+      "0.1": {
+        "top1_hit_rate": 0.1667,
+        "hits": 4,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 84.7037,
+        "fp": 11435,
+        "n_free": 135
+      },
+      "0.15": {
+        "top1_hit_rate": 0.1667,
+        "hits": 4,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 42.837,
+        "fp": 5783,
+        "n_free": 135
+      },
+      "0.2": {
+        "top1_hit_rate": 0.125,
+        "hits": 3,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 22.8889,
+        "fp": 3090,
+        "n_free": 135
+      },
+      "0.25": {
+        "top1_hit_rate": 0.0417,
+        "hits": 1,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 12.0519,
+        "fp": 1627,
+        "n_free": 135
+      },
+      "0.3": {
+        "top1_hit_rate": 0.0417,
+        "hits": 1,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 6.1259,
+        "fp": 827,
+        "n_free": 135
+      },
+      "0.4": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 1.0963,
+        "fp": 148,
+        "n_free": 135
+      },
+      "0.5": {
+        "top1_hit_rate": 0.0,
+        "hits": 0,
+        "n_logo": 24,
+        "n_hero": 24,
+        "n_logo_no_hero": 0,
+        "fp_per_free_frame": 0.1185,
+        "fp": 16,
+        "n_free": 135
+      }
+    }
+  },
+  "per_split": {
+    "88b0502222": {
+      "owlv2": {
+        "0.05": {
+          "top1_hit_rate": 0.2727,
+          "hits": 3,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 1.1159,
+          "fp": 77,
+          "n_free": 69
+        },
+        "0.1": {
+          "top1_hit_rate": 0.0909,
+          "hits": 1,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.1884,
+          "fp": 13,
+          "n_free": 69
+        },
+        "0.15": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.1014,
+          "fp": 7,
+          "n_free": 69
+        },
+        "0.2": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0725,
+          "fp": 5,
+          "n_free": 69
+        },
+        "0.25": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.058,
+          "fp": 4,
+          "n_free": 69
+        },
+        "0.3": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 69
+        },
+        "0.4": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 69
+        },
+        "0.5": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 69
+        }
+      },
+      "yolo": {
+        "0.05": {
+          "top1_hit_rate": 0.2727,
+          "hits": 3,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 244.2754,
+          "fp": 16855,
+          "n_free": 69
+        },
+        "0.1": {
+          "top1_hit_rate": 0.0909,
+          "hits": 1,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 86.8841,
+          "fp": 5995,
+          "n_free": 69
+        },
+        "0.15": {
+          "top1_hit_rate": 0.0909,
+          "hits": 1,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 43.5942,
+          "fp": 3008,
+          "n_free": 69
+        },
+        "0.2": {
+          "top1_hit_rate": 0.0909,
+          "hits": 1,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 25.2609,
+          "fp": 1743,
+          "n_free": 69
+        },
+        "0.25": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 13.7391,
+          "fp": 948,
+          "n_free": 69
+        },
+        "0.3": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 6.8841,
+          "fp": 475,
+          "n_free": 69
+        },
+        "0.4": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 1.1449,
+          "fp": 79,
+          "n_free": 69
+        },
+        "0.5": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 11,
+          "n_hero": 11,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.1739,
+          "fp": 12,
+          "n_free": 69
+        }
+      }
+    },
+    "df01d5a843": {
+      "owlv2": {
+        "0.05": {
+          "top1_hit_rate": 0.2308,
+          "hits": 3,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 1.0606,
+          "fp": 70,
+          "n_free": 66
+        },
+        "0.1": {
+          "top1_hit_rate": 0.1538,
+          "hits": 2,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.2121,
+          "fp": 14,
+          "n_free": 66
+        },
+        "0.15": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0606,
+          "fp": 4,
+          "n_free": 66
+        },
+        "0.2": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0303,
+          "fp": 2,
+          "n_free": 66
+        },
+        "0.25": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0303,
+          "fp": 2,
+          "n_free": 66
+        },
+        "0.3": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 66
+        },
+        "0.4": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 66
+        },
+        "0.5": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0,
+          "fp": 0,
+          "n_free": 66
+        }
+      },
+      "yolo": {
+        "0.05": {
+          "top1_hit_rate": 0.4615,
+          "hits": 6,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 233.4091,
+          "fp": 15405,
+          "n_free": 66
+        },
+        "0.1": {
+          "top1_hit_rate": 0.2308,
+          "hits": 3,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 82.4242,
+          "fp": 5440,
+          "n_free": 66
+        },
+        "0.15": {
+          "top1_hit_rate": 0.2308,
+          "hits": 3,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 42.0455,
+          "fp": 2775,
+          "n_free": 66
+        },
+        "0.2": {
+          "top1_hit_rate": 0.1538,
+          "hits": 2,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 20.4091,
+          "fp": 1347,
+          "n_free": 66
+        },
+        "0.25": {
+          "top1_hit_rate": 0.0769,
+          "hits": 1,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 10.2879,
+          "fp": 679,
+          "n_free": 66
+        },
+        "0.3": {
+          "top1_hit_rate": 0.0769,
+          "hits": 1,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 5.3333,
+          "fp": 352,
+          "n_free": 66
+        },
+        "0.4": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 1.0455,
+          "fp": 69,
+          "n_free": 66
+        },
+        "0.5": {
+          "top1_hit_rate": 0.0,
+          "hits": 0,
+          "n_logo": 13,
+          "n_hero": 13,
+          "n_logo_no_hero": 0,
+          "fp_per_free_frame": 0.0606,
+          "fp": 4,
+          "n_free": 66
+        }
+      }
+    }
+  },
+  "excluded_circular_for_yolo": 0,
+  "chosen_owlv2_conf": null,
+  "fp_margin_frames": null,
+  "pass": false,
+  "note": "thresholds swept on the same frames flatter both arms about equally (selection bias); df01d5a843 was the old val video and 88b0502222 the old frozen_test, so both were seen in earlier decisions - holdout is fresh-split, not unseen."
+}

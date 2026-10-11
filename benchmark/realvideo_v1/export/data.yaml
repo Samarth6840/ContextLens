@@ -1,0 +1,7 @@
+path: /Users/samarthjoshi/Downloads/Contextlens/benchmark/realvideo_v1/export
+# hand-reviewed video frames, split by video
+train: images/train
+val: images/val
+
+nc: 1
+names: ['logo']
