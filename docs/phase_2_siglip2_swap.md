@@ -41,6 +41,11 @@ different space.
   `embedding_version` and raises on any mismatch against a stored tag (legacy
   rows without a tag remain usable — fail-open only where there is no tag).
   The pipeline's indirect-mention call site passes the live extractor version.
+  Note (a0dc08, tightened): an embedded row with NO `embedding_model_version`
+  now also raises on any embedded lookup — a persisted vector that cannot be
+  validated against the live space is never compared. Any runtime-written
+  `brand_memory.json` from a deployed instance with untagged embedded rows
+  will fail when queried; rebuild the bank under the active embedder.
 - Nothing else persists vectors to disk (logo-retrieval and product indexes
   are rebuilt in-process at pipeline start; verified no `np.save/npz/pickle`
   of index matrices).
