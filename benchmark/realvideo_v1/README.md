@@ -125,3 +125,22 @@ equally — stated in the decision note, not hidden. Contamination: `df01d5a843`
 was the OLD val video and `88b0502222` the OLD frozen_test, so both were seen in
 earlier decisions; this holdout is fresh-SPLIT, not unseen. Phase 2.5 reserves
 one video for confirmation when it gets there.
+
+### 1.7 verdict (2026-10-11): FAIL — see `../results/realvideo_v1_yolo.grade.json`
+
+OWLv2 zero-shot and the LogoDet-trained detector both lost on the real holdout.
+Composition of the pooled 160: **24 logo frames with hero, 0 logo frames
+without hero, 135 free**. At its best threshold (conf 0.05) OWLv2 reached
+top-1 recall **6/24 (0.25)** — below the pre-registered ≥0.3 bar, so no
+threshold entered the FP-margin comparison and the decision fails outright
+(`chosen_owlv2_conf: None`). The detector's best top-1 was **9/24 (0.375)** at
+**239 FP per free frame**; even at conf 0.25 it still emits ~12 FP/free — a
+domain-gap failure on real creator video, and the retired 0.886 bar now looks
+optimistic. Logos are rare in real frames (15% of the holdout), so production
+is dominated by rejecting free frames, where both arms are weakest, and the
+training positives are starving.
+
+Decision consequence: OWLv2 is dropped with no further rescoring; Phase 3.1
+(cancelled, its verifier would sit on OWLv2 proposals); Phase 3 on hold until
+Phase 1.8 (detector+OCR+retrieval+fusion vs OCR+retrieval-only on this same
+holdout) decides between 3.2 and OCR+CLIP-primary.
