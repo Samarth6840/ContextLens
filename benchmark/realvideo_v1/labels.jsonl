@@ -158,3 +158,82 @@
 {"file": "88b0502222_016080.jpg", "video": "88b0502222", "frame_index": 16080, "verdict": "logo", "boxes": [{"x": 299, "y": 177, "w": 166, "h": 30, "src": "human", "on": true, "hero": false}, {"x": 128, "y": 174, "w": 61, "h": 51, "src": "human", "on": true, "hero": true}], "human_drawn": true}
 {"file": "88b0502222_017560.jpg", "video": "88b0502222", "frame_index": 17560, "verdict": "logo", "boxes": [{"x": 60, "y": 104, "w": 176, "h": 27, "src": "human", "on": true, "hero": false}, {"x": 296, "y": 235, "w": 60, "h": 37, "src": "human", "on": true, "hero": true}], "human_drawn": true}
 {"file": "88b0502222_018840.jpg", "video": "88b0502222", "frame_index": 18840, "verdict": "logo", "boxes": [{"x": 301, "y": 176, "w": 296, "h": 86, "src": "human", "on": true, "hero": false}, {"x": 69, "y": 245, "w": 47, "h": 63, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_000000.jpg", "video": "df01d5a843", "frame_index": 0, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_000240.jpg", "video": "df01d5a843", "frame_index": 240, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_000440.jpg", "video": "df01d5a843", "frame_index": 440, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_000680.jpg", "video": "df01d5a843", "frame_index": 680, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_000880.jpg", "video": "df01d5a843", "frame_index": 880, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_001120.jpg", "video": "df01d5a843", "frame_index": 1120, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_001320.jpg", "video": "df01d5a843", "frame_index": 1320, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_001560.jpg", "video": "df01d5a843", "frame_index": 1560, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_001760.jpg", "video": "df01d5a843", "frame_index": 1760, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_002000.jpg", "video": "df01d5a843", "frame_index": 2000, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_002200.jpg", "video": "df01d5a843", "frame_index": 2200, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_002440.jpg", "video": "df01d5a843", "frame_index": 2440, "verdict": "logo", "boxes": [{"x": 193, "y": 133, "w": 84, "h": 40, "src": "human", "on": true, "hero": false}, {"x": 349, "y": 31, "w": 115, "h": 23, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_002640.jpg", "video": "df01d5a843", "frame_index": 2640, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_002880.jpg", "video": "df01d5a843", "frame_index": 2880, "verdict": "logo", "boxes": [{"x": 173, "y": 25, "w": 181, "h": 65, "src": "human", "on": true, "hero": false}, {"x": 247, "y": 155, "w": 152, "h": 60, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_003080.jpg", "video": "df01d5a843", "frame_index": 3080, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_003320.jpg", "video": "df01d5a843", "frame_index": 3320, "verdict": "logo", "boxes": [{"x": 328, "y": 27, "w": 95, "h": 19, "src": "human", "on": true, "hero": false}, {"x": 122, "y": 183, "w": 47, "h": 44, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_003560.jpg", "video": "df01d5a843", "frame_index": 3560, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_003760.jpg", "video": "df01d5a843", "frame_index": 3760, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_004000.jpg", "video": "df01d5a843", "frame_index": 4000, "verdict": "logo", "boxes": [{"x": 212, "y": 106, "w": 45, "h": 24, "src": "human", "on": true, "hero": true}, {"x": 574, "y": 12, "w": 57, "h": 26, "src": "human", "on": true, "hero": false}], "human_drawn": true}
+{"file": "df01d5a843_004200.jpg", "video": "df01d5a843", "frame_index": 4200, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_004440.jpg", "video": "df01d5a843", "frame_index": 4440, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_004640.jpg", "video": "df01d5a843", "frame_index": 4640, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_004880.jpg", "video": "df01d5a843", "frame_index": 4880, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_005080.jpg", "video": "df01d5a843", "frame_index": 5080, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_005320.jpg", "video": "df01d5a843", "frame_index": 5320, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_005520.jpg", "video": "df01d5a843", "frame_index": 5520, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_005760.jpg", "video": "df01d5a843", "frame_index": 5760, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_005960.jpg", "video": "df01d5a843", "frame_index": 5960, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_006200.jpg", "video": "df01d5a843", "frame_index": 6200, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_006400.jpg", "video": "df01d5a843", "frame_index": 6400, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_006640.jpg", "video": "df01d5a843", "frame_index": 6640, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_006840.jpg", "video": "df01d5a843", "frame_index": 6840, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_007080.jpg", "video": "df01d5a843", "frame_index": 7080, "verdict": "logo", "boxes": [{"x": 142, "y": 35, "w": 91, "h": 32, "src": "human", "on": true, "hero": false}, {"x": 159, "y": 173, "w": 323, "h": 106, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_007320.jpg", "video": "df01d5a843", "frame_index": 7320, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_007520.jpg", "video": "df01d5a843", "frame_index": 7520, "verdict": "logo", "boxes": [{"x": 108, "y": 120, "w": 109, "h": 56, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_007760.jpg", "video": "df01d5a843", "frame_index": 7760, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_007960.jpg", "video": "df01d5a843", "frame_index": 7960, "verdict": "logo", "boxes": [{"x": 51, "y": 143, "w": 333, "h": 92, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_008200.jpg", "video": "df01d5a843", "frame_index": 8200, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_008400.jpg", "video": "df01d5a843", "frame_index": 8400, "verdict": "logo", "boxes": [{"x": 166, "y": 56, "w": 104, "h": 135, "src": "human", "on": true, "hero": true}, {"x": 282, "y": 112, "w": 323, "h": 174, "src": "human", "on": true, "hero": false}], "human_drawn": true}
+{"file": "df01d5a843_008640.jpg", "video": "df01d5a843", "frame_index": 8640, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_008840.jpg", "video": "df01d5a843", "frame_index": 8840, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_009080.jpg", "video": "df01d5a843", "frame_index": 9080, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_009280.jpg", "video": "df01d5a843", "frame_index": 9280, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_009520.jpg", "video": "df01d5a843", "frame_index": 9520, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_009720.jpg", "video": "df01d5a843", "frame_index": 9720, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_009960.jpg", "video": "df01d5a843", "frame_index": 9960, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_010160.jpg", "video": "df01d5a843", "frame_index": 10160, "verdict": "logo", "boxes": [{"x": 114, "y": 191, "w": 45, "h": 107, "src": "human", "on": true, "hero": false}, {"x": 179, "y": 233, "w": 45, "h": 54, "src": "human", "on": true, "hero": true}, {"x": 238, "y": 242, "w": 46, "h": 59, "src": "human", "on": true, "hero": false}, {"x": 300, "y": 252, "w": 37, "h": 51, "src": "human", "on": true, "hero": false}, {"x": 358, "y": 264, "w": 43, "h": 41, "src": "human", "on": true, "hero": false}], "human_drawn": true}
+{"file": "df01d5a843_010400.jpg", "video": "df01d5a843", "frame_index": 10400, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_010640.jpg", "video": "df01d5a843", "frame_index": 10640, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_010840.jpg", "video": "df01d5a843", "frame_index": 10840, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_011080.jpg", "video": "df01d5a843", "frame_index": 11080, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_011280.jpg", "video": "df01d5a843", "frame_index": 11280, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_011520.jpg", "video": "df01d5a843", "frame_index": 11520, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_011720.jpg", "video": "df01d5a843", "frame_index": 11720, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_011960.jpg", "video": "df01d5a843", "frame_index": 11960, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_012160.jpg", "video": "df01d5a843", "frame_index": 12160, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_012400.jpg", "video": "df01d5a843", "frame_index": 12400, "verdict": "logo", "boxes": [{"x": 41, "y": 125, "w": 349, "h": 123, "src": "human", "on": true, "hero": true}, {"x": 399, "y": 131, "w": 252, "h": 107, "src": "human", "on": true, "hero": false}], "human_drawn": true}
+{"file": "df01d5a843_012600.jpg", "video": "df01d5a843", "frame_index": 12600, "verdict": "logo", "boxes": [{"x": 232, "y": 120, "w": 194, "h": 84, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_012840.jpg", "video": "df01d5a843", "frame_index": 12840, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_013040.jpg", "video": "df01d5a843", "frame_index": 13040, "verdict": "logo", "boxes": [{"x": 226, "y": 53, "w": 184, "h": 89, "src": "human", "on": true, "hero": true}, {"x": 433, "y": 322, "w": 193, "h": 38, "src": "human", "on": true, "hero": false}], "human_drawn": true}
+{"file": "df01d5a843_013280.jpg", "video": "df01d5a843", "frame_index": 13280, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_013480.jpg", "video": "df01d5a843", "frame_index": 13480, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_013720.jpg", "video": "df01d5a843", "frame_index": 13720, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_013920.jpg", "video": "df01d5a843", "frame_index": 13920, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_014160.jpg", "video": "df01d5a843", "frame_index": 14160, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_014400.jpg", "video": "df01d5a843", "frame_index": 14400, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_014600.jpg", "video": "df01d5a843", "frame_index": 14600, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_014840.jpg", "video": "df01d5a843", "frame_index": 14840, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_015040.jpg", "video": "df01d5a843", "frame_index": 15040, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_015280.jpg", "video": "df01d5a843", "frame_index": 15280, "verdict": "logo", "boxes": [{"x": 295, "y": 143, "w": 61, "h": 49, "src": "human", "on": true, "hero": true}], "human_drawn": true}
+{"file": "df01d5a843_015480.jpg", "video": "df01d5a843", "frame_index": 15480, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_015720.jpg", "video": "df01d5a843", "frame_index": 15720, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_015920.jpg", "video": "df01d5a843", "frame_index": 15920, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_016160.jpg", "video": "df01d5a843", "frame_index": 16160, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_016360.jpg", "video": "df01d5a843", "frame_index": 16360, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_016600.jpg", "video": "df01d5a843", "frame_index": 16600, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_016800.jpg", "video": "df01d5a843", "frame_index": 16800, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_017040.jpg", "video": "df01d5a843", "frame_index": 17040, "verdict": "free", "boxes": [], "human_drawn": false}
+{"file": "df01d5a843_017240.jpg", "video": "df01d5a843", "frame_index": 17240, "verdict": "free", "boxes": [], "human_drawn": false}
