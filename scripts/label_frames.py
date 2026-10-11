@@ -90,7 +90,7 @@ button{font:inherit;padding:5px 12px;border:0;border-radius:5px;cursor:pointer}
   <b id=id>-</b><span id=prog>-</span><span id=st>-</span>
   <span style=color:#6E6E6A>drag=draw &middot; d=delete last box &middot;
   <b>l</b>=LOGO &middot; <b>k</b>=NO LOGO &middot; <b>s</b>=SKIP &middot;
-  <b>n</b>=next, unlabelled</span>
+  <b>n</b>=next, unlabelled &middot; click box, then <b>h</b>=HERO</span>
 </div>
 <!-- The canvas must be a sibling of the img, not the img itself: an <img> has
      no 2D context, so drawing straight onto it throws and kills load(). -->
@@ -103,12 +103,13 @@ button{font:inherit;padding:5px 12px;border:0;border-radius:5px;cursor:pointer}
   <button onclick="location.reload()">&gt; reload</button>
 </div>
 <script>
-let cur=null, boxes=[], nat=[0,0], cv=null;
+let cur=null, boxes=[], nat=[0,0], cv=null, sel=-1;
 const $=s=>document.querySelector(s);
 async function load(){
   const r=await fetch('/api/next'); cur=await r.json();
   if(!cur){$('#id').textContent='DONE - every frame reviewed or skipped';return}
-  boxes=(cur.proposals||[]).map(b=>({...b,src:'model',on:true}));
+  boxes=(cur.proposals||[]).map(b=>({...b,src:'model',on:true,hero:false}));
+  sel=-1;
   $('#im').src='/img/'+cur.file;
   $('#id').textContent=cur.video+'#'+cur.frame_index;
   await new Promise(res=>{const i=$('#im');i.complete?res():i.onload=res});
@@ -135,8 +136,10 @@ function draw(){
   ctx.clearRect(0,0,c.width,c.height);
   ctx.lineWidth=2;
   boxes.forEach((b,i)=>{
-    ctx.strokeStyle=b.on?(b.src==='model'?'#3af':'#fa3'):'#666';
-    ctx.fillStyle=b.on?(b.src==='model'?'rgba(50,170,255,.18)':'rgba(255,170,50,.18)'):'transparent';
+    const isHero=b.on&&b.hero;
+    ctx.strokeStyle=b.on?(b.src==='model'?'#3af':isHero?'#fd6':'#fa3'):'#666';
+    ctx.fillStyle=b.on?(b.src==='model'?'rgba(50,170,255,.18)':isHero?'rgba(255,215,64,.28)':'rgba(255,170,50,.18)'):'transparent';
+    ctx.lineWidth=isHero?3:2;
     const x=b.x*s[0],y=b.y*s[1],w=b.w*s[0],h=b.h*s[1];
     if(!b.on)ctx.setLineDash([5,4]);ctx.strokeRect(x,y,w,h);ctx.setLineDash([]);
     ctx.fillRect(x,y,w,h);
@@ -144,8 +147,9 @@ function draw(){
     // Index text sits on unknown video, so it carries a dark halo rather
     // than picking one colour: white-on-bright and black-on-dark both fail.
     ctx.lineWidth=3;ctx.strokeStyle='rgba(0,0,0,.75)';
-    ctx.strokeText(`${i}${b.src==='model'?'m':'h'}`,x+2,y+12);
-    ctx.fillStyle=b.on?'#fff':'#bbb';ctx.fillText(`${i}${b.src==='model'?'m':'h'}`,x+2,y+12);
+    const tag=`${i}${b.src==='model'?'m':'h'}${b.hero?'H':''}`;
+    ctx.strokeText(tag,x+2,y+12);
+    ctx.fillStyle=b.on?'#fff':'#bbb';ctx.fillText(tag,x+2,y+12);
     ctx.lineWidth=2;
   });
   if(drag){const a=Math.min(drag.x0,drag.x1),b2=Math.min(drag.y0,drag.y1);
@@ -162,10 +166,11 @@ addEventListener('mouseup',()=>{
   const x=Math.min(d.x0,d.x1),y=Math.min(d.y0,d.y1);
   const w=Math.abs(d.x1-d.x0),h=Math.abs(d.y1-d.y0);
   if(w*h>nat[0]*nat[1]*0.25){alert('box covers >25% of the frame - is that a logo, or a scene/ad/card?');return}
-  if(w>=4&&h>=4)boxes.push({x,y,w,h,src:'human',on:true});
+  if(w>=4&&h>=4)boxes.push({x,y,w,h,src:'human',on:true,hero:false});
   draw()});
 $('#im').addEventListener('click',e=>{
   const [x,y]=xy(e),hit=boxes.findIndex(b=>x>=b.x&&x<=b.x+b.w&&y>=b.y&&y<=b.y+b.h);
+  sel=hit;
   if(hit>=0){boxes[hit].on=!boxes[hit].on;draw()}});
 function xy(e){const r=$('#im').getBoundingClientRect(),s=sc();
   return[(e.clientX-r.left)/s[0],(e.clientY-r.top)/s[1]]}
@@ -198,6 +203,19 @@ $('#br').addEventListener('keydown',e=>{
 });
 addEventListener('keydown',e=>{
   if(e.target.tagName==='INPUT')return;   // typing a brand must not trigger keys
+  if(e.key==='h'){
+    // HERO: the ONE box top-1 is measured against. The protocol defines it as
+    // the largest *clearly visible* brand mark, NOT largest-by-area, so the
+    // choice is the reviewer's, and at most one box may carry the flag. The
+    // grader reads heroes.json (not argmax area) once labels export.
+    const b=sel>=0?boxes[sel]:null;
+    if(b&&b.on){
+      boxes.forEach(x=>x.hero=false);
+      b.hero=true;
+      $('#st').textContent='hero: box '+sel;
+      draw();
+    }
+    return}
   if(e.key==='d'){boxes.pop();draw()}
   else if(e.key==='k')save('free');else if(e.key==='n')skip();
   else if(e.key==='l')save('logo');
@@ -508,6 +526,7 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
     src = {f.name: f for f in files}
 
     areas, aspects, per_split, logo_free, model_only = [], [], defaultdict(int), [], []
+    heroes: dict[str, dict] = {}
     for r in rows:
         sp = vid_split[r["video"]]
         d, dl = out / "images" / sp, out / "labels" / sp
@@ -528,20 +547,38 @@ def export(args: argparse.Namespace, files: list[Path], store: Store) -> int:
             continue
         h, w = cv2.imread(str(f)).shape[:2]
         lines = []
+        hero_boxes = [b for b in r["boxes"] if b.get("hero")]
+        if len(hero_boxes) > 1:
+            sys.exit(f"FATAL: {r['file']} has {len(hero_boxes)} hero boxes; "
+                     f"exactly one box may be the hero the top-1 criterion "
+                     f"is measured against (0 is valid, >1 is not).")
         for b in r["boxes"]:
-            x, y, bw, bh = b["x"], b["y"], b["w"], b["h"]
+            # Clamp the box to the frame. A box that pokes outside the image
+            # edge (common for logos) normalizes to >1/<0 coordinates, which
+            # Ultralytics treats as a corrupt label and silently skips the
+            # WHOLE image — losing training frames with no error.
+            x0 = max(0.0, float(b["x"]))
+            y0 = max(0.0, float(b["y"]))
+            x1 = min(w, float(b["x"]) + float(b["w"]))
+            y1 = min(h, float(b["y"]) + float(b["h"]))
+            bw, bh = x1 - x0, y1 - y0
             if bw < 1 or bh < 1:
                 continue
-            lines.append(f"0 {(x+bw/2)/w:.6f} {(y+bh/2)/h:.6f} "
+            lines.append(f"0 {(x0+bw/2)/w:.6f} {(y0+bh/2)/h:.6f} "
                          f"{bw/w:.6f} {bh/h:.6f}")
             areas.append(bw * bh / (w * h))
             aspects.append(bw / max(bh, 1e-6))
+            if b.get("hero"):
+                heroes[Path(r['file']).stem] = {"x": x0, "y": y0,
+                                                "w": bw, "h": bh}
         (dl / f"{Path(r['file']).stem}.txt").write_text("\n".join(lines) + "\n")
         per_split[sp] += 1
         if not r.get("human_drawn"):
             model_only.append({"file": r["file"], "video": r["video"],
                                "frame_index": r["frame_index"], "split": sp,
                                "boxes": len(lines)})
+    if heroes:
+        (out / "heroes.json").write_text(json.dumps(heroes, indent=1))
 
     pos_rows = [r for r in rows if r["boxes"]]
     a = np.array(areas) if areas else np.zeros(0)

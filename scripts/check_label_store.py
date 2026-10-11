@@ -97,6 +97,17 @@ def check(path: Path) -> None:
     if boxes_on_free:
         raise ValueError(f"free verdict carrying boxes: {boxes_on_free}")
 
+    for r in rows:
+        nhero = sum(1 for b in r["boxes"] if b.get("hero"))
+        if nhero > 1:
+            raise ValueError(
+                f"{r['file']} has {nhero} hero boxes; exactly one box may "
+                f"be the hero top-1 is measured against")
+        if nhero and r["verdict"] != "logo":
+            raise ValueError(
+                f"{r['file']} carries a hero box on a {r['verdict']} verdict; "
+                f"hero is only meaningful on a LOGO frame")
+
     judged = [r for r in rows if r["verdict"] != "skip"]
     free = sum(1 for r in judged if r["verdict"] == "free")
     logo = sum(1 for r in judged if r["verdict"] == "logo")

@@ -60,9 +60,14 @@ One review pass decides per frame: LOGO (boxes) or NO LOGO (free) or SKIP.
 - **Hero box** = the largest *clearly visible* brand logo or wordmark on a
   product, packaging, or the presenter's device. Billboards, background posters
   and UI overlays ARE labelled as logo boxes but are NOT hero candidates.
-- **Top-1** means a detection matching the hero box under that definition —
-  NOT the largest box by area (that definition is retired: in 1.4b a big
-  background billboard could beat the small hero product mark).
+  The reviewer DESIGNATES the hero in the UI (click the box, then `h`); it is
+  recorded in the label row and exported to `heroes.json`. The designated hero
+  decides top-1 even when a second, larger box (a billboard) is present.
+- **Top-1** means a detection matching the *designated hero box* — NOT the
+  largest box by area (that definition is retired: in 1.4b a big background
+  billboard could beat the small hero product mark). The grader reads
+  `heroes.json`; a logo frame with no designated hero (e.g. only billboard
+  boxes) stays in the composition count but is excluded from the top-1 pool.
 - Frames with no readable logo are labelled **logo-free** (key `k` in the UI).
   The count matters: the holdout needs at least ~30 logo-free frames out of
   the 160, or FP/free-frame is a poor denominator. VERDICT SPLIT IS REPORTED

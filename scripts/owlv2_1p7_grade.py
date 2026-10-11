@@ -121,6 +121,24 @@ def main():
     print(f"export: {len(items_exp)} reviewed frames "
           f"({sum(1 for i in items_exp if len(i[1]))} logo)")
 
+    # HERO designation (label_frames export): the ONE box top-1 is measured
+    # against. Protocol defines it as the largest *clearly visible* brand mark,
+    # NOT the largest-by-area, so the reviewer picks it and it is persisted in
+    # heroes.json {stem: {x, y, w, h}} in pixel coords. A logo frame with no
+    # designated hero (e.g. only billboard boxes, which are logos but not hero
+    # candidates) is NOT top-1-gradeable: it stays in the composition count
+    # (n_logo) but is excluded from the top-1 pool (n_hero). No argmax-area
+    # fallback — that is the 1.4b proxy the protocol explicitly rejected.
+    heroes_path = export / "heroes.json"
+    if not heroes_path.is_file():
+        sys.exit("FATAL: no heroes.json in export. Top-1 is measured against "
+                 "the designated hero box (label_frames UI: click a box, "
+                 "press h); without it the grader must not fall back to "
+                 "largest-by-area.")
+    hero_box = {}
+    for stem, hb in json.loads(heroes_path.read_text()).items():
+        hero_box[stem] = [hb["x"], hb["y"], hb["x"] + hb["w"], hb["y"] + hb["h"]]
+
     # Pass/fail runs on the POOLED holdout (val+test videos); per-video numbers
     # ride alongside because two 80-frame videos are too small each to carry a
     # call. Holdout identity is the video md5 (frozen in splits.json), NOT the
@@ -149,21 +167,24 @@ def main():
                 r[0] in dets and (not holdout or in_holdout(r[0]))]
         free = [r for r in items_exp if not len(r[1]) and r[0] in dets and
                 (not holdout or in_holdout(r[0]))]
+        hero_frames = [r for r in logo if r[0] in hero_box]  # top-1 pool
         out = {}
         for thr in THRS:
             hits = 0
-            for r in logo:
-                g = r[1]
-                hero = g[((g[:, 2] - g[:, 0]) * (g[:, 3] - g[:, 1])).argmax()]
+            for r in hero_frames:
+                # hero box is the reviewer's designation, NOT argmax-area
+                hero = np.asarray(hero_box[r[0]], dtype=float)
                 d = det_rows(dets, r[0])
                 d = d[d[:, 4] >= thr] if len(d) else d
                 if any(ev._iou(x[:4], hero) >= 0.5 for x in d):
                     hits += 1
             fp = sum(int((det_rows(dets, r[0])[:, 4] >= thr).sum())
                      for r in free)
-            out[thr] = {"top1_hit_rate": round(hits / len(logo), 4) if logo
+            out[thr] = {"top1_hit_rate":
+                        round(hits / len(hero_frames), 4) if hero_frames
                         else None,
                         "hits": hits, "n_logo": len(logo),
+                        "n_hero": len(hero_frames),
                         "fp_per_free_frame": round(fp / len(free), 4) if free
                         else None,
                         "fp": fp, "n_free": len(free)}
@@ -175,20 +196,20 @@ def main():
               r[0] in dets and r[0].startswith(vid)]
         fr = [r for r in items_exp if not len(r[1]) and r[0] in dets and
               r[0].startswith(vid)]
+        hf = [r for r in lg if r[0] in hero_box]
         t = {}
         for thr in THRS:
             hits = 0
-            for r in lg:
-                hero = r[1][((r[1][:, 2] - r[1][:, 0]) *
-                             (r[1][:, 3] - r[1][:, 1])).argmax()]
+            for r in hf:
+                hero = np.asarray(hero_box[r[0]], dtype=float)
                 d = det_rows(dets, r[0])
                 d = d[d[:, 4] >= thr] if len(d) else d
                 if any(ev._iou(x[:4], hero) >= 0.5 for x in d):
                     hits += 1
             fp = sum(int((det_rows(dets, r[0])[:, 4] >= thr).sum())
                      for r in fr)
-            t[thr] = {"top1_hit_rate": round(hits / len(lg), 4) if lg else None,
-                      "hits": hits, "n_logo": len(lg),
+            t[thr] = {"top1_hit_rate": round(hits / len(hf), 4) if hf else None,
+                      "hits": hits, "n_logo": len(lg), "n_hero": len(hf),
                       "fp_per_free_frame": round(fp / len(fr), 4) if fr else None,
                       "fp": fp, "n_free": len(fr)}
         return t
@@ -199,8 +220,9 @@ def main():
     mo = grade(owl_dets, set())
     my = grade(yolo_dets, excl)
     n_l, n_f = mo[THRS[0]]["n_logo"], mo[THRS[0]]["n_free"]
-    print(f"\n=== held-out pooled = val+test: logo frames n={n_l}, "
-          f"free frames n={n_f} ===")
+    n_h = mo[THRS[0]]["n_hero"]
+    print(f"\n=== held-out pooled = val+test: logo frames n={n_l} "
+          f"(hero-designated n={n_h}), free frames n={n_f} ===")
     print(f"  {'conf':>6} | {'OWLv2 top1':>11} {'FP/free':>8} | "
           f"{'YOLO top1':>10} {'FP/free':>8}")
     for t in THRS:
@@ -209,7 +231,8 @@ def main():
               f"{my[t]['top1_hit_rate']!s:>10} {my[t]['fp_per_free_frame']!s:>8}")
     for vid in HOLDOUT_MD5:
         a, b = per_split[vid]["owlv2"], per_split[vid]["yolo"]
-        print(f"  [{vid}] logo n={a[THRS[0]]['n_logo']} free n="
+        print(f"  [{vid}] logo n={a[THRS[0]]['n_logo']} "
+              f"(hero n={a[THRS[0]]['n_hero']}) free n="
               f"{a[THRS[0]]['n_free']}")
         for t in (0.05, 0.10, 0.25):
             print(f"    {t:>5.2f} OWLv2 {a[t]['top1_hit_rate']!s}/"
@@ -226,7 +249,7 @@ def main():
                          None)
         md = my[det_match] if det_match is not None else None
         print(f"\n  OWLv2 @conf {best}: top1 {mo[best]['top1_hit_rate']} "
-              f"({mo[best]['hits']}/{mo[best]['n_logo']}) "
+              f"({mo[best]['hits']}/{mo[best]['n_hero']} hero frames) "
               f"FP/free {mo[best]['fp_per_free_frame']} "
               f"({mo[best]['fp']}/{mo[best]['n_free']})")
         if md is not None:
@@ -241,7 +264,7 @@ def main():
                   f"(best {my[THRS[0]]['top1_hit_rate']} at conf {THRS[0]})")
     else:
         print(f"\n  NO OWLv2 threshold reaches top-1 >= 0.3 "
-              f"({mo[THRS[0]]['n_logo']} logo frames reviewed) "
+              f"({mo[THRS[0]]['n_hero']} hero frames reviewed) "
               f"-> FAIL")
     out = {"pooled": {"owlv2": mo, "yolo": my}, "per_split": per_split,
            "excluded_circular_for_yolo": len(excl),
