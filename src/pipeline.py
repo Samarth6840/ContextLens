@@ -887,6 +887,8 @@ class Phase1Pipeline:
             reference_dir=ref_dir,
             device=self.device,
             checkpoint_path=lr_cfg.get("checkpoint_path"),
+            model_name=lr_cfg.get("model_name", "ViT-B-32"),
+            pretrained=lr_cfg.get("pretrained", "openai"),
         )
         if index.is_empty:
             logger.warning(

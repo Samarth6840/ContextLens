@@ -110,6 +110,22 @@ layer1:
     # (a 640 model evaluated at 960 lost ~30% mAP50 here). The current best.pt
     # was trained at imgsz=640; bump this to 960 only alongside a 960 retrain.
     imgsz: 640
+    # Duplicate/nested-box suppression before resolution (logo_detector.py).
+    # One on-screen mark otherwise yields several boxes: YOLO-World gives every
+    # prompt its own class and Ultralytics NMS is class-aware, and the trained
+    # detector emits LogoDet's nested container boxes (low mutual IoU, so NMS
+    # keeps both). Boxes overlapping above dedupe_iou, or contained above
+    # dedupe_containment, collapse to the highest-confidence box — less visual
+    # noise on a frame and proportionally fewer crop-OCR calls. Set dedupe_iou
+    # to 1.0 to disable.
+    dedupe_iou: 0.55
+    dedupe_containment: 0.80
+    # "iou" = hard NMS-style keep of the highest-confidence box per cluster.
+    # "wbf" = Weighted Box Fusion: confidence-weighted average of each cluster's
+    # coordinates, which tracks a jittering mark better than dropping the
+    # losers. Both are class-agnostic; both run before crop-OCR so duplicates
+    # never multiply OCR work.
+    dedupe_method: "iou"
     sampling_strategy: "scene_change"  # "stride" | "detection_gated" | "scene_change" | "all"
     max_logo_candidates: 30  # max frames for detection-gated sampling; caps workload for dense/long videos
     # Generic fallback queries. The pipeline automatically merges these with
@@ -224,6 +240,21 @@ layer1:
   # reference_dir: benchmark/reference_logos_bank  # per-brand subdirectories
   logo_retrieval:
     enabled: True
+    # Encoder for the reference-bank query index (Phase 2). Default is the
+    # original CLIP ViT-B-32 (openai) — the space every min_similarity /
+    # min_margin number below was calibrated in. A documented alternative,
+    # "ViT-B-16-SigLIP2-256" (open_clip, siglip2 pretrained), embeds crops and
+    # the bank in a DIFFERENT space: same output dim (768) but incompatible
+    # nearest neighbours, and the raw logits have a different scale, so the
+    # CLIP-calibrated 0.65 / 0.10 gates DO NOT transfer. Do not ship that swap
+    # until the gates are re-tuned on held-out real-video labels (Phase 2.5,
+    # blocked on the 1.7 verdict). The embedding_version tag
+    # (logo_clip:open_clip:<model>:<pretrained>:rgb1) pins the space so a
+    # CLIP-built bank can never be queried from a SigLIP2 process — that guard
+    # is what makes a premature config flip fail loudly instead of silently
+    # corrupting retrieval.
+    model_name: "ViT-B-32"
+    pretrained: "openai"
     # Reference bank: a directory with one subdirectory per canonical brand
     # (SUB_DIR = brand name, e.g. SAMSUNG/, APPLE/, ...). If this dir is absent
     # the pipeline falls back to the flat benchmark/reference_logos (grouped by

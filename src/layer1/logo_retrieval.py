@@ -24,10 +24,9 @@ Honesty / fail-closed (repo ethos):
   * Reference images are keyed by canonical catalog brands so adding a brand
     later is "add images under a <BRAND>/ dir and rebuild" — not a code change.
 
-CLIP is loaded lazily (ViT-B/32 via open_clip if a checkpoint is configured,
-else the built-in `clip` package), exactly mirroring the existing
-scripts/logo_bench_backends.py RegionProposalCLIPBackend loading, so we never
-load two divergent CLIP instances in one process.
+CLIP is loaded lazily (open_clip ViT-B/32 openai by default; Phase 2 overrides
+via model_name/pretrained, e.g. SigLIP2) so we never load two divergent CLIP
+instances in one process.
 """
 
 from __future__ import annotations
@@ -57,11 +56,19 @@ class LogoRetrievalIndex:
         min_similarity: float = 0.20,
         top_k: int = 3,
         checkpoint_path: Optional[str] = None,
+        model_name: str = "ViT-B-32",
+        pretrained: str = "openai",
     ):
         self.reference_dir = Path(reference_dir)
         self.min_similarity = float(min_similarity)
         self.top_k = int(top_k)
         self.checkpoint_path = checkpoint_path or None
+        # Encoder identity. Defaults preserve the original CLIP ViT-B/32 space;
+        # a Phase 2 config override (e.g. "ViT-B-16-SigLIP2-256") re-embeds the
+        # bank in a DIFFERENT space, which the embedding_version tag below pins
+        # so a CLIP-built index can never be queried from a SigLIP2 process.
+        self.model_name = model_name
+        self.pretrained = pretrained
 
         self._clip = None
         self._preprocess = None
@@ -76,39 +83,34 @@ class LogoRetrievalIndex:
     # False until _load() has run; lets us record which CLIP checkpoint/space
     # produced the stored embeddings so querying with a different one fails
     # loudly instead of silently corrupting nearest-neighbor results.
+    # Deterministic from init (the encoder identity never changes after __init__),
+    # so the tag is valid before a lazy weight load and the mismatch guard works
+    # even for a code path that checks it eagerly. :rgb1 suffix pins the channel
+    # convention. Index rows and query crops must agree: the pipeline hands us
+    # RGB crops, and a mismatch here silently flips every embedding (nearest-
+    # neighbour results stay plausible but are meaningless). The
+    # model_name/pretrained in the tag likewise separate CLIP from SigLIP2
+    # spaces (same output dim, incompatible nearest neighbours), so a bank
+    # embedded under one encoder can never be queried from a process running
+    # the other without the guard firing.
     @property
-    def embedding_version(self) -> Optional[str]:
-        if not self._use_open_clip and self._clip is None:
-            return None
-        if self._use_open_clip:
-            source = self.checkpoint_path or "open_clip:ViT-B-32"
-        else:
-            source = "clip:ViT-B/32"
-        # :rgb1 suffix pins the channel convention. Index rows and query crops
-        # must agree: the pipeline hands us RGB crops, and a mismatch here
-        # silently flips every embedding (nearest-neighbour results stay
-        # plausible but are meaningless). Bumping the tag invalidates any
-        # index cached under the old BGR convention.
+    def embedding_version(self) -> str:
+        source = self.checkpoint_path or f"open_clip:{self.model_name}:{self.pretrained}"
         return f"logo_clip:{source}:rgb1"
 
-    # ── CLIP lifecycle (lazy; mirrors RegionProposalCLIPBackend) ─────────
+    # ── Encoder lifecycle (lazy) ──────────────────────────────────────────
     def _load(self, device: str = "cpu"):
         self._device = device
         if self._clip is not None:
             return
-        if self.checkpoint_path and Path(self.checkpoint_path).exists():
-            import open_clip
+        import open_clip
 
-            model, _, preprocess = open_clip.create_model_and_transforms(
-                "ViT-B-32", pretrained=self.checkpoint_path, device=device
-            )
-            model.eval()
-            self._clip, self._preprocess, self._use_open_clip = model, preprocess, True
-        else:
-            import clip
-
-            model, preprocess = clip.load("ViT-B/32", device=device)
-            self._clip, self._preprocess, self._use_open_clip = model, preprocess, False
+        model, _, preprocess = open_clip.create_model_and_transforms(
+            self.model_name, pretrained=self.checkpoint_path or self.pretrained,
+            device=device,
+        )
+        model.eval()
+        self._clip, self._preprocess, self._use_open_clip = model, preprocess, True
 
     def _embed_image_batch(self, crops: Sequence[np.ndarray]) -> np.ndarray:
         """L2-normalized CLIP image embeddings for an array of RGB crops.
@@ -220,6 +222,8 @@ class LogoRetrievalIndex:
         reference_dir: str,
         device: str = "cpu",
         checkpoint_path: Optional[str] = None,
+        model_name: str = "ViT-B-32",
+        pretrained: str = "openai",
     ) -> "LogoRetrievalIndex":
         """Convenience builder: one brand per subdirectory of reference_dir.
 
@@ -230,6 +234,8 @@ class LogoRetrievalIndex:
         index = LogoRetrievalIndex(
             reference_dir=reference_dir,
             checkpoint_path=checkpoint_path,
+            model_name=model_name,
+            pretrained=pretrained,
         )
         base = Path(reference_dir)
         if not base.is_dir():

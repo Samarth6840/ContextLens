@@ -848,6 +848,17 @@ class TestLogoRetrievalValidation:
     def test_canonical_uppercases_and_strips(self):
         assert _canonical("  Under Armour ") == "UNDER ARMOUR"
 
+    def test_embedding_version_separates_clip_and_siglip2(self):
+        # Phase 2 swap: switching the encoder must change the embedding-space
+        # tag, else a CLIP-built bank could be queried from a SigLIP2 process
+        # (same 768 dims, incompatible nearest neighbours). The pipeline's
+        # assert_embedding_version guard lives on this difference.
+        idx_clip = LogoRetrievalIndex(model_name="ViT-B-32", pretrained="openai")
+        idx_sig = LogoRetrievalIndex(model_name="ViT-B-16-SigLIP2-256", pretrained="webli")
+        assert "ViT-B-32" in idx_clip.embedding_version
+        assert "ViT-B-16-SigLIP2-256" in idx_sig.embedding_version
+        assert idx_clip.embedding_version != idx_sig.embedding_version
+
     def test_hyphenated_brand_accepted(self):
         assert LogoRetrievalIndex().add_brand("COCA-COLA", [self._blank()]) == 1
 
