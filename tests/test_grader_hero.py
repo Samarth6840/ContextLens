@@ -14,9 +14,11 @@ def _iou(a, b):
 def test_grader_hero_designation_not_largest(tmp_path):
     """Top-1 must hit the DESIGNATED hero box, never argmax-area.
 
-    Every logo frame carries a small hero (80,40,120,60) and a larger
-    non-overlapping billboard (0,60,199,99); the frozen dets hit the hero box.
-    A grader falling back to largest-by-area scores 0.0 (iou(hero,bill)=0).
+    Every hero-designated logo frame carries a small hero (80,40,120,60) and a
+    larger non-overlapping billboard (0,60,199,99); the frozen dets hit the
+    hero box. A grader falling back to largest-by-area scores 0.0
+    (iou(hero,bill)=0). One logo frame is billboard-only (no hero): it counts
+    in n_logo, is reported as n_logo_no_hero, and drops out of the top-1 pool.
     """
     subprocess.run(
         [sys.executable, str(REPO / "scripts" / "make_grader_dryrun.py"),
@@ -36,10 +38,11 @@ def test_grader_hero_designation_not_largest(tmp_path):
     assert out["fp_margin_frames"] == 12
     m = out["pooled"]["owlv2"][str(best)]
     assert m["n_logo"] == 8
-    assert m["n_hero"] == 8
+    assert m["n_hero"] == 7          # one billboard-only frame has no hero
+    assert m["n_logo_no_hero"] == 1
     assert m["top1_hit_rate"] == 1.0
-    assert m["hits"] == 8  # hero hits, NOT the larger billboard boxes
-    assert "hero-designated" in g.stdout
+    assert m["hits"] == 7  # hero hits, NOT the larger billboard boxes
+    assert "with hero, 1 without hero" in g.stdout
 
 
 def test_grader_blind_mode_no_prelabelled(tmp_path):

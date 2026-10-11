@@ -168,6 +168,7 @@ def main():
         free = [r for r in items_exp if not len(r[1]) and r[0] in dets and
                 (not holdout or in_holdout(r[0]))]
         hero_frames = [r for r in logo if r[0] in hero_box]  # top-1 pool
+        logo_no_hero = [r for r in logo if r[0] not in hero_box]
         out = {}
         for thr in THRS:
             hits = 0
@@ -185,6 +186,7 @@ def main():
                         else None,
                         "hits": hits, "n_logo": len(logo),
                         "n_hero": len(hero_frames),
+                        "n_logo_no_hero": len(logo_no_hero),
                         "fp_per_free_frame": round(fp / len(free), 4) if free
                         else None,
                         "fp": fp, "n_free": len(free)}
@@ -197,6 +199,7 @@ def main():
         fr = [r for r in items_exp if not len(r[1]) and r[0] in dets and
               r[0].startswith(vid)]
         hf = [r for r in lg if r[0] in hero_box]
+        lnoh = [r for r in lg if r[0] not in hero_box]
         t = {}
         for thr in THRS:
             hits = 0
@@ -210,6 +213,7 @@ def main():
                      for r in fr)
             t[thr] = {"top1_hit_rate": round(hits / len(hf), 4) if hf else None,
                       "hits": hits, "n_logo": len(lg), "n_hero": len(hf),
+                      "n_logo_no_hero": len(lnoh),
                       "fp_per_free_frame": round(fp / len(fr), 4) if fr else None,
                       "fp": fp, "n_free": len(fr)}
         return t
@@ -221,8 +225,9 @@ def main():
     my = grade(yolo_dets, excl)
     n_l, n_f = mo[THRS[0]]["n_logo"], mo[THRS[0]]["n_free"]
     n_h = mo[THRS[0]]["n_hero"]
+    n_no_h = mo[THRS[0]]["n_logo_no_hero"]
     print(f"\n=== held-out pooled = val+test: logo frames n={n_l} "
-          f"(hero-designated n={n_h}), free frames n={n_f} ===")
+          f"({n_h} with hero, {n_no_h} without hero), free frames n={n_f} ===")
     print(f"  {'conf':>6} | {'OWLv2 top1':>11} {'FP/free':>8} | "
           f"{'YOLO top1':>10} {'FP/free':>8}")
     for t in THRS:
@@ -232,7 +237,8 @@ def main():
     for vid in HOLDOUT_MD5:
         a, b = per_split[vid]["owlv2"], per_split[vid]["yolo"]
         print(f"  [{vid}] logo n={a[THRS[0]]['n_logo']} "
-              f"(hero n={a[THRS[0]]['n_hero']}) free n="
+              f"({a[THRS[0]]['n_hero']} with hero, "
+              f"{a[THRS[0]]['n_logo_no_hero']} without hero) free n="
               f"{a[THRS[0]]['n_free']}")
         for t in (0.05, 0.10, 0.25):
             print(f"    {t:>5.2f} OWLv2 {a[t]['top1_hit_rate']!s}/"
