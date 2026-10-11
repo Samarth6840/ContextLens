@@ -5,3 +5,7 @@ ce3ad6728646a10c008d0b100fa951612d3c06abb959cb78f5b1570de8e24b2c  source/vidssav
 
 # 320 sampled frames, aggregate sha256 (over the sha256 hex of each frame file, sorted):
 708a3426cf91154386c687b46086d86acd31b8403005fd7de736e24b1a7dfe5a
+
+# Source-videos tarball (source/ + MANIFEST.sha256, frames excluded — they are
+# pinned separately above). Local copy for the durable backup step:
+ae3e498e02595e4c0d093b876b02f2afcf8b7c63a40f57911e660d63a8dc478c  realvideo_v1_source.tar.gz

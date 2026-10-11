@@ -202,6 +202,7 @@ class BrandMemoryBank:
         returned_products: Sequence[str] = (),
         sim_weight: float = 0.5,
         top_k: int = 3,
+        embedding_version: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Resolve an indirect reference to a remembered brand entity.
 
@@ -215,11 +216,35 @@ class BrandMemoryBank:
           * exclusion of brands already returned (avoid re-recommending a brand
             the outreach pass already returned in this context).
 
+        `embedding_version` (when provided) MUST match every stored embedding it
+        is compared against: brand_memory.json persists reference vectors across
+        processes, so a vector cached under DINO v2 but queried from DINO v3
+        (different space, same dims) would silently corrupt the cosine ranking.
+        Entities without a stored version tag are legacy rows and skipped by the
+        guard (fail-open only where there is no tag to check).
+
         The returned dict always includes the decision's explanation as
         "reason" so the system is auditable (no silent inference).
         """
         if not reference or not self._entities:
             return None
+
+        ref_embed = list(embedding) if embedding is not None else None
+        clock = ref_clock if ref_clock is not None else self._recency_clock
+        excluded = {b.strip().upper() for b in returned_products}
+
+        if ref_embed is not None and embedding_version:
+            for ent in self._entities.values():
+                stored = ent.get("embedding_model_version")
+                if stored and stored != embedding_version:
+                    raise ValueError(
+                        "BrandMemoryBank: embedding-space version mismatch — "
+                        f"entity {ent.get('brand')!r} stores vectors from "
+                        f"'{stored}' but the live query uses "
+                        f"'{embedding_version}'. Same dims, incompatible "
+                        "spaces; rebuild the bank under the active embedding "
+                        "model before querying it."
+                    )
 
         ref_embed = list(embedding) if embedding is not None else None
         clock = ref_clock if ref_clock is not None else self._recency_clock

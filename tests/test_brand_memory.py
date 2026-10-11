@@ -56,6 +56,25 @@ def test_embedding_similarity_biases_selection():
     assert resolved["brand"] == "APPLE"
 
 
+def test_resolve_reference_refuses_mismatched_embedding_version():
+    # brand_memory.json persists vectors across processes; a stored vector from
+    # one embedding space queried from another (same dims, wrong neighbours)
+    # must raise, not silently corrupt the cosine ranking. Only fires when BOTH
+    # the stored row and the live query carry a tag (legacy rows stay usable).
+    bank = BrandMemoryBank(recency_decay=1.0)
+    bank.record("APPLE", confidence=0.9, embedding=[0.1, 0.1], wall_time=0,
+                embedding_version="embed:dinov3-vitb16")
+    import pytest
+    with pytest.raises(ValueError, match="version mismatch"):
+        bank.resolve_reference("this phone", embedding=[0.1, 0.1],
+                               ref_clock=1, embedding_version="embed:dinov2-base")
+    # matching version resolves fine; untagged live query is a no-op (legacy)
+    assert bank.resolve_reference("this phone", embedding=[0.1, 0.1],
+                                  ref_clock=1,
+                                  embedding_version="embed:dinov3-vitb16")
+    assert bank.resolve_reference("this phone", embedding=[0.1, 0.1], ref_clock=1)
+
+
 def test_reference_excludes_returned_products():
     bank = BrandMemoryBank(recency_decay=1.0)
     bank.record("APPLE", confidence=0.9, wall_time=0)

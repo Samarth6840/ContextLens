@@ -1134,7 +1134,14 @@ class Phase1Pipeline:
                 continue
             if not (tokens & INDIRECT_DEVICE_WORDS):
                 continue
-            resolved = self._brand_memory.resolve_reference(sentence)
+            resolved = self._brand_memory.resolve_reference(
+                sentence,
+                embedding_version=getattr(
+                    self.__dict__.get("_embedding_extractor"),
+                    "embedding_version",
+                    None,
+                ),
+            )
             if resolved:
                 resolutions.append(resolved)
         return resolutions
