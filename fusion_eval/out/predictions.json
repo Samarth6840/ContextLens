@@ -1,0 +1,352 @@
+{
+  "metrics": {
+    "n": 6.0,
+    "top1_accuracy": 0.6667,
+    "top1_accuracy_covered": 0.75,
+    "top3_accuracy_covered": 0.75,
+    "precision_accepted": 0.5,
+    "recall_positive": 0.2,
+    "f1": 0.2857,
+    "false_positive_rate": 0.0,
+    "abstention_rate": 0.3333,
+    "ambiguous_rate": 0.3333,
+    "ece": 0.2694,
+    "brier": 0.0776,
+    "latency_layer1_mean_s": 3706.45,
+    "gpu_mem_mean_mb": 0.0,
+    "weight_source_counts": {
+      "quality_proportional_fallback (1/1 samples)": 6
+    }
+  },
+  "by_difficulty": {
+    "blur": {
+      "n": 1.0,
+      "top1_accuracy": 1.0,
+      "top1_accuracy_covered": 1.0,
+      "top3_accuracy_covered": 1.0,
+      "precision_accepted": 0.0,
+      "recall_positive": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.0,
+      "ambiguous_rate": 1.0,
+      "ece": 0.1607,
+      "brier": 0.0258,
+      "latency_layer1_mean_s": 79.582,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 1
+      }
+    },
+    "conflict": {
+      "n": 1.0,
+      "top1_accuracy": 0.0,
+      "top1_accuracy_covered": 0.0,
+      "top3_accuracy_covered": 0.0,
+      "precision_accepted": 0.0,
+      "recall_positive": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.0,
+      "ambiguous_rate": 0.0,
+      "ece": 0.3243,
+      "brier": 0.1052,
+      "latency_layer1_mean_s": 86.67,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 1
+      }
+    },
+    "easy": {
+      "n": 2.0,
+      "top1_accuracy": 0.5,
+      "top1_accuracy_covered": 1.0,
+      "top3_accuracy_covered": 1.0,
+      "precision_accepted": 1.0,
+      "recall_positive": 0.5,
+      "f1": 0.6667,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.5,
+      "ambiguous_rate": 0.0,
+      "ece": 0.34,
+      "brier": 0.1156,
+      "latency_layer1_mean_s": 10889.692,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 2
+      }
+    },
+    "negative": {
+      "n": 1.0,
+      "top1_accuracy": 1.0,
+      "top1_accuracy_covered": 0.0,
+      "top3_accuracy_covered": 0.0,
+      "precision_accepted": 0.0,
+      "recall_positive": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 1.0,
+      "ambiguous_rate": 0.0,
+      "ece": 0.0,
+      "brier": 0.0,
+      "latency_layer1_mean_s": 128.358,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 1
+      }
+    },
+    "small": {
+      "n": 1.0,
+      "top1_accuracy": 1.0,
+      "top1_accuracy_covered": 1.0,
+      "top3_accuracy_covered": 1.0,
+      "precision_accepted": 0.0,
+      "recall_positive": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.0,
+      "ambiguous_rate": 1.0,
+      "ece": 0.2526,
+      "brier": 0.0638,
+      "latency_layer1_mean_s": 164.707,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 1
+      }
+    }
+  },
+  "by_modality": {
+    "logo+ocr+product": {
+      "n": 5.0,
+      "top1_accuracy": 0.6,
+      "top1_accuracy_covered": 0.75,
+      "top3_accuracy_covered": 0.75,
+      "precision_accepted": 0.5,
+      "recall_positive": 0.2,
+      "f1": 0.2857,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.2,
+      "ambiguous_rate": 0.4,
+      "ece": 0.2694,
+      "brier": 0.0776,
+      "latency_layer1_mean_s": 4422.069,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 5
+      }
+    },
+    "none": {
+      "n": 1.0,
+      "top1_accuracy": 1.0,
+      "top1_accuracy_covered": 0.0,
+      "top3_accuracy_covered": 0.0,
+      "precision_accepted": 0.0,
+      "recall_positive": 0.0,
+      "f1": 0.0,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 1.0,
+      "ambiguous_rate": 0.0,
+      "ece": 0.0,
+      "brier": 0.0,
+      "latency_layer1_mean_s": 128.358,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 1
+      }
+    }
+  },
+  "ablation": {
+    "base": {
+      "n": 6.0,
+      "top1_accuracy": 0.6667,
+      "top1_accuracy_covered": 0.75,
+      "top3_accuracy_covered": 0.75,
+      "precision_accepted": 0.5,
+      "recall_positive": 0.2,
+      "f1": 0.2857,
+      "false_positive_rate": 0.0,
+      "abstention_rate": 0.3333,
+      "ambiguous_rate": 0.3333,
+      "ece": 0.2694,
+      "brier": 0.0776,
+      "latency_layer1_mean_s": 3706.45,
+      "gpu_mem_mean_mb": 0.0,
+      "weight_source_counts": {
+        "quality_proportional_fallback (1/1 samples)": 6
+      }
+    },
+    "combos": {
+      "ALL": {
+        "top1": 0.6667,
+        "top1_covered": 0.75,
+        "f1": 0.2857,
+        "ece": 0.2694,
+        "abstention": 0.3333,
+        "delta_top1_vs_all": 0.0,
+        "delta_f1_vs_all": 0.0,
+        "delta_ece_vs_all": 0.0
+      },
+      "NO_LOGO": {
+        "top1": 0.6667,
+        "top1_covered": 1.0,
+        "f1": 0.0,
+        "ece": 0.165,
+        "abstention": 0.5,
+        "delta_top1_vs_all": 0.0,
+        "delta_f1_vs_all": -0.2857,
+        "delta_ece_vs_all": -0.1044
+      },
+      "NO_OCR": {
+        "top1": 0.6667,
+        "top1_covered": 0.75,
+        "f1": 0.3333,
+        "ece": 0.2709,
+        "abstention": 0.3333,
+        "delta_top1_vs_all": 0.0,
+        "delta_f1_vs_all": 0.0476,
+        "delta_ece_vs_all": 0.0015
+      },
+      "NO_ASR": {
+        "top1": 0.6667,
+        "top1_covered": 0.75,
+        "f1": 0.2857,
+        "ece": 0.2694,
+        "abstention": 0.3333,
+        "delta_top1_vs_all": 0.0,
+        "delta_f1_vs_all": 0.0,
+        "delta_ece_vs_all": 0.0
+      },
+      "NO_PRODUCT": {
+        "top1": 0.1667,
+        "top1_covered": 0.0,
+        "f1": 0.0,
+        "ece": 0.3243,
+        "abstention": 0.8333,
+        "delta_top1_vs_all": -0.5,
+        "delta_f1_vs_all": -0.2857,
+        "delta_ece_vs_all": 0.0549
+      },
+      "VISUAL_ONLY": {
+        "top1": 0.6667,
+        "top1_covered": 0.75,
+        "f1": 0.2857,
+        "ece": 0.2694,
+        "abstention": 0.3333,
+        "delta_top1_vs_all": 0.0,
+        "delta_f1_vs_all": 0.0,
+        "delta_ece_vs_all": 0.0
+      },
+      "TEXT_ONLY": {
+        "top1": 0.1667,
+        "top1_covered": 0.0,
+        "f1": 0.0,
+        "ece": 0.0,
+        "abstention": 1.0,
+        "delta_top1_vs_all": -0.5,
+        "delta_f1_vs_all": -0.2857,
+        "delta_ece_vs_all": -0.2694
+      }
+    }
+  },
+  "calibration": {
+    "temperature": 1.5,
+    "ece": 0.2747,
+    "brier": 0.0978,
+    "ece_all": {
+      "1.5": 0.2747,
+      "1.0": 0.275,
+      "2.0": 0.2803,
+      "0.75": 0.2855,
+      "3.0": 0.291,
+      "0.5": 0.3217
+    },
+    "n_fit": 3,
+    "heldout_ece": 0.1764,
+    "heldout_brier": 0.0311,
+    "n_test": 1
+  },
+  "rows": [
+    {
+      "video_id": "easy_ADIDAS",
+      "difficulty": "easy",
+      "gt": "ADIDAS",
+      "winner": null,
+      "prob": 0.0,
+      "margin": 0.0,
+      "verdict": "abstain",
+      "families": {},
+      "taxonomy": "FN_UNKNOWN",
+      "latency_s": 21683.916
+    },
+    {
+      "video_id": "easy_BMW",
+      "difficulty": "easy",
+      "gt": "BMW",
+      "winner": "BMW",
+      "prob": 0.66,
+      "margin": 0.66,
+      "verdict": "confident",
+      "families": {
+        "product": 0.9183,
+        "logo": 0.2613
+      },
+      "taxonomy": "OK",
+      "latency_s": 95.468
+    },
+    {
+      "video_id": "small_BMW",
+      "difficulty": "small",
+      "gt": "BMW",
+      "winner": "BMW",
+      "prob": 0.7474,
+      "margin": 0.7474,
+      "verdict": "ambiguous",
+      "families": {
+        "product": 0.7474
+      },
+      "taxonomy": "OK",
+      "latency_s": 164.707
+    },
+    {
+      "video_id": "blur_BMW",
+      "difficulty": "blur",
+      "gt": "BMW",
+      "winner": "BMW",
+      "prob": 0.8393,
+      "margin": 0.8393,
+      "verdict": "ambiguous",
+      "families": {
+        "product": 0.8393
+      },
+      "taxonomy": "OK",
+      "latency_s": 79.582
+    },
+    {
+      "video_id": "conflict_BMW_vs_PEPSI",
+      "difficulty": "conflict",
+      "gt": "BMW",
+      "winner": "PEPSI",
+      "prob": 0.3243,
+      "margin": 0.3243,
+      "verdict": "confident",
+      "families": {
+        "ocr": 0.1148,
+        "logo": 0.3303
+      },
+      "taxonomy": "FP_WRONG_CANDIDATE",
+      "latency_s": 86.67
+    },
+    {
+      "video_id": "negative_NEG",
+      "difficulty": "negative",
+      "gt": null,
+      "winner": null,
+      "prob": 0.0,
+      "margin": 0.0,
+      "verdict": "abstain",
+      "families": {},
+      "taxonomy": "OK",
+      "latency_s": 128.358
+    }
+  ]
+}
