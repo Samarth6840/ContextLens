@@ -192,7 +192,7 @@
 {"file": "df01d5a843_006840.jpg", "video": "df01d5a843", "frame_index": 6840, "verdict": "free", "boxes": [], "human_drawn": false}
 {"file": "df01d5a843_007080.jpg", "video": "df01d5a843", "frame_index": 7080, "verdict": "logo", "boxes": [{"x": 142, "y": 35, "w": 91, "h": 32, "src": "human", "on": true, "hero": false}, {"x": 159, "y": 173, "w": 323, "h": 106, "src": "human", "on": true, "hero": true, "brand": "MICROSOFT"}], "human_drawn": true}
 {"file": "df01d5a843_007320.jpg", "video": "df01d5a843", "frame_index": 7320, "verdict": "free", "boxes": [], "human_drawn": false}
-{"file": "df01d5a843_007520.jpg", "video": "df01d5a843", "frame_index": 7520, "verdict": "logo", "boxes": [{"x": 108, "y": 120, "w": 109, "h": 56, "src": "human", "on": true, "hero": true, "brand": "NVIDIAL"}], "human_drawn": true}
+{"file": "df01d5a843_007520.jpg", "video": "df01d5a843", "frame_index": 7520, "verdict": "logo", "boxes": [{"x": 108, "y": 120, "w": 109, "h": 56, "src": "human", "on": true, "hero": true, "brand": "NVIDIA"}], "human_drawn": true}
 {"file": "df01d5a843_007760.jpg", "video": "df01d5a843", "frame_index": 7760, "verdict": "free", "boxes": [], "human_drawn": false}
 {"file": "df01d5a843_007960.jpg", "video": "df01d5a843", "frame_index": 7960, "verdict": "logo", "boxes": [{"x": 51, "y": 143, "w": 333, "h": 92, "src": "human", "on": true, "hero": true, "brand": "BROADCOM"}], "human_drawn": true}
 {"file": "df01d5a843_008200.jpg", "video": "df01d5a843", "frame_index": 8200, "verdict": "free", "boxes": [], "human_drawn": false}
