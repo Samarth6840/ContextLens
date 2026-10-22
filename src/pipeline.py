@@ -867,6 +867,7 @@ class Phase1Pipeline:
             device=self.device,
             text_queries=queries,
             imgsz=logo_cfg.get("imgsz", 640),
+            max_detections=int(logo_cfg.get("max_detections", 40)),
             timeout=float(logo_cfg.get("cloud_timeout_seconds", 20.0)),
             min_score=float(logo_cfg.get("cloud_min_score", 0.25)),
             dedupe_iou=float(logo_cfg.get("dedupe_iou", 0.55)),

@@ -535,6 +535,18 @@ function summaryStrip(d) {
   const scenes = (d.scenes || []).length;
   const logos = (d.scenes || []).reduce((a, s) => a + (s.logos || []).length, 0);
   const cell = (val, label) => `<div class="figure"><span class="figure-val">${val}</span><span class="figure-label">${escapeHtml(label)}</span></div>`;
+  const processTime = Number(d.processing_seconds);
+  const processLabel = Number.isFinite(processTime) && processTime > 0
+    ? (processTime >= 3600
+      ? `${Math.floor(processTime / 3600)}h ${Math.floor((processTime % 3600) / 60)}m`
+      : `${Math.floor(processTime / 60)}m ${Math.floor(processTime % 60)}s`)
+    : '—';
+  const stageHint = Object.entries(d.stage_timings || {})
+    .filter(([name, seconds]) => name !== 'total' && Number(seconds) > 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]))
+    .slice(0, 3)
+    .map(([name, seconds]) => `${name.replace(/_/g, ' ')} ${Math.round(Number(seconds))}s`)
+    .join(' · ');
   return `
     <div class="figure-line">
       ${cell(brands, brands === 1 ? 'brand' : 'brands')}
@@ -543,6 +555,10 @@ function summaryStrip(d) {
       <div class="figure figure-quiet">
         <span class="figure-val">${d.num_frames != null ? d.num_frames : '—'}</span>
         <span class="figure-label">frames at ${(d.video_fps || 0).toFixed(1)} fps, ${logos} logo ${logos === 1 ? 'box' : 'boxes'}</span>
+      </div>
+      <div class="figure figure-quiet" title="${escapeHtml(stageHint || (d.processing_timing_source === 'wall_clock' ? 'Stage timings were not saved for this older job.' : 'Stage timing details will be available after analysis.'))}">
+        <span class="figure-val">${escapeHtml(processLabel)}</span>
+        <span class="figure-label">pipeline time</span>
       </div>
     </div>`;
 }
@@ -857,7 +873,7 @@ function renderSceneRows(d) {
             ${sceneChips(s)}
             <a class="chip chip-ghost clip-chip" role="button" data-ts="${Number(s.timestamp).toFixed(2)}">&blacktriangleright; Play @ ${fmtTime(s.timestamp)}</a>
           </div>
-          ${saturated ? `<p class="scene-density-note">Detector saturation: the preview limits logo overlays to named matches. Click the image for the clean original frame.</p>` : ''}
+          ${saturated ? `<p class="scene-density-note">Detector saturation: logo boxes are hidden because this frame is unreliable. Click the image for the clean original frame.</p>` : ''}
         </div>
       </div>`;
   }).join('');

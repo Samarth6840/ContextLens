@@ -150,6 +150,10 @@ def prune_for_store(result: Dict[str, Any]) -> Dict[str, Any]:
         "video_total_frames": result.get("video_total_frames"),
         "video_fps": result.get("video_fps"),
         "has_audio": result.get("has_audio"),
+        # Compact diagnostics are useful for explaining slow jobs and are
+        # negligible beside the model outputs/embeddings pruned below.
+        "timings": result.get("timings") or {},
+        "model_wall_times": result.get("model_wall_times") or {},
         "layer2b_confidence": l2b.get("confidence"),
         "resolver_acceptance": l2c.get("resolver_acceptance"),
         "temporal_corroboration": l2c.get("temporal_corroboration"),

@@ -21,7 +21,7 @@ from server import (  # noqa: E402
 )
 
 
-def test_saturated_scene_preview_hides_unknown_box_swarm_but_keeps_named_matches():
+def test_saturated_scene_preview_hides_all_untrusted_logo_boxes():
     logos = [{"bbox": [i, i, i + 20, i + 20], "brand": None, "confidence": 0.9}
              for i in range(100)]
     logos[0].update(brand="OPPO", resolution_quality=0.7)
@@ -29,8 +29,8 @@ def test_saturated_scene_preview_hides_unknown_box_swarm_but_keeps_named_matches
 
     visible, hidden = _scene_logo_overlays(logos)
 
-    assert [logo["brand"] for logo in visible] == ["SAMSUNG", "OPPO"]
-    assert hidden == 98
+    assert visible == []
+    assert hidden == 100
 
 
 def test_normal_scene_preview_keeps_all_logo_detections():

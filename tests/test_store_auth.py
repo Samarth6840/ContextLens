@@ -104,6 +104,8 @@ def test_prune_for_store_drops_heavy_embeds():
         "layer3": {"recommendations": [{"brand": "NIKE"}]},
         "layer2d": {"creator_profile": {"handle": "@r"}},
         "layer2c": {"memory_brands": ["NIKE"], "memory_size": 1},
+        "timings": {"total": 123.4, "layer1_visual": 98.7},
+        "model_wall_times": {"logo_detection": 15.2},
     }
     pruned = prune_for_store(result)
     assert "fused_embed" not in pruned
@@ -111,3 +113,5 @@ def test_prune_for_store_drops_heavy_embeds():
     assert pruned["layer3"]["recommendations"] == [{"brand": "NIKE"}]
     assert pruned["layer2d"]["creator_profile"]["handle"] == "@r"
     assert pruned["layer2c"]["memory_brands"] == ["NIKE"]
+    assert pruned["timings"]["layer1_visual"] == 98.7
+    assert pruned["model_wall_times"]["logo_detection"] == 15.2

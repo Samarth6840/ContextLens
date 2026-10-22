@@ -71,7 +71,6 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 _SCENE_THUMB_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
 _SCENE_THUMB_CACHE_LOCK = threading.Lock()
 SCENE_LOGO_OVERLOAD_THRESHOLD = 20
-SCENE_LOGO_OVERLAY_CAP = 12
 MAX_SCENE_THUMBS = 256
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -210,27 +209,15 @@ def _is_unknown_brand(name) -> bool:
 def _scene_logo_overlays(logos):
     """Avoid drawing a detector swarm over the evidence frame.
 
-    Dense frames contain up to 100 nested, unresolved proposals. Those raw
-    boxes are not useful as an annotation and obscure the source image. Keep
-    all detections in the dashboard data, but show only a small, ranked set of
-    named matches on saturated previews; the original frame remains available.
+    Dense frames contain nested, unresolved proposals. Even named matches on
+    such a frame can be false positives from the saturated detector, so draw
+    none of them. Keep detections in dashboard data; the clean source frame is
+    always available by clicking the preview.
     """
     logos = list(logos or [])
     if len(logos) <= SCENE_LOGO_OVERLOAD_THRESHOLD:
         return logos, 0
-    named = [logo for logo in logos if not _is_unknown_brand(logo.get("brand"))]
-
-    def score(logo):
-        value = logo.get("resolution_quality")
-        if value is None:
-            value = logo.get("confidence", 0.0)
-        try:
-            return float(value or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    shown = sorted(named, key=score, reverse=True)[:SCENE_LOGO_OVERLAY_CAP]
-    return shown, len(logos) - len(shown)
+    return [], len(logos)
 
 
 def _catalog_lookup(brand: str):
@@ -660,6 +647,8 @@ def _build_dashboard(result: dict, job: dict) -> dict:
     # Duration from the source video's real codec frame count (fixes the unit
     # bug: sampled-frame count / source fps previously rendered 60 s as 3 s).
     duration_sec = (video_total_frames / video_fps) if video_fps else 0.0
+    timings = result.get("timings") or {}
+    model_wall_times = result.get("model_wall_times") or {}
 
     # ── Scenes ──────────────────────────────────────────────
     # A scene row exists for ANY frame with real signal — object detections,
@@ -961,6 +950,9 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "filename": job.get("filename", ""),
         "job_id": job["job_id"],
         "duration_sec": duration_sec or job.get("duration_sec", 0),
+        "processing_seconds": timings.get("total"),
+        "stage_timings": timings,
+        "model_wall_times": model_wall_times,
         "num_frames": num_frames,
         "video_total_frames": video_total_frames,
         "video_fps": video_fps,
@@ -1413,7 +1405,18 @@ def pipeline_dashboard(job_id: str):
         return jsonify({"error": job.get("error") or "PIPELINE FAILED"}), 500
     if job.get("status") != "done" or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT COMPLETE", "status": job.get("status")}), 409
-    return jsonify(_sanitize_void_candidates(job["dashboard"]))
+    dash = dict(job["dashboard"])
+    # Older archived jobs predate persisted stage timings. Their creation and
+    # completion timestamps still give an honest end-to-end wall-clock value.
+    if dash.get("processing_seconds") is None:
+        try:
+            started = datetime.fromisoformat(str(job["created_at"]).replace("Z", "+00:00"))
+            finished = datetime.fromisoformat(str(job["finished_at"]).replace("Z", "+00:00"))
+            dash["processing_seconds"] = max(0.0, (finished - started).total_seconds())
+            dash["processing_timing_source"] = "wall_clock"
+        except (KeyError, TypeError, ValueError):
+            pass
+    return jsonify(_sanitize_void_candidates(dash))
 
 
 @app.get("/api/insights/<job_id>")

@@ -187,7 +187,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
 
     # Class-level defaults so the attributes exist on any instance, including
     # one built via __new__ in tests that skip the model load.
-    max_detections: int = 100
+    max_detections: int = 40
     imgsz: int = 640
 
     def __init__(
@@ -196,7 +196,7 @@ class YOLOLogoDetector(LogoDetectionBackend):
         confidence_threshold: float = 0.25,
         device: Optional[str] = None,
         text_queries: Optional[List[str]] = None,
-        max_detections: int = 100,
+        max_detections: int = 40,
         imgsz: int = 640,
     ):
         import torch
@@ -209,13 +209,10 @@ class YOLOLogoDetector(LogoDetectionBackend):
         # equal to config.yaml's logo_detector.imgsz, and bump both together
         # with a retrained 960 model.
         self.imgsz = imgsz
-        # Bound the candidate set per frame. Ultralytics defaults to 300, and
-        # the nested-label pathology in the training data makes this detector
-        # emit boxes densely enough that the count reaches the NMS clock and
-        # trips "NMS time limit ... exceeded". Every extra box is also another
-        # crop-OCR call downstream, so the cap is a cost control as much as a
-        # stability one. 100 is ~2.5x what a healthy frame produces here, so it
-        # only discards the pathological tail.
+        # Bound the candidate set per frame. The current checkpoint's nested
+        # labels produce up to 100 low-quality boxes on a single image. Keep
+        # the highest-confidence 40 proposals to limit downstream resolution
+        # work; identity is still independently verified by OCR/retrieval.
         self.max_detections = max_detections
         self.device = device or ("mps" if torch.backends.mps.is_available() else "cpu")
         self._current_queries = None  # fixed classes, nothing to re-prompt
@@ -340,6 +337,7 @@ def create_logo_detector(
             confidence_threshold=confidence_threshold,
             device=device,
             imgsz=imgsz,
+            max_detections=int(kwargs.get("max_detections", 40)),
         )
     raise ValueError(
         f"Unknown logo detection backend: '{backend}'. "

@@ -114,6 +114,7 @@ layer1:
     backend: "yolo"  # local proposals keep full video frames on-device
     model: "weights/logo_detector/train/weights/best.pt"
     confidence_threshold: 0.10  # local fallback threshold; identity is resolved independently
+    max_detections: 40  # bound nested low-quality proposals before crop resolution
     cloud_min_score: 0.25
     # Must match the loaded checkpoint's training resolution, or mAP drops
     # (a 640 model evaluated at 960 lost ~30% mAP50 here). The current best.pt
