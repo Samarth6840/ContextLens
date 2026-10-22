@@ -10,6 +10,7 @@ presented detection — until logo.dev validates it.
 
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -21,6 +22,7 @@ from src.openset import (  # noqa: E402
     GeminiGroundedBackend,
     GoogleVisionWebBackend,
     OpenSetBrandIdentifier,
+    OpenSetSearchStore,
     ReverseImageResult,
     SerpApiReverseBackend,
     _brand_likeness,
@@ -44,6 +46,7 @@ def _identifier(
     min_crop_area: float = 100.0,
     max_crop_aspect: float = 5.0,
     consent_upload: bool = True,
+    search_store=None,
 ) -> OpenSetBrandIdentifier:
     return OpenSetBrandIdentifier(
         backend=backend,
@@ -56,6 +59,7 @@ def _identifier(
         generic_tag_filter=_GENERIC_WORDS,
         generic_domain_filter=_GENERIC_DOMAINS,
         logodev_timeout=2.0,
+        search_store=search_store,
     )
 
 
@@ -523,7 +527,8 @@ def test_gemini_search_includes_ocr_wordmark_as_explicit_web_query(monkeypatch):
 
 def test_serpapi_lens_upload_and_result_parsing(monkeypatch):
     monkeypatch.setenv("SERPAPI_KEY", "test-key")
-    backend = SerpApiReverseBackend()
+    store = OpenSetSearchStore(Path(tempfile.mkdtemp()) / "quota.sqlite3")
+    backend = SerpApiReverseBackend(usage_store=store)
     assert backend.available
     calls = []
 
@@ -560,6 +565,35 @@ def test_serpapi_lens_upload_and_result_parsing(monkeypatch):
     assert len(results) == 1
     assert results[0].url == "https://northstar.example/"
     assert results[0].source == "serpapi_google_lens_visual_match"
+    assert backend.usage_status()["used"] == 1
+
+
+def test_serpapi_monthly_budget_is_atomic_persistent_and_resets_by_utc_month(tmp_path):
+    db_path = tmp_path / "search-state.sqlite3"
+    store = OpenSetSearchStore(db_path)
+    october = datetime(2026, 10, 1, tzinfo=timezone.utc)
+    assert store.reserve_serpapi_search(2, now=october)["allowed"]
+    assert store.reserve_serpapi_search(2, now=october)["allowed"]
+    assert not store.reserve_serpapi_search(2, now=october)["allowed"]
+
+    restarted = OpenSetSearchStore(db_path)
+    assert restarted.serpapi_status(2, now=october)["used"] == 2
+    november = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert restarted.serpapi_status(2, now=november)["used"] == 0
+
+
+def test_serpapi_exhausted_budget_blocks_before_upload(monkeypatch, tmp_path):
+    import pytest
+    import requests
+    from src.openset import SerpApiBudgetExceeded
+
+    monkeypatch.setenv("SERPAPI_KEY", "test-key")
+    store = OpenSetSearchStore(tmp_path / "quota.sqlite3")
+    store.reserve_serpapi_search(1)
+    backend = SerpApiReverseBackend(monthly_limit=1, usage_store=store)
+    monkeypatch.setattr(requests, "post", lambda *a, **k: pytest.fail("unexpected upload"))
+    with pytest.raises(SerpApiBudgetExceeded):
+        backend.search_crop(np.zeros((32, 40, 3), dtype=np.uint8))
 
 
 def test_bing_visual_backend_is_removed_from_product_routing():

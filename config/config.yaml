@@ -610,6 +610,13 @@ open_set:
   #   serpapi           -> SERPAPI_KEY (crop uses temporary image upload)
   #   gemini_grounded   -> GEMINI_API_KEY (or ~/.gemini_key; model via GEMINI_MODEL)
   backend: "auto"
+  # Persistent protection for the 250-query SerpApi starter allowance. The
+  # tracker counts one slot immediately before each Google Lens search request,
+  # shares usage across restarts/processes, and resets on the UTC month boundary.
+  serpapi_monthly_limit: 250
+  search_state_db_path: "data/open_set_search.sqlite3"
+  # Reuse identical crop+context results across uploads for six months.
+  search_cache_ttl_days: 180
   # Only logo detections with REAL model confidence at/above this threshold
   # become candidates — this is the documented cost guard against calling the
   # (billable) reverse-image API on the detector's confidence noise floor.

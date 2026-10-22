@@ -1210,6 +1210,12 @@ function openSetPanel(d) {
   const cands = os.candidates || [];
   const rejected = os.rejected || [];
   const skipped = os.skipped_counts || {};
+  const serpUsage = (os.provider_usage || {}).serpapi || null;
+  const serpUsageNotice = serpUsage ? `
+    <div class="os-warn">
+      <div class="note-title">SerpApi Google Lens: ${escapeHtmlNum(serpUsage.used)} / ${escapeHtmlNum(serpUsage.limit)} searches used</div>
+      <p>${escapeHtmlNum(serpUsage.remaining)} searches remain for ${escapeHtml(serpUsage.period)} UTC.${serpUsage.exhausted ? ' The monthly app limit is reached; cached results remain available.' : ''}</p>
+    </div>` : '';
   const gate = `gate: ${Math.round((os.min_confidence || 0) * 100)}% confidence, ${escapeHtml(String(os.min_crop_area))} px&sup2;, ${escapeHtml(String(os.max_crop_aspect))}:1 max aspect`;
 
   if (!os.available) {
@@ -1306,7 +1312,7 @@ function openSetPanel(d) {
     </details>` : '';
 
   if (!cands.length) {
-    return `${funnel}
+    return `${serpUsageNotice}${funnel}
       ${saturation}
       <div class="os-empty">
         <div class="note-title">Nothing cleared the gate</div>
@@ -1316,7 +1322,7 @@ function openSetPanel(d) {
       ${rejects}`;
   }
 
-  return `${funnel}
+  return `${serpUsageNotice}${funnel}
     ${saturation}
     <div class="cand-grid">${cards}</div>
     <p class="os-note">Candidates are lower-trust than on-screen detections. A match here is a lead, not an appearance — confirm against the crop before you count it.</p>

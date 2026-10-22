@@ -449,6 +449,9 @@ def _build_open_set(result: dict, video_path: str) -> dict:
         "generic_tag_filter",
         "generic_domain_filter",
         "logodev_timeout",
+        "serpapi_monthly_limit",
+        "search_state_db_path",
+        "search_cache_ttl_days",
     ]
     missing = [k for k in required_keys if k not in _OPEN_SET_CFG]
     if missing:
@@ -469,10 +472,23 @@ def _build_open_set(result: dict, video_path: str) -> dict:
         }
 
     try:
-        from src.openset import OpenSetBrandIdentifier, create_backend
+        from src.openset import OpenSetBrandIdentifier, OpenSetSearchStore, create_backend
+
+        search_db_path = Path(str(_OPEN_SET_CFG["search_state_db_path"]))
+        if not search_db_path.is_absolute():
+            search_db_path = ROOT / search_db_path
+        search_store = OpenSetSearchStore(
+            search_db_path,
+            cache_ttl_days=int(_OPEN_SET_CFG["search_cache_ttl_days"]),
+        )
+        monthly_limit = int(_OPEN_SET_CFG["serpapi_monthly_limit"])
 
         identifier = OpenSetBrandIdentifier(
-            backend=create_backend(str(_OPEN_SET_CFG["backend"])),
+            backend=create_backend(
+                str(_OPEN_SET_CFG["backend"]),
+                serpapi_monthly_limit=monthly_limit,
+                usage_store=search_store,
+            ),
             consent_upload=bool(_OPEN_SET_CFG["consent_upload"]),
             min_logo_confidence=float(_OPEN_SET_CFG["min_logo_confidence"]),
             min_crop_area=float(_OPEN_SET_CFG["min_crop_area"]),
@@ -486,6 +502,7 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             max_crop_area_fraction=float(_OPEN_SET_CFG.get("max_crop_area_fraction", 0.75)),
             saturated_proposals_per_frame=int(
                 _OPEN_SET_CFG.get("saturated_proposals_per_frame", 30) or 30),
+            search_store=search_store,
         )
     except Exception as exc:  # noqa: BLE001
         return {

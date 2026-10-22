@@ -33,16 +33,20 @@ without keys — no key means no names are surfaced, ever.
 from __future__ import annotations
 
 import base64
+from contextlib import contextmanager
+import hashlib
 import json
 import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import time
 from abc import ABC, abstractmethod
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -80,6 +84,121 @@ SERPAPI_IMAGE_URL = "https://serpapi.com/image"
 GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
+
+
+class SerpApiBudgetExceeded(RuntimeError):
+    """Raised before a Google Lens query would exceed the configured monthly cap."""
+
+
+class OpenSetSearchStore:
+    """Persistent, cross-process cache and monthly SerpApi query ledger."""
+
+    def __init__(self, path, cache_ttl_days: int = 180):
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.cache_ttl_days = max(1, int(cache_ttl_days))
+        with self._connect() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS reverse_image_cache ("
+                "cache_key TEXT PRIMARY KEY, results_json TEXT NOT NULL, "
+                "expires_at REAL NOT NULL)"
+            )
+            db.execute(
+                "CREATE TABLE IF NOT EXISTS serpapi_monthly_usage ("
+                "month TEXT PRIMARY KEY, used INTEGER NOT NULL CHECK (used >= 0))"
+            )
+
+    @contextmanager
+    def _connect(self):
+        db = sqlite3.connect(str(self.path), timeout=15, isolation_level=None)
+        db.execute("PRAGMA busy_timeout=15000")
+        try:
+            yield db
+        finally:
+            db.close()
+
+    @staticmethod
+    def _month(now=None) -> str:
+        current = now or datetime.now(timezone.utc)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=timezone.utc)
+        return current.astimezone(timezone.utc).strftime("%Y-%m")
+
+    def serpapi_status(self, monthly_limit: int, now=None) -> Dict[str, Any]:
+        limit = max(0, int(monthly_limit))
+        month = self._month(now)
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT used FROM serpapi_monthly_usage WHERE month = ?", (month,)
+            ).fetchone()
+        used = int(row[0]) if row else 0
+        return {
+            "period": month,
+            "used": used,
+            "limit": limit,
+            "remaining": max(0, limit - used),
+            "exhausted": used >= limit,
+        }
+
+    def reserve_serpapi_search(self, monthly_limit: int, now=None) -> Dict[str, Any]:
+        """Atomically claim one search slot across threads and server processes."""
+        limit = max(0, int(monthly_limit))
+        month = self._month(now)
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT used FROM serpapi_monthly_usage WHERE month = ?", (month,)
+            ).fetchone()
+            used = int(row[0]) if row else 0
+            if used >= limit:
+                db.execute("COMMIT")
+                return {
+                    "allowed": False, "period": month, "used": used,
+                    "limit": limit, "remaining": 0, "exhausted": True,
+                }
+            used += 1
+            db.execute(
+                "INSERT INTO serpapi_monthly_usage(month, used) VALUES (?, ?) "
+                "ON CONFLICT(month) DO UPDATE SET used = excluded.used",
+                (month, used),
+            )
+            db.execute("COMMIT")
+        return {
+            "allowed": True, "period": month, "used": used,
+            "limit": limit, "remaining": max(0, limit - used),
+            "exhausted": used >= limit,
+        }
+
+    def get_results(self, cache_key: str) -> Optional[List["ReverseImageResult"]]:
+        now = time.time()
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT results_json, expires_at FROM reverse_image_cache "
+                "WHERE cache_key = ?", (cache_key,),
+            ).fetchone()
+            if row and float(row[1]) <= now:
+                db.execute("DELETE FROM reverse_image_cache WHERE cache_key = ?", (cache_key,))
+                row = None
+        if row is None:
+            return None
+        try:
+            return [ReverseImageResult(**item) for item in json.loads(row[0])]
+        except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+            with self._connect() as db:
+                db.execute("DELETE FROM reverse_image_cache WHERE cache_key = ?", (cache_key,))
+            return None
+
+    def put_results(self, cache_key: str, results: List["ReverseImageResult"]) -> None:
+        payload = json.dumps([result.to_dict() for result in results], ensure_ascii=False)
+        expires_at = time.time() + self.cache_ttl_days * 24 * 60 * 60
+        with self._connect() as db:
+            db.execute(
+                "INSERT INTO reverse_image_cache(cache_key, results_json, expires_at) "
+                "VALUES (?, ?, ?) ON CONFLICT(cache_key) DO UPDATE SET "
+                "results_json=excluded.results_json, expires_at=excluded.expires_at",
+                (cache_key, payload, expires_at),
+            )
 
 
 class ReverseImageResult:
@@ -128,6 +247,14 @@ class FallbackReverseImageSearchBackend(ReverseImageSearchBackend):
     @property
     def available(self) -> bool:
         return any(backend.available for backend in self.backends)
+
+    def provider_usage(self) -> Dict[str, Dict[str, Any]]:
+        usage = {}
+        for backend in self.backends:
+            status = getattr(backend, "usage_status", None)
+            if callable(status):
+                usage[backend.name] = status()
+        return usage
 
     def search_crop(self, crop: np.ndarray, context_text: str = "") -> List[ReverseImageResult]:
         errors = []
@@ -319,13 +446,26 @@ class SerpApiReverseBackend(ReverseImageSearchBackend):
 
     MAX_UPLOAD_BYTES = 480 * 1024
 
-    def __init__(self, image_base_url: str = "", timeout: float = 30.0):
+    def __init__(
+        self,
+        image_base_url: str = "",
+        timeout: float = 30.0,
+        monthly_limit: int = 250,
+        usage_store: Optional[OpenSetSearchStore] = None,
+    ):
         self.timeout = timeout
         self._key = _env(BACKEND_ENV[self.name])
+        self.monthly_limit = max(0, int(monthly_limit))
+        self.usage_store = usage_store or OpenSetSearchStore(
+            Path(__file__).resolve().parents[1] / "data" / "open_set_search.sqlite3"
+        )
 
     @property
     def available(self) -> bool:
         return bool(self._key)
+
+    def usage_status(self) -> Dict[str, Any]:
+        return self.usage_store.serpapi_status(self.monthly_limit)
 
     @classmethod
     def _jpeg_bytes(cls, crop: np.ndarray) -> bytes:
@@ -353,6 +493,12 @@ class SerpApiReverseBackend(ReverseImageSearchBackend):
     def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
         if not self.available:
             raise RuntimeError("SerpApi Google Lens: missing SERPAPI_KEY")
+        status = self.usage_status()
+        if status["exhausted"]:
+            raise SerpApiBudgetExceeded(
+                "SerpApi monthly Google Lens limit reached "
+                f"({status['used']}/{status['limit']} for {status['period']})"
+            )
         import requests
 
         image = self._jpeg_bytes(crop)
@@ -369,6 +515,18 @@ class SerpApiReverseBackend(ReverseImageSearchBackend):
         image_id = str(upload_data.get("image_id") or "").strip()
         if not image_id:
             raise RuntimeError("SerpApi image upload returned no image_id")
+
+        # Reserve immediately before the billable search call. Image uploads
+        # do not count as searches, and a rejected reservation prevents the
+        # Google Lens query even if another worker used the final slot while
+        # this crop was uploading.
+        reservation = self.usage_store.reserve_serpapi_search(self.monthly_limit)
+        if not reservation["allowed"]:
+            raise SerpApiBudgetExceeded(
+                "SerpApi monthly Google Lens limit reached "
+                f"({reservation['used']}/{reservation['limit']} for "
+                f"{reservation['period']})"
+            )
 
         response = requests.get(
             SERPAPI_URL,
@@ -858,7 +1016,12 @@ class BrowserGroundedSearchBackend(ReverseImageSearchBackend):
         return results
 
 
-def create_backend(name: str) -> ReverseImageSearchBackend:
+def create_backend(
+    name: str,
+    *,
+    serpapi_monthly_limit: int = 250,
+    usage_store: Optional[OpenSetSearchStore] = None,
+) -> ReverseImageSearchBackend:
     """Factory: create the configured reverse-image-search backend."""
     if name == "google_vision_web":
         return GoogleVisionWebBackend()
@@ -868,7 +1031,9 @@ def create_backend(name: str) -> ReverseImageSearchBackend:
             "gemini_grounded, or browser_grounded"
         )
     if name == "serpapi":
-        return SerpApiReverseBackend()
+        return SerpApiReverseBackend(
+            monthly_limit=serpapi_monthly_limit, usage_store=usage_store
+        )
     if name == "browser_grounded":
         return BrowserGroundedSearchBackend()
     if name == "gemini_grounded":
@@ -876,7 +1041,9 @@ def create_backend(name: str) -> ReverseImageSearchBackend:
     if name == "auto":
         return FallbackReverseImageSearchBackend([
             GoogleVisionWebBackend(),
-            SerpApiReverseBackend(),
+            SerpApiReverseBackend(
+                monthly_limit=serpapi_monthly_limit, usage_store=usage_store
+            ),
             GeminiGroundedBackend(),
             BrowserGroundedSearchBackend(),
         ])
@@ -1185,6 +1352,7 @@ class OpenSetBrandIdentifier:
         saturated_proposals_per_frame: int = 30,
         ocr_min_crop_area: float = 600.0,
         max_crop_area_fraction: float = 0.75,
+        search_store: Optional[OpenSetSearchStore] = None,
     ):
         """All tunables are explicit and come from config `open_set:`.
 
@@ -1242,6 +1410,8 @@ class OpenSetBrandIdentifier:
                 "OpenSetBrandIdentifier requires saturated_proposals_per_frame > 0")
         self._logodev_client = None  # lazy
         self._result_cache: Dict[str, List[ReverseImageResult]] = {}
+        self.search_store = search_store
+        self.search_cache_hits = 0
 
     def _logodev(self):
         from src.logodev import LogoDevClient
@@ -1249,6 +1419,12 @@ class OpenSetBrandIdentifier:
         if self._logodev_client is None:
             self._logodev_client = LogoDevClient(timeout=self.logodev_timeout)
         return self._logodev_client
+
+    def _search_cache_key(self, crop_hash: str, context_text: str) -> str:
+        context_hash = hashlib.sha256(
+            " ".join(str(context_text or "").lower().split()).encode("utf-8")
+        ).hexdigest()[:20]
+        return f"{self.backend.name}:{crop_hash}:{context_hash}"
 
     def _unknown_ocr_proposals(self, l1: dict) -> List[List[dict]]:
         """Extract compact, high-confidence OCR wordmarks absent from catalog.
@@ -1548,6 +1724,7 @@ class OpenSetBrandIdentifier:
 
         accepted, rejected, skipped_counts, diagnostics = self._candidate_crops(
             result, video_path)
+        self.search_cache_hits = 0
         for cand in accepted:
             crop = cand.pop("crop")
             entry: Dict[str, Any] = {
@@ -1576,8 +1753,17 @@ class OpenSetBrandIdentifier:
 
             if backend_available and self.consent_upload:
                 try:
-                    if cand["crop_hash"] in self._result_cache:
-                        results = self._result_cache[cand["crop_hash"]]
+                    cache_key = self._search_cache_key(
+                        cand["crop_hash"], cand.get("ocr_text") or ""
+                    )
+                    if cache_key in self._result_cache:
+                        results = self._result_cache[cache_key]
+                    elif self.search_store is not None and (
+                        cached_results := self.search_store.get_results(cache_key)
+                    ) is not None:
+                        results = cached_results
+                        self._result_cache[cache_key] = results
+                        self.search_cache_hits += 1
                     else:
                         results = []
                         if cand.get("ocr_text"):
@@ -1595,7 +1781,12 @@ class OpenSetBrandIdentifier:
                                 )
                             else:
                                 results = search_with_context(crop)
-                        self._result_cache[cand["crop_hash"]] = results
+                        self._result_cache[cache_key] = results
+                        if self.search_store is not None:
+                            try:
+                                self.search_store.put_results(cache_key, results)
+                            except Exception as cache_exc:  # noqa: BLE001
+                                logger.warning("reverse-image cache write failed: %s", cache_exc)
                     entry["search_results"] = [r.to_dict() for r in results]
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("reverse-image search failed for %s: %s", cand["crop_hash"], exc)
@@ -1630,6 +1821,17 @@ class OpenSetBrandIdentifier:
             candidates.append(entry)
 
         resolved = len([c for c in candidates if c["status"] == "candidate_verified"])
+        provider_usage = {}
+        usage_reader = getattr(self.backend, "provider_usage", None)
+        try:
+            if callable(usage_reader):
+                provider_usage = usage_reader()
+            else:
+                usage_reader = getattr(self.backend, "usage_status", None)
+                if callable(usage_reader):
+                    provider_usage = {self.backend.name: usage_reader()}
+        except Exception as usage_exc:  # noqa: BLE001
+            logger.warning("reverse-image usage status unavailable: %s", usage_exc)
         return {
             "available": backend_available,
             "consent_upload": self.consent_upload,
@@ -1642,6 +1844,8 @@ class OpenSetBrandIdentifier:
             "rejected": rejected,
             "skipped_counts": skipped_counts,
             "resolved": resolved,
+            "provider_usage": provider_usage,
+            "search_cache_hits": self.search_cache_hits,
             # Detector state upstream of every gate above, so a funnel of
             # zeros reads as a detector diagnosis rather than a resolver one.
             "detector_diagnostics": diagnostics,
