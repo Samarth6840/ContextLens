@@ -70,6 +70,8 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # JPEG keyed by (job_id, frame_index) and serve it with a private cache header.
 _SCENE_THUMB_CACHE: "OrderedDict[tuple, bytes]" = OrderedDict()
 _SCENE_THUMB_CACHE_LOCK = threading.Lock()
+SCENE_LOGO_OVERLOAD_THRESHOLD = 20
+SCENE_LOGO_OVERLAY_CAP = 12
 MAX_SCENE_THUMBS = 256
 
 app = Flask(__name__, static_folder="static", static_url_path="")
@@ -203,6 +205,32 @@ _UNKNOWN_BRAND_STRINGS = frozenset({UNKNOWN_BRAND, "UNKNOWN BRAND"})
 
 def _is_unknown_brand(name) -> bool:
     return not name or _normalize_brand(name) in _UNKNOWN_BRAND_STRINGS
+
+
+def _scene_logo_overlays(logos):
+    """Avoid drawing a detector swarm over the evidence frame.
+
+    Dense frames contain up to 100 nested, unresolved proposals. Those raw
+    boxes are not useful as an annotation and obscure the source image. Keep
+    all detections in the dashboard data, but show only a small, ranked set of
+    named matches on saturated previews; the original frame remains available.
+    """
+    logos = list(logos or [])
+    if len(logos) <= SCENE_LOGO_OVERLOAD_THRESHOLD:
+        return logos, 0
+    named = [logo for logo in logos if not _is_unknown_brand(logo.get("brand"))]
+
+    def score(logo):
+        value = logo.get("resolution_quality")
+        if value is None:
+            value = logo.get("confidence", 0.0)
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    shown = sorted(named, key=score, reverse=True)[:SCENE_LOGO_OVERLAY_CAP]
+    return shown, len(logos) - len(shown)
 
 
 def _catalog_lookup(brand: str):
@@ -1378,6 +1406,8 @@ def _sanitize_void_candidates(dash: dict) -> dict:
 def pipeline_dashboard(job_id: str):
     job = _job(job_id)
     if job is None:
+        job = JOB_STORE.load(job_id)
+    if job is None:
         return jsonify({"error": "JOB NOT FOUND"}), 404
     if job.get("status") == "error":
         return jsonify({"error": job.get("error") or "PIPELINE FAILED"}), 500
@@ -1425,20 +1455,28 @@ def insights(job_id: str):
 @app.get("/api/scene/<job_id>/<int:frame_index>")
 @login_required
 def scene_image(job_id: str, frame_index: int):
-    """Annotated JPEG of a sampled frame (drawn boxes, no brand class names)."""
+    """Serve a clean or annotated JPEG for one sampled frame."""
     job = _job(job_id)
+    if job is None:
+        job = JOB_STORE.load(job_id)
     if job is None:
         return jsonify({"error": "JOB NOT FOUND"}), 404
     if job.get("status") != "done" or job.get("result") is None:
         return jsonify({"error": "JOB NOT COMPLETE"}), 409
 
     result = job["result"]
-    num_frames = result.get("num_frames", 0)
+    dashboard = job.get("dashboard") or {}
+    num_frames = int(result.get("num_frames") or dashboard.get("num_frames") or 0)
+    if frame_index < 0:
+        return jsonify({"error": "FRAME OUT OF RANGE"}), 404
     video_stride = int(result.get("video_stride", 1) or 1)
     if frame_index >= num_frames:
         return jsonify({"error": "FRAME OUT OF RANGE"}), 404
 
-    cache_key = (job_id, frame_index)
+    has_detections = isinstance(result.get("layer1"), dict)
+    raw_frame = request.args.get("raw") == "1" or not has_detections
+    cache_mode = "archive-clean" if not has_detections else ("raw" if raw_frame else "annotated")
+    cache_key = (job_id, frame_index, cache_mode)
     with _SCENE_THUMB_CACHE_LOCK:
         cached = _SCENE_THUMB_CACHE.get(cache_key)
     if cached is not None:
@@ -1446,15 +1484,52 @@ def scene_image(job_id: str, frame_index: int):
             "Cache-Control": "private, max-age=3600",
         })
 
-    frame = _read_video_frame(job["video_path"], frame_index, video_stride)
+    video_path = job.get("video_path") or result.get("video_path")
+    if not video_path:
+        return jsonify({"error": "SOURCE VIDEO NOT AVAILABLE"}), 404
+    if has_detections:
+        frame = _read_video_frame(video_path, frame_index, video_stride)
+    else:
+        # Archived jobs intentionally omit full detector arrays. Use the
+        # dashboard's saved timestamp to seek to the corresponding source
+        # frame and show it cleanly, instead of losing the scene preview after
+        # a server restart.
+        scene = next(
+            (item for item in dashboard.get("scenes", [])
+             if int(item.get("frame_index", -1)) == frame_index),
+            {},
+        )
+        fps = float(result.get("video_fps") or dashboard.get("video_fps") or 0)
+        timestamp = scene.get("timestamp")
+        if timestamp is not None and fps > 0:
+            source_frame = int(round(float(timestamp) * fps))
+        else:
+            total = int(result.get("video_total_frames") or dashboard.get("video_total_frames") or 0)
+            source_frame = int(round(frame_index * total / max(1, num_frames)))
+        frame = _read_video_frame(video_path, source_frame, 1)
     if frame is None:
         return jsonify({"error": "FRAME NOT FOUND"}), 404
 
     import cv2
 
+    if raw_frame:
+        ok, buf = cv2.imencode(".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+        if not ok:
+            return jsonify({"error": "FRAME ENCODE FAILED"}), 500
+        jpeg = buf.tobytes()
+        with _SCENE_THUMB_CACHE_LOCK:
+            _SCENE_THUMB_CACHE[cache_key] = jpeg
+            _SCENE_THUMB_CACHE.move_to_end(cache_key)
+            while len(_SCENE_THUMB_CACHE) > MAX_SCENE_THUMBS:
+                _SCENE_THUMB_CACHE.popitem(last=False)
+        return Response(jpeg, mimetype="image/jpeg", headers={
+            "Cache-Control": "private, max-age=3600",
+        })
+
     l1 = result["layer1"]
     objects = l1["scene_object_detections"][frame_index] or []
     logos = l1["logo_detections"][frame_index] or []
+    visible_logos, hidden_logo_count = _scene_logo_overlays(logos)
     annotated = frame.copy()
     for o in objects:
         bbox = o.get("bbox")
@@ -1467,7 +1542,7 @@ def scene_image(job_id: str, frame_index: int):
             annotated, label, (x1, max(10, y1 - 6)),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 0), 1,
         )
-    for o in logos:
+    for o in visible_logos:
         bbox = o.get("bbox")
         if not bbox:
             continue
@@ -1483,6 +1558,13 @@ def scene_image(job_id: str, frame_index: int):
         cv2.putText(
             annotated, label, (x1, max(10, y1 - 6)),
             cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1,
+        )
+    if hidden_logo_count:
+        note = f"Detector saturated: {hidden_logo_count} extra logo boxes hidden"
+        cv2.rectangle(annotated, (0, 0), (min(annotated.shape[1], 440), 25), (24, 24, 24), -1)
+        cv2.putText(
+            annotated, note, (8, 18), cv2.FONT_HERSHEY_SIMPLEX,
+            0.48, (255, 255, 255), 1, cv2.LINE_AA,
         )
     ok, buf = cv2.imencode(".jpg", cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR))
     if not ok:

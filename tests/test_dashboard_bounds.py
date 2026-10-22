@@ -14,7 +14,103 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from server import _validate_dashboard_bounds, _enrich_recommendations  # noqa: E402
+from server import (  # noqa: E402
+    _enrich_recommendations,
+    _scene_logo_overlays,
+    _validate_dashboard_bounds,
+)
+
+
+def test_saturated_scene_preview_hides_unknown_box_swarm_but_keeps_named_matches():
+    logos = [{"bbox": [i, i, i + 20, i + 20], "brand": None, "confidence": 0.9}
+             for i in range(100)]
+    logos[0].update(brand="OPPO", resolution_quality=0.7)
+    logos[1].update(brand="SAMSUNG", resolution_quality=0.9)
+
+    visible, hidden = _scene_logo_overlays(logos)
+
+    assert [logo["brand"] for logo in visible] == ["SAMSUNG", "OPPO"]
+    assert hidden == 98
+
+
+def test_normal_scene_preview_keeps_all_logo_detections():
+    logos = [{"bbox": [i, i, i + 20, i + 20], "brand": None} for i in range(20)]
+    visible, hidden = _scene_logo_overlays(logos)
+    assert visible == logos
+    assert hidden == 0
+
+
+def test_scene_endpoint_shows_clean_preview_and_serves_original_frame(monkeypatch):
+    import numpy as np
+    import server
+
+    job_id = "OVERLAY-SATURATION-TEST"
+    detections = [
+        {"bbox": [i, i, i + 30, i + 30], "confidence": 0.5, "brand": None}
+        for i in range(25)
+    ]
+    job = {
+        "status": "done",
+        "video_path": "unused-in-test.mp4",
+        "result": {
+            "num_frames": 1,
+            "video_stride": 1,
+            "layer1": {
+                "scene_object_detections": [[]],
+                "logo_detections": [detections],
+            },
+        },
+    }
+    frame = np.zeros((96, 128, 3), dtype=np.uint8)
+    monkeypatch.setattr(server, "AUTH_ENABLED", False)
+    monkeypatch.setattr(server, "_job", lambda _job_id: job)
+    monkeypatch.setattr(server, "_read_video_frame", lambda *_args: frame.copy())
+    client = server.app.test_client()
+
+    preview = client.get(f"/api/scene/{job_id}/0")
+    original = client.get(f"/api/scene/{job_id}/0?raw=1")
+
+    assert preview.status_code == original.status_code == 200
+    assert preview.data != original.data
+
+
+def test_archived_pipeline_and_scene_preview_survive_server_restart(monkeypatch):
+    import numpy as np
+    import server
+    from types import SimpleNamespace
+
+    job = {
+        "status": "done",
+        "dashboard": {
+            "job_id": "ARCHIVED-OVERLAY-TEST",
+            "num_frames": 3,
+            "video_fps": 25,
+            "scenes": [{"frame_index": 1, "timestamp": 2.0}],
+        },
+        "result": {
+            "num_frames": 3,
+            "video_total_frames": 75,
+            "video_fps": 25,
+            "video_path": "archived-video.mp4",
+        },
+    }
+    seeks = []
+    frame = np.zeros((96, 128, 3), dtype=np.uint8)
+    monkeypatch.setattr(server, "AUTH_ENABLED", False)
+    monkeypatch.setattr(server, "_job", lambda _job_id: None)
+    monkeypatch.setattr(server, "JOB_STORE", SimpleNamespace(load=lambda _job_id: job))
+    monkeypatch.setattr(
+        server, "_read_video_frame",
+        lambda path, index, stride: (seeks.append((path, index, stride)) or frame.copy()),
+    )
+    client = server.app.test_client()
+
+    dashboard = client.get("/api/pipeline/ARCHIVED-OVERLAY-TEST")
+    image = client.get("/api/scene/ARCHIVED-OVERLAY-TEST/1")
+
+    assert dashboard.status_code == 200
+    assert image.status_code == 200
+    assert seeks == [("archived-video.mp4", 50, 1)]
 
 
 def _dashboard(num_frames, scenes, products=None, ads=None, open_set=None):

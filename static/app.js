@@ -653,8 +653,8 @@ function renderDashboard(root, d, activeTab) {
   wireAdsPanel(root);
 }
 
-function sceneThumbUrl(jobId, frameIndex) {
-  return `/api/scene/${encodeURIComponent(jobId)}/${frameIndex}`;
+function sceneThumbUrl(jobId, frameIndex, raw = false) {
+  return `/api/scene/${encodeURIComponent(jobId)}/${frameIndex}${raw ? '?raw=1' : ''}`;
 }
 
 /* ── Confidence bar (design: evidence strength is shown, not one opaque %) ── */
@@ -842,9 +842,10 @@ function renderSceneRows(d) {
   return sorted.map((s) => {
     const near = hl != null && Math.abs(s.timestamp - hl) < 2.0;
     const hasUnresolved = (s.logos || []).some((o) => o.class_name === 'UNKNOWN BRAND');
+    const saturated = (s.logos || []).length > LOGO_OVERLOAD;
     return `
       <div class="scene-row ${near ? 'scene-highlight' : ''} ${hasUnresolved ? 'scene-row--has-unresolved' : ''}" data-ts="${Number(s.timestamp).toFixed(2)}">
-        <a class="scene-thumb-link" href="${sceneThumbUrl(src.job_id, s.frame_index)}" target="_blank">
+        <a class="scene-thumb-link" href="${sceneThumbUrl(src.job_id, s.frame_index, true)}" target="_blank" title="Open original frame without detection overlays">
           <img class="scene-thumb" src="${sceneThumbUrl(src.job_id, s.frame_index)}" alt="${fmtScene(s.n)} — annotated frame" loading="lazy">
         </a>
         <div class="scene-body">
@@ -856,6 +857,7 @@ function renderSceneRows(d) {
             ${sceneChips(s)}
             <a class="chip chip-ghost clip-chip" role="button" data-ts="${Number(s.timestamp).toFixed(2)}">&blacktriangleright; Play @ ${fmtTime(s.timestamp)}</a>
           </div>
+          ${saturated ? `<p class="scene-density-note">Detector saturation: the preview limits logo overlays to named matches. Click the image for the clean original frame.</p>` : ''}
         </div>
       </div>`;
   }).join('');
@@ -902,7 +904,7 @@ function scenesPanel(d) {
         ${audioBlock}
       </div>
       <div class="scenes-bin">
-        <div class="card-head bin-head"><span class="card-sub">${d.scenes.length} scenes${unknownNote}. Click a frame to open the source image.</span></div>
+        <div class="card-head bin-head"><span class="card-sub">${d.scenes.length} scenes${unknownNote}. Click a frame to open the clean original image.</span></div>
         <div class="scene-toolbar">
           <input id="scene-search" class="input scene-search" type="search" placeholder="Search scenes (brand, object, time)…" value="${escapeHtml(sceneView.q)}" autocomplete="off">
           <button id="scene-filter-btn" class="btn" type="button" aria-haspopup="true" aria-expanded="false">Filter${filterActive ? ' \u2713' : ''}</button>
