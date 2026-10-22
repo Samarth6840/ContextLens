@@ -1,0 +1,243 @@
+{
+  "benchmark": "logo_product_eval_pilot",
+  "live": true,
+  "manifest": "benchmark/logo_product_eval/serpapi_google_lens_pilot.jsonl",
+  "sample_count": 14,
+  "image_policy": "gold hero crops only; full video frames are not sent",
+  "providers": [
+    {
+      "provider": "gemini_grounded",
+      "status": "partial",
+      "samples": 14,
+      "requests": 14,
+      "completed": 4,
+      "top1_accuracy": 0.1429,
+      "top5_accuracy": 0.2143,
+      "source_return_rate": 0.0714,
+      "mean_latency_seconds": 3.728,
+      "errors": [
+        "Gemini API error 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+        "Gemini API error 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex",
+        "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+      ],
+      "per_sample": [
+        {
+          "sample_id": "df01d5a843:df01d5a843_003320:APPLE",
+          "brand": "APPLE",
+          "status": "ok",
+          "latency_seconds": 6.522,
+          "source_count": 3,
+          "top1_brand": null,
+          "top1_hit": false,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "APPLE",
+            "APPLE"
+          ],
+          "results": [
+            {
+              "title": "wikipedia.org",
+              "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQGCeb3iE7b7zU_Z2V4y4r0XJCbqb-wSVqfg1G4K7_9hD25YtlVSuEAl4cOklMRPO3RqJyPnjEhwdQsSbIi7jieVIHyNfWmYCnbXYDcBO0sn4cQGRzHkiafDL0ZRm1SblW0m1A==",
+              "source": "gemini_grounded_web",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "fandom.com",
+              "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQHSN9dwmRazadUpIqk1ZuQQ4hFKtGf-ibWFflqQGy-ZkBI_umKQtgKWFM8yKRLVghsSxCYdwlya8o2hnsjFdeMcYZwVsjSQbdKWHvyyZlItkBjejC3A0IeBvnplo1U=",
+              "source": "gemini_grounded_web",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "crowdspring.com",
+              "url": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQEV3poZuUjCHGrqou7Gvyn_hrvzTkSXSSzOvRI2QhI1paybZwqN_aWJ7e2W9n7N0SFetCTUuiSkJOzIyQxp7Jq4wkaZ8kITJSXBhqNJfxUG_m12kvr7y8UBZdsXYeQCHHR_od3Qwm8=",
+              "source": "gemini_grounded_web",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "Apple BRAND: Apple",
+              "url": "",
+              "source": "gemini_grounded_tags",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "The image clearly displays the iconic bitten apple logo. This logo is associated with Apple Inc.. The company was founded in 1976 as Apple Computer Company and later became Apple Inc. in 2007, expanding its focus beyond computers to consumer electronics. The current logo, a bitten apple, has been in use since 1977, with minor variations in color and style over the years.\n\nBRAND: Apple BRAND: Apple",
+              "url": "",
+              "source": "gemini_grounded_desc",
+              "thumbnail_url": ""
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007960:BROADCOM",
+          "brand": "BROADCOM",
+          "status": "ok",
+          "latency_seconds": 8.72,
+          "source_count": 0,
+          "top1_brand": "BROADCOM",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "BROADCOM",
+            "BROADCOM"
+          ],
+          "results": [
+            {
+              "title": "Broadcom",
+              "url": "",
+              "source": "gemini_grounded_tags",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "BRAND: Broadcom",
+              "url": "",
+              "source": "gemini_grounded_desc",
+              "thumbnail_url": ""
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_005280:CMF",
+          "brand": "CMF",
+          "status": "ok",
+          "latency_seconds": 14.867,
+          "source_count": 0,
+          "top1_brand": "CMF",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "CMF",
+            "CMF"
+          ],
+          "results": [
+            {
+              "title": "CMF by Nothing",
+              "url": "",
+              "source": "gemini_grounded_tags",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "BRAND: CMF by Nothing",
+              "url": "",
+              "source": "gemini_grounded_desc",
+              "thumbnail_url": ""
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012400:GOOGLE",
+          "brand": "GOOGLE",
+          "status": "error",
+          "latency_seconds": 5.842,
+          "error": "Gemini API error 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_008400:HONDA",
+          "brand": "HONDA",
+          "status": "error",
+          "latency_seconds": 2.275,
+          "error": "Gemini API error 503: {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_010160:MI",
+          "brand": "MI",
+          "status": "ok",
+          "latency_seconds": 7.336,
+          "source_count": 0,
+          "top1_brand": "XIAOMI",
+          "top1_hit": false,
+          "top5_hit": false,
+          "matched_brands_top5": [
+            "XIAOMI",
+            "XIAOMI"
+          ],
+          "results": [
+            {
+              "title": "Xiaomi",
+              "url": "",
+              "source": "gemini_grounded_tags",
+              "thumbnail_url": ""
+            },
+            {
+              "title": "BRAND: Xiaomi",
+              "url": "",
+              "source": "gemini_grounded_desc",
+              "thumbnail_url": ""
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007080:MICROSOFT",
+          "brand": "MICROSOFT",
+          "status": "error",
+          "latency_seconds": 0.87,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_016080:MOTOROLA",
+          "brand": "MOTOROLA",
+          "status": "error",
+          "latency_seconds": 0.743,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007520:NVIDIA",
+          "brand": "NVIDIA",
+          "status": "error",
+          "latency_seconds": 0.696,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_008800:OPPO",
+          "brand": "OPPO",
+          "status": "error",
+          "latency_seconds": 0.727,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_009560:REALME",
+          "brand": "REALME",
+          "status": "error",
+          "latency_seconds": 1.254,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_006280:SAMSUNG",
+          "brand": "SAMSUNG",
+          "status": "error",
+          "latency_seconds": 0.792,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_000520:SNAPDRAGON",
+          "brand": "SNAPDRAGON",
+          "status": "error",
+          "latency_seconds": 0.767,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012600:VENGEANCE",
+          "brand": "VENGEANCE",
+          "status": "error",
+          "latency_seconds": 0.781,
+          "error": "Gemini API error 429: {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \\n* Quota ex"
+        }
+      ],
+      "attempted": 14,
+      "conditional_top1_accuracy": 0.5,
+      "conditional_top5_accuracy": 0.75,
+      "conditional_source_return_rate": 0.25,
+      "success_rate": 0.2857,
+      "not_run": 0,
+      "error_count": 10,
+      "top1_hits": 2,
+      "top5_hits": 3
+    }
+  ]
+}

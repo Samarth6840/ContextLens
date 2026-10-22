@@ -81,8 +81,8 @@ def train_affinity_from_jobs(
     *,
     embed_dim: int = 64,
     n_layers: int = 3,
-    epochs: int = 30,
-    lr: float = 1e-3,
+    epochs: int = 100,
+    lr: float = 1e-2,
     seed: int = 0,
     model_cls=None,
 ) -> Tuple[Any, Dict[str, Any]]:

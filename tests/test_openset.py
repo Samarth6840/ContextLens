@@ -17,12 +17,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np  # noqa: E402
 
 from src.openset import (  # noqa: E402
+    FallbackReverseImageSearchBackend,
     GeminiGroundedBackend,
+    GoogleVisionWebBackend,
     OpenSetBrandIdentifier,
     ReverseImageResult,
+    SerpApiReverseBackend,
     _brand_likeness,
     _derive_candidate_name,
     _is_void_name,
+    _safe_external_error,
     create_backend,
 )
 
@@ -83,6 +87,75 @@ class _FakeBackend:
         return self._results
 
 
+def test_auto_search_backend_falls_back_to_next_available_provider():
+    class Broken:
+        name = "broken"
+        available = True
+
+        def search_crop(self, crop):
+            raise RuntimeError("temporary provider failure")
+
+    result = ReverseImageResult("NORDNEST", "https://nordnest.example/", "web")
+
+    class Working(_FakeBackend):
+        name = "working"
+
+    backend = FallbackReverseImageSearchBackend([Broken(), Working([result])])
+    out = backend.search_crop(np.zeros((8, 8, 3), dtype=np.uint8))
+    assert out == [result]
+
+
+def test_auto_search_rejects_ungrounded_model_labels():
+    class TextOnly(_FakeBackend):
+        name = "text_only"
+
+    good = ReverseImageResult("NORDNEST", "https://nordnest.example/", "web")
+    backend = FallbackReverseImageSearchBackend([
+        TextOnly([ReverseImageResult("NORDNEST", "", "gemini_grounded_tags")]),
+        _FakeBackend([good]),
+    ])
+    assert backend.search_crop(np.zeros((8, 8, 3), dtype=np.uint8)) == [good]
+
+
+def test_external_error_redacts_api_keys_in_urls():
+    error = "403 for https://example.test/path?key=super-secret&x=1"
+    safe = _safe_external_error(error)
+    assert "super-secret" not in safe
+    assert "key=[REDACTED]" in safe
+
+
+def test_google_vision_web_returns_logo_annotations_and_web_sources(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLOUD_VISION_API_KEY", "test-key")
+    backend = GoogleVisionWebBackend()
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"responses": [{
+                "logoAnnotations": [{"description": "Northstar"}],
+                "webDetection": {
+                    "pagesWithMatchingImages": [{"pageTitle": "Northstar", "url": "https://northstar.example/"}],
+                    "webEntities": [{"description": "Northstar", "uri": "https://northstar.example/"}],
+                },
+            }]}
+
+    import requests
+    captured = {}
+
+    def fake_post(*args, **kwargs):
+        captured.update(kwargs)
+        return Response()
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    results = backend.search_crop(np.zeros((16, 16, 3), dtype=np.uint8))
+    types = [feature["type"] for feature in captured["json"]["requests"][0]["features"]]
+    assert types == ["LOGO_DETECTION", "WEB_DETECTION"]
+    assert any(r.source == "google_vision_logo_tags" and r.title == "Northstar" for r in results)
+    assert any(r.url == "https://northstar.example/" for r in results)
+
+
 def test_derive_candidate_uses_real_wordmark_tags_not_guess():
     """Candidate name comes only from real engine-read tags/URLs."""
     results = [
@@ -91,6 +164,32 @@ def test_derive_candidate_uses_real_wordmark_tags_not_guess():
         ReverseImageResult(title="tshirt", url="", source="yandex_cbir_tags"),
     ]
     assert _derive_candidate_name(results, _GENERIC_WORDS, _GENERIC_DOMAINS) == "BEST EXPRESS"
+
+
+def test_lens_result_domains_do_not_become_retailer_brands():
+    retailer = [
+        ReverseImageResult("Samsung phone", "https://amazon.com/p/1", "serpapi_google_lens_visual_match"),
+    ]
+    assert _derive_candidate_name(retailer, _GENERIC_WORDS, _GENERIC_DOMAINS) is None
+
+
+def test_lens_brand_requires_agreement_across_independent_hosts():
+    rows = [
+        ReverseImageResult("Samsung Galaxy phone", "https://shop-a.example/p", "serpapi_google_lens_visual_match"),
+        ReverseImageResult("Samsung Galaxy phone", "https://shop-b.example/p", "serpapi_google_lens_visual_match"),
+    ]
+    assert _derive_candidate_name(rows, _GENERIC_WORDS, _GENERIC_DOMAINS) == "SAMSUNG"
+
+
+def test_unknown_lens_brand_requires_multiple_pages_from_its_domain():
+    one = [
+        ReverseImageResult("Unknown logo", "https://northstar.example/a", "serpapi_google_lens_visual_match"),
+    ]
+    two = one + [
+        ReverseImageResult("Northstar products", "https://northstar.example/b", "serpapi_google_lens_visual_match"),
+    ]
+    assert _derive_candidate_name(one, _GENERIC_WORDS, _GENERIC_DOMAINS) is None
+    assert _derive_candidate_name(two, _GENERIC_WORDS, _GENERIC_DOMAINS) == "NORTHSTAR"
 
 
 def test_derive_candidate_rejects_generic_tags():
@@ -227,6 +326,101 @@ def test_identify_surfaces_candidate_without_verification():
     assert cand["logo_dev_validation"]["status"] != "verified"
 
 
+def test_unknown_ocr_wordmark_becomes_online_search_crop():
+    identifier = _identifier(backend=_UnavailableBackend(), min_crop_area=100.0)
+    identifier.ocr_min_crop_area = 100.0
+    result = {
+        "video_stride": 1,
+        "layer1": {
+            "logo_detections": [[]],
+            "logo_search_proposals": [[]],
+            "ocr_results": [[{
+                "text": "NORDNEST",
+                "confidence": 0.98,
+                "bbox": [[2, 2], [60, 2], [60, 24], [2, 24]],
+            }]],
+        },
+    }
+    video = _tiny_video()
+    try:
+        accepted, rejected, skipped, diagnostics = identifier._candidate_crops(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert len(accepted) == 1
+    assert accepted[0]["source"] == "ocr_unknown_wordmark"
+    assert accepted[0]["ocr_text"] == "NORDNEST"
+
+
+def test_catalog_wordmark_is_not_sent_to_online_fallback():
+    identifier = _identifier(backend=_UnavailableBackend(), min_crop_area=100.0)
+    identifier.ocr_min_crop_area = 100.0
+    video = _tiny_video()
+    result = {
+        "video_stride": 1,
+        "layer1": {
+            "logo_detections": [[]],
+            "logo_search_proposals": [[]],
+            "ocr_results": [[{
+                "text": "SAMSUNG",
+                "confidence": 0.99,
+                "bbox": [[2, 2], [60, 2], [60, 24], [2, 24]],
+            }]],
+        },
+    }
+    try:
+        accepted, _, _, _ = identifier._candidate_crops(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert accepted == []
+
+
+def test_phone_ui_wordmark_is_not_sent_to_online_fallback():
+    identifier = _identifier(backend=_UnavailableBackend(), min_crop_area=100.0)
+    identifier.ocr_min_crop_area = 100.0
+    video = _tiny_video()
+    result = {
+        "video_stride": 1,
+        "layer1": {
+            "logo_detections": [[]],
+            "logo_search_proposals": [[]],
+            "ocr_results": [[{
+                "text": "Instagram",
+                "confidence": 0.99,
+                "bbox": [[2, 2], [60, 2], [60, 24], [2, 24]],
+            }]],
+        },
+    }
+    try:
+        accepted, _, _, _ = identifier._candidate_crops(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert accepted == []
+
+
+def test_editorial_full_frame_proposal_is_not_searched():
+    identifier = _identifier(backend=_UnavailableBackend(), min_crop_area=100.0)
+    video = _tiny_video()
+    result = {
+        "video_stride": 1,
+        "layer1": {
+            "logo_detections": [[]],
+            "logo_search_proposals": [[{
+                "bbox": [0, 0, 60, 60],
+                "confidence": 0.99,
+                "class_name": "logo",
+                "detection_source": "local",
+            }]],
+            "ocr_results": [[]],
+        },
+    }
+    try:
+        accepted, rejected, _, _ = identifier._candidate_crops(result, video)
+    finally:
+        Path(video).unlink(missing_ok=True)
+    assert accepted == []
+    assert any(row["reason"] == "editorial_box" for row in rejected)
+
+
 class _UnavailableBackend:
     name = "fake_unavailable"
     available = False
@@ -308,6 +502,87 @@ def test_gemini_search_parses_grounded_chunks_into_real_sources(monkeypatch):
     tags = [r for r in results if r.source == "gemini_grounded_tags"]
     assert tags and tags[0].title == "BestE"
     assert any(r.source == "gemini_grounded_desc" for r in results)
+
+
+def test_gemini_search_includes_ocr_wordmark_as_explicit_web_query(monkeypatch):
+    import requests as real_requests
+
+    backend = _gemini_backend(monkeypatch)
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeGeminiResponse("BRAND: Northstar")
+
+    monkeypatch.setattr(real_requests, "post", fake_post)
+    backend.search_crop(np.zeros((16, 16, 3), dtype=np.uint8), context_text="NORTHSTAR")
+    prompt = captured["payload"]["contents"][0]["parts"][0]["text"]
+    assert "NORTHSTAR" in prompt
+    assert "Search the exact wordmark" in prompt
+
+
+def test_serpapi_lens_upload_and_result_parsing(monkeypatch):
+    monkeypatch.setenv("SERPAPI_KEY", "test-key")
+    backend = SerpApiReverseBackend()
+    assert backend.available
+    calls = []
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.data
+
+    import requests
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        assert len(kwargs["files"]["image"][1]) <= backend.MAX_UPLOAD_BYTES
+        return Response({"image_id": "temporary-id"})
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        assert kwargs["params"]["engine"] == "google_lens"
+        assert kwargs["params"]["image_id"] == "temporary-id"
+        return Response({"visual_matches": [
+            {"title": "Northstar official", "link": "https://northstar.example/", "source": "Northstar"},
+            {"title": "bad result", "link": "javascript:alert(1)"},
+        ]})
+
+    monkeypatch.setattr(requests, "post", fake_post)
+    monkeypatch.setattr(requests, "get", fake_get)
+    results = backend.search_crop(np.zeros((32, 40, 3), dtype=np.uint8))
+    assert len(calls) == 2
+    assert len(results) == 1
+    assert results[0].url == "https://northstar.example/"
+    assert results[0].source == "serpapi_google_lens_visual_match"
+
+
+def test_bing_visual_backend_is_removed_from_product_routing():
+    import pytest
+    with pytest.raises(ValueError, match="retired"):
+        create_backend("bing_visual")
+
+
+def test_gemini_text_search_uses_grounded_sources_and_wordmark(monkeypatch):
+    import requests as real_requests
+
+    backend = _gemini_backend(monkeypatch)
+    captured = {}
+
+    def fake_post(url, params=None, json=None, timeout=None):
+        captured["payload"] = json
+        return _FakeGeminiResponse("BRAND: Northstar")
+
+    monkeypatch.setattr(real_requests, "post", fake_post)
+    results = backend.search_text("NORTHSTAR")
+    assert "NORTHSTAR" in captured["payload"]["contents"][0]["parts"][0]["text"]
+    assert any(r.url == "https://beste.com/" for r in results)
+    assert any(r.source == "gemini_grounded_tags" for r in results)
 
 
 def test_gemini_identification_line_parses_brand_format():

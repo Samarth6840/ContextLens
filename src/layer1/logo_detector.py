@@ -13,7 +13,9 @@ Configuration:
 All inference is real — no mock/stub/placeholder.
 """
 
+import base64
 import logging
+import os
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
@@ -316,6 +318,15 @@ def create_logo_detector(
     Returns:
         LogoDetectionBackend instance
     """
+    if backend == "google_cloud_vision":
+        return GoogleCloudVisionLogoDetector(
+            model_name=model_name,
+            confidence_threshold=confidence_threshold,
+            device=device,
+            imgsz=imgsz,
+            timeout=float(kwargs.get("timeout", 20.0)),
+            min_score=float(kwargs.get("min_score", 0.25)),
+        )
     if backend == "yolo_world":
         return YOLOWorldLogoDetector(
             model_name=model_name,
@@ -332,5 +343,156 @@ def create_logo_detector(
         )
     raise ValueError(
         f"Unknown logo detection backend: '{backend}'. "
-        "Choose 'yolo_world' or 'yolo'."
+        "Choose 'google_cloud_vision', 'yolo_world', or 'yolo'."
     )
+
+
+class GoogleCloudVisionLogoDetector(LogoDetectionBackend):
+    """Cloud Vision named-logo detector with a local YOLO fallback."""
+
+    API_URL = "https://vision.googleapis.com/v1/images:annotate"
+
+    def __init__(
+        self,
+        model_name: str,
+        confidence_threshold: float,
+        device: Optional[str],
+        imgsz: int,
+        timeout: float = 20.0,
+        min_score: float = 0.25,
+    ):
+        self.confidence_threshold = float(confidence_threshold)
+        self.device = device
+        self.imgsz = int(imgsz)
+        self.timeout = float(timeout)
+        self.min_score = float(min_score)
+        self._fallback_args = (model_name, confidence_threshold, device, imgsz)
+        self._fallback = None
+        self._remote_disabled = False
+        # Reuse the project's env/.env loader without exposing key material.
+        from src.openset import _env, _safe_external_error
+        self._api_key = os.environ.get("GOOGLE_CLOUD_VISION_API_KEY") or _env(
+            "GOOGLE_CLOUD_VISION_API_KEY"
+        )
+        self._safe_error = _safe_external_error
+
+    @property
+    def available(self) -> bool:
+        return bool(self._api_key) and not self._remote_disabled
+
+    @staticmethod
+    def _parse_response(response: dict, frame_shape) -> List[dict]:
+        h, w = frame_shape[:2]
+        out = []
+        for annotation in response.get("logoAnnotations") or []:
+            try:
+                score = float(annotation.get("score", 0.0))
+                vertices = (annotation.get("boundingPoly") or {}).get("vertices") or []
+                points = [
+                    (float(point.get("x", 0)), float(point.get("y", 0)))
+                    for point in vertices
+                ]
+            except (TypeError, ValueError):
+                continue
+            if len(points) < 2 or not np.isfinite(points).all():
+                continue
+            bbox = [
+                max(0.0, min(float(w), min(p[0] for p in points))),
+                max(0.0, min(float(h), min(p[1] for p in points))),
+                max(0.0, min(float(w), max(p[0] for p in points))),
+                max(0.0, min(float(h), max(p[1] for p in points))),
+            ]
+            name = str(annotation.get("description") or "").strip()
+            if name and bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                out.append({
+                    "bbox": bbox,
+                    "confidence": score,
+                    "text_prompt": name,
+                    "class_name": name,
+                    "class_confirmed": True,
+                    "detection_source": "google_cloud_vision",
+                })
+        return out
+
+    def _local_fallback(self):
+        if self._fallback is None:
+            model_name, confidence, device, imgsz = self._fallback_args
+            self._fallback = YOLOLogoDetector(
+                model_name=model_name,
+                confidence_threshold=confidence,
+                device=device,
+                imgsz=imgsz,
+            )
+        return self._fallback
+
+    def detect(self, image: np.ndarray, text_queries=None) -> List[dict]:
+        return self.detect_batch([image], text_queries=text_queries)[0]
+
+    def detect_batch(
+        self,
+        frames: List[np.ndarray],
+        text_queries: Optional[List[str]] = None,
+        batch_size: int = 8,
+    ) -> List[List[dict]]:
+        if not frames:
+            return []
+        if not self.available:
+            logger.warning("Cloud Vision is not configured or was disabled; using local logo proposals")
+            return self._local_fallback().detect_batch(frames, text_queries, batch_size)
+
+        import cv2
+        import requests
+
+        output: List[List[dict]] = [[] for _ in frames]
+        try:
+            chunk_size = min(max(1, int(batch_size)), 8)
+            for start in range(0, len(frames), chunk_size):
+                batch = frames[start:start + chunk_size]
+                payloads = []
+                positions = []
+                for local_idx, frame in enumerate(batch):
+                    if frame is None or frame.size == 0:
+                        continue
+                    ok, encoded = cv2.imencode(
+                        ".jpg", cv2.cvtColor(frame, cv2.COLOR_RGB2BGR),
+                        [cv2.IMWRITE_JPEG_QUALITY, 92],
+                    )
+                    if not ok:
+                        raise ValueError("could not encode frame for Cloud Vision")
+                    payloads.append({
+                        "image": {"content": base64.b64encode(encoded).decode("ascii")},
+                        "features": [{"type": "LOGO_DETECTION", "maxResults": 10}],
+                    })
+                    positions.append(local_idx)
+                if not payloads:
+                    continue
+                response = requests.post(
+                    self.API_URL,
+                    params={"key": self._api_key},
+                    json={"requests": payloads},
+                    timeout=self.timeout,
+                )
+                response.raise_for_status()
+                responses = response.json().get("responses") or []
+                if len(responses) != len(positions):
+                    raise RuntimeError("Cloud Vision returned a misaligned response batch")
+                for local_idx, item in zip(positions, responses):
+                    if item.get("error"):
+                        logger.warning("Cloud Vision failed on one frame: %s", item["error"])
+                        continue
+                    output[start + local_idx] = [
+                        det for det in self._parse_response(item, batch[local_idx].shape)
+                        if det["confidence"] >= self.min_score
+                    ]
+            return output
+        except Exception as exc:  # noqa: BLE001 — remote failure must not break a video job
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            if status_code in {401, 403, 404}:
+                # A bad key/service configuration won't recover during this
+                # process. Stop issuing one doomed cloud call per uploaded video.
+                self._remote_disabled = True
+            logger.warning(
+                "Cloud Vision logo detection failed; using local proposals: %s",
+                self._safe_error(exc),
+            )
+            return self._local_fallback().detect_batch(frames, text_queries, batch_size)

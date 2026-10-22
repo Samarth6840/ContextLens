@@ -119,6 +119,30 @@ def test_product_index_query_rejects_mismatch(ref_dir):
         list,
     )
 
+
+def test_product_index_cache_reuses_embeddings_and_tracks_model_version(ref_dir, tmp_path):
+    cache_path = tmp_path / "cache" / "product_index.npz"
+    first_extractor = _make_extractor("embed:dinov3-vitb16")
+    first = ProductEmbeddingIndex(ref_dir, cache_path=str(cache_path))
+    assert first.build(first_extractor) == 1
+    assert cache_path.is_file()
+
+    class NoInferenceExtractor:
+        embedding_version = "embed:dinov3-vitb16"
+
+        def extract_batch(self, *args, **kwargs):
+            raise AssertionError("a valid cache should avoid model inference")
+
+    cached = ProductEmbeddingIndex(ref_dir, cache_path=str(cache_path))
+    assert cached.build(NoInferenceExtractor()) == 1
+    assert cached.embedding_version == first.embedding_version
+    np.testing.assert_allclose(cached._matrix, first._matrix)
+
+    changed_model = _make_extractor("embed:dinov2-base")
+    rebuilt = ProductEmbeddingIndex(ref_dir, cache_path=str(cache_path))
+    assert rebuilt.build(changed_model) == 1
+    assert rebuilt.embedding_version == "embed:dinov2-base"
+
 # ── Resolver acceptance canary ─────────────────────────────
 
 

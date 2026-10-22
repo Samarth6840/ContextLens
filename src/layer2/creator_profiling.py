@@ -142,6 +142,13 @@ def build_profile_from_results(
             brand = rec.get("brand")
             if not brand:
                 continue
+            # Only DIRECT (on-screen) brands describe the creator's content.
+            # SUGGESTED brands never appeared in the video, so counting them
+            # builds the profile from the very suggestions the niche gate is
+            # meant to filter. A recommendation with no explicit type (a bare
+            # recommender list passed by a caller) is treated as DIRECT.
+            if rec.get("type") == "SUGGESTED":
+                continue
             brands[brand] = brands.get(brand, 0) + 1
             for cat in categories_for(brand):
                 categories[cat] = categories.get(cat, 0) + 1

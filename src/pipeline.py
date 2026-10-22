@@ -22,7 +22,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import numpy as np
 import yaml
 
-from src.brand_catalog import find_brand_mentions, match_brand
+from src.brand_catalog import (
+    find_brand_mentions,
+    match_brand,
+    match_brand_wordmark,
+)
 from src.layer2.brand_resolver import (
     UNKNOWN_BRAND,
     BrandResolver,
@@ -270,6 +274,114 @@ def _collect_ocr_product_resolutions(
                 if len(entry["frames"]) < max_frames:
                     entry["frames"].append(frame_idx)
     return list(found.values())
+
+
+def _ocr_brand_detections(
+    ocr_results: List[List[dict]],
+    frames: List[np.ndarray],
+    resolver: BrandResolver,
+    min_confidence: float = 0.70,
+    max_area_fraction: float = 0.50,
+) -> List[List[dict]]:
+    """Turn high-confidence, wordmark-like full-frame OCR into brand boxes.
+
+    This is the OCR-primary identification route selected by the frozen
+    real-video comparison. It avoids converting every generic detector box
+    into a brand guess: names must be read directly in a compact OCR region,
+    must look like a wordmark/product label, and must not be phone UI text.
+    """
+    out: List[List[dict]] = [[] for _ in frames]
+    for frame_idx, (frame, frame_ocr) in enumerate(zip(frames, ocr_results)):
+        if frame is None or frame.size == 0 or not frame_ocr:
+            continue
+        h, w = frame.shape[:2]
+        best_by_brand: Dict[str, dict] = {}
+        for result in frame_ocr:
+            text = str(result.get("text") or "").strip()
+            brand = match_brand_wordmark(text)
+            if not brand or resolver._is_screen_content_text(text):
+                continue
+            try:
+                confidence = float(result.get("confidence", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if not math.isfinite(confidence) or confidence < min_confidence:
+                continue
+            try:
+                points = np.asarray(result.get("bbox"), dtype=float).reshape(-1, 2)
+            except (TypeError, ValueError):
+                continue
+            if points.shape[0] < 2 or not np.isfinite(points).all():
+                continue
+            x1 = max(0.0, min(float(w), float(points[:, 0].min())))
+            y1 = max(0.0, min(float(h), float(points[:, 1].min())))
+            x2 = max(0.0, min(float(w), float(points[:, 0].max())))
+            y2 = max(0.0, min(float(h), float(points[:, 1].max())))
+            area_fraction = max(0.0, x2 - x1) * max(0.0, y2 - y1) / max(1, h * w)
+            if x2 <= x1 or y2 <= y1 or area_fraction > max_area_fraction:
+                continue
+            existing = best_by_brand.get(brand)
+            if existing is None or confidence > existing["confidence"]:
+                best_by_brand[brand] = {
+                    "bbox": [x1, y1, x2, y2],
+                    "confidence": confidence,
+                    "text_prompt": None,
+                    "class_name": brand,
+                    "brand": brand,
+                    "resolution_source": "full_frame_ocr",
+                    "resolution_quality": 0.90,
+                    "class_confirmed": False,
+                    "ocr_text": text[:120],
+                }
+        out[frame_idx] = list(best_by_brand.values())
+    return out
+
+
+def _merge_brand_detections(
+    detector_detections: List[List[dict]],
+    ocr_detections: List[List[dict]],
+    min_iou: float = 0.35,
+) -> List[List[dict]]:
+    """Merge independent detector and OCR identities without hiding conflicts."""
+    from src.layer1.detector import _iou
+
+    merged: List[List[dict]] = []
+    n = max(len(detector_detections), len(ocr_detections))
+    for frame_idx in range(n):
+        row = [dict(d) for d in (detector_detections[frame_idx]
+                                 if frame_idx < len(detector_detections) else [])]
+        supplemental = (ocr_detections[frame_idx]
+                        if frame_idx < len(ocr_detections) else [])
+        for candidate in supplemental:
+            overlaps = [
+                (idx, _iou(candidate.get("bbox", []), existing.get("bbox", [])))
+                for idx, existing in enumerate(row)
+                if candidate.get("bbox") and existing.get("bbox")
+            ]
+            best_idx, best_iou = max(overlaps, key=lambda pair: pair[1], default=(-1, 0.0))
+            if best_idx < 0 or best_iou < min_iou:
+                row.append(dict(candidate))
+                continue
+            existing = row[best_idx]
+            old_brand, new_brand = existing.get("brand"), candidate.get("brand")
+            if old_brand and new_brand and old_brand != new_brand:
+                old_quality = float(existing.get("resolution_quality", 0.0) or 0.0)
+                new_quality = float(candidate.get("resolution_quality", 0.0) or 0.0)
+                if abs(old_quality - new_quality) < 0.12:
+                    existing.update({
+                        "brand": None,
+                        "identity_conflict": [old_brand, new_brand],
+                        "unresolved_reason": "independent_identity_conflict",
+                    })
+                    continue
+                if new_quality < old_quality:
+                    continue
+            old_quality = float(existing.get("resolution_quality", 0.0) or 0.0)
+            new_quality = float(candidate.get("resolution_quality", 0.0) or 0.0)
+            if new_quality > old_quality:
+                row[best_idx] = {**existing, **candidate}
+        merged.append(row)
+    return merged
 
 
 def resolver_acceptance_canary(resolved_logos: List[List[dict]]) -> dict:
@@ -751,6 +863,8 @@ class Phase1Pipeline:
             device=self.device,
             text_queries=queries,
             imgsz=logo_cfg.get("imgsz", 640),
+            timeout=float(logo_cfg.get("cloud_timeout_seconds", 20.0)),
+            min_score=float(logo_cfg.get("cloud_min_score", 0.25)),
             dedupe_iou=float(logo_cfg.get("dedupe_iou", 0.55)),
             dedupe_containment=float(logo_cfg.get("dedupe_containment", 0.80)),
             dedupe_method=str(logo_cfg.get("dedupe_method", "iou")),
@@ -854,7 +968,10 @@ class Phase1Pipeline:
         if not os.path.isabs(ref_raw):
             repo_root = os.path.dirname(self.workspace)
             ref_raw = os.path.join(repo_root, ref_raw)
-        index = ProductEmbeddingIndex(reference_dir=os.path.abspath(ref_raw))
+        index = ProductEmbeddingIndex(
+            reference_dir=os.path.abspath(ref_raw),
+            cache_path=os.path.join(os.path.dirname(self.workspace), "var", "cache", "product_index.npz"),
+        )
         n_ref = index.build(self.embedding_extractor)
         if n_ref == 0:
             logger.critical(
@@ -1252,11 +1369,11 @@ class Phase1Pipeline:
     @staticmethod
     def _select_keyframes(frames: List[np.ndarray], max_frames: int = 30) -> List[int]:
         """
-        Select keyframes for per-frame expensive models.
+        Select representative frames around visual scene changes.
 
-        Uses evenly-spaced indices via linspace to ensure uniform temporal
-        coverage regardless of video length. Avoids parity bias from integer
-        stride sampling. Collapses to first N frames when total <= max_frames.
+        Long static shots are represented once, while frames at hard cuts are
+        retained. If there are more cuts than the budget allows, cuts are
+        sampled evenly so the start and end of the video remain covered.
 
         Args:
             frames: List of RGB images
@@ -1266,12 +1383,64 @@ class Phase1Pipeline:
             Sorted list of frame indices selected as keyframes
         """
         n = len(frames)
+        if max_frames <= 0 or n == 0:
+            return []
         if n <= max_frames:
             return list(range(n))
 
-        # Evenly-spaced indices — guarantees uniform coverage
-        indices = np.linspace(0, n - 1, max_frames, dtype=int).tolist()
-        return sorted(set(indices))
+        # Compare small grayscale thumbnails rather than full-resolution
+        # frames. This keeps selection cheap even for long 1080p uploads.
+        thumbnails = []
+        for frame in frames:
+            if frame is None or frame.size == 0:
+                thumbnails.append(None)
+                continue
+            gray = np.asarray(frame[..., :3], dtype=np.float32).mean(axis=2)
+            h, w = gray.shape
+            step_y = max(1, h // 32)
+            step_x = max(1, w // 32)
+            thumbnails.append(gray[::step_y, ::step_x])
+
+        changes = np.zeros(n, dtype=np.float32)
+        for i in range(1, n):
+            before, after = thumbnails[i - 1], thumbnails[i]
+            if before is None or after is None or before.shape != after.shape:
+                changes[i] = 255.0
+            else:
+                changes[i] = float(np.mean(np.abs(after - before)))
+
+        # A fixed floor catches hard cuts without treating codec noise and
+        # small object motion as a new scene. Keep the new-scene frame itself.
+        cut_indices = np.flatnonzero(changes >= 18.0).tolist()
+        # A brief transition can span several adjacent frames; collapse each
+        # run to its strongest change so one cut consumes one candidate slot.
+        cuts = []
+        for idx in cut_indices:
+            if cuts and idx <= cuts[-1] + 2:
+                if changes[idx] > changes[cuts[-1]]:
+                    cuts[-1] = idx
+            else:
+                cuts.append(idx)
+
+        candidates = [0] + cuts
+        if cuts:
+            # Keep one frame inside each detected scene as well as its start;
+            # this catches a logo appearing after the cut while still
+            # collapsing a long, unchanged shot to a couple of samples.
+            boundaries = cuts + [n]
+            starts = [0] + cuts
+            for start, end in zip(starts, boundaries):
+                if end - start > 1:
+                    candidates.append((start + end - 1) // 2)
+        if len(candidates) > max_frames:
+            pick = np.linspace(0, len(candidates) - 1, max_frames, dtype=int)
+            candidates = [candidates[i] for i in pick]
+
+        # A clip with gradual motion has no hard cuts. Use uniform coverage in
+        # that case, but do not expand a truly static shot into duplicate work.
+        if not cuts and float(np.max(changes)) >= 1.5:
+            candidates = np.linspace(0, n - 1, max_frames, dtype=int).tolist()
+        return sorted(set(candidates))
 
     def process_video(self, video_path: str, frame_rate: Optional[float] = None,
                       creator_id: Optional[str] = None,
@@ -1354,6 +1523,8 @@ class Phase1Pipeline:
         logo_sampling = self.cfg["layer1"]["logo_detection"].get(
             "sampling_strategy", "scene_change"
         )
+        _logo_cfg = self.cfg["layer1"].get("logo_detection", {})
+        logo_identity_mode = str(_logo_cfg.get("identity_mode", "ocr_primary"))
         max_logo = self.cfg["layer1"]["logo_detection"].get("max_logo_candidates", 30)
         if logo_sampling == "scene_change":
             logo_indices = self._select_keyframes(frames, max_frames=max_logo)
@@ -1369,7 +1540,12 @@ class Phase1Pipeline:
             logo_indices[:10],
         )
 
-        all_logo_detections = None
+        all_logo_detections = (
+            [[] for _ in frames]
+            if logo_identity_mode in {"ocr_primary", "hybrid"}
+            else None
+        )
+        logo_search_proposals: List[List[dict]] = [[] for _ in frames]
         embed_raw = None
         all_detections = None
         all_ocr_results = None
@@ -1385,7 +1561,9 @@ class Phase1Pipeline:
         _qwen_frames: List[np.ndarray] = []
         _qwen_results = None
 
-        # Submit everything — logo, embeddings, STT, audio_events, AND detection —
+        # Submit embeddings, STT, audio_events, and object detection together.
+        # OCR-primary mode does not run the low-recall logo proposal model; it
+        # identifies compact catalog wordmarks directly from sampled OCR.
         # into the same concurrent pool. OCR submits in a second wave once
         # detection results arrive (it's the only module that depends on them).
         _t_logo = time.monotonic()
@@ -1394,12 +1572,14 @@ class Phase1Pipeline:
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {}
 
-            # Logo detection (YOLO-World zero-shot backend)
-            futures[self._locked_submit(
-                executor, "logo_detector", self.logo_detector.detect_batch,
-                logo_frames, None, batch_size,
-                wall_times=_model_wall_times,
-            )] = "logo_detection"
+            if logo_identity_mode in {"hybrid", "detector_fusion"}:
+                # Hybrid keeps model proposals for icon-only and out-of-catalog
+                # marks while OCR remains the strongest local identity signal.
+                futures[self._locked_submit(
+                    executor, "logo_detector", self.logo_detector.detect_batch,
+                    logo_frames, None, batch_size,
+                    wall_times=_model_wall_times,
+                )] = "logo_detection"
 
             # Open-vocabulary scene objects (YOLO-World zero-shot, ADDITIONAL
             # pass). Prompts config-driven product queries ("wristwatch",
@@ -1562,14 +1742,29 @@ class Phase1Pipeline:
                     # serialized to its own sequential pass after the executor.
                     has_detections = [len(d) > 0 for d in all_detections]
                     det_idx_map = [i for i, has in enumerate(has_detections) if has]
-                    max_ocr = self.cfg['layer1']['ocr'].get('max_frames', 30)
-                    if len(det_idx_map) > max_ocr:
-                        orig_count = len(det_idx_map)
-                        indices = np.linspace(0, orig_count - 1, max_ocr).astype(int)
-                        det_idx_map = [det_idx_map[i] for i in indices]
+                    max_ocr = max(
+                        0, int(self.cfg['layer1']['ocr'].get('max_frames', 60))
+                    )
+                    logo_priority = sorted(set(logo_indices))
+                    object_only = sorted(set(det_idx_map) - set(logo_priority))
+                    ocr_candidate_count = len(logo_priority) + len(object_only)
+                    if len(logo_priority) >= max_ocr:
+                        keep = np.linspace(
+                            0, len(logo_priority) - 1, max_ocr, dtype=int
+                        ) if max_ocr else []
+                        det_idx_map = [logo_priority[i] for i in keep]
+                    else:
+                        object_budget = max_ocr - len(logo_priority)
+                        if len(object_only) > object_budget:
+                            keep = np.linspace(
+                                0, len(object_only) - 1, object_budget, dtype=int
+                            ) if object_budget else []
+                            object_only = [object_only[i] for i in keep]
+                        det_idx_map = sorted(logo_priority + object_only)
+                    if ocr_candidate_count > max_ocr:
                         logger.info(
-                            "OCR limited: %d -> %d frames (max_ocr_frames=%d)",
-                            orig_count, len(det_idx_map), max_ocr,
+                            "OCR frame selection capped: %d -> %d frame(s)",
+                            ocr_candidate_count, len(det_idx_map),
                         )
                     frames_with_dets = [frames[i] for i in det_idx_map]
                     if frames_with_dets:
@@ -1698,21 +1893,54 @@ class Phase1Pipeline:
         _t_resolve = time.monotonic()
         _br_cfg = self.cfg["layer1"].get("logo_detection", {})
         _lr_cfg = self.cfg["layer1"].get("logo_retrieval", {})
+        logo_identity_mode = str(_br_cfg.get("identity_mode", "ocr_primary"))
         resolver = BrandResolver(
-            ocr_extractor=self.ocr,
+            ocr_extractor=self.ocr if logo_identity_mode != "ocr_primary" else None,
             class_confidence=_br_cfg.get("class_confidence", 0.55),
             crop_scale=_br_cfg.get("crop_scale", 2.0),
-            retrieval_index=self.logo_retrieval if _lr_cfg.get("enabled", True) else None,
+            retrieval_index=(
+                self.logo_retrieval
+                if logo_identity_mode == "detector_fusion"
+                and _lr_cfg.get("enabled", True)
+                else None
+            ),
             retrieval_min_similarity=_lr_cfg.get("min_similarity", 0.65),
             retrieval_min_margin=_lr_cfg.get("min_margin", 0.10),
             screen_content_filter=_br_cfg.get("screen_content_filter", {}).get("enabled", True),
             class_require_corroboration=_br_cfg.get("class_require_corroboration", True),
             max_logo_area_fraction=_br_cfg.get("max_logo_area_fraction", 0.50),
             max_unknown_per_frame=_br_cfg.get("max_unknown_per_frame", 10),
+            max_ocr_crops_per_frame=_br_cfg.get("max_ocr_crops_per_frame", 12),
             superset_margin_ratio=_br_cfg.get("superset_margin_ratio", 0.45),
             progress=progress,
         )
-        resolved_logos = resolver.resolve(all_logo_detections, frames)
+        if logo_identity_mode in {"ocr_primary", "hybrid"}:
+            logo_search_proposals = [list(row or []) for row in (all_logo_detections or [])]
+            detector_resolved = (
+                resolver.resolve(all_logo_detections, frames)
+                if logo_identity_mode == "hybrid"
+                else [[] for _ in frames]
+            )
+            resolved_logos = _ocr_brand_detections(
+                all_ocr_results,
+                frames,
+                resolver,
+                min_confidence=float(_br_cfg.get("ocr_min_confidence", 0.70)),
+                max_area_fraction=float(
+                    _br_cfg.get("max_logo_area_fraction", 0.50)
+                ),
+            )
+            if logo_identity_mode == "hybrid":
+                resolved_logos = _merge_brand_detections(
+                    detector_resolved, resolved_logos,
+                )
+            logger.info(
+                "Hybrid logo identification: %d wordmark/model detection(s)",
+                sum(len(dets) for dets in resolved_logos),
+            )
+        else:
+            logo_search_proposals = [list(row or []) for row in (all_logo_detections or [])]
+            resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
         if progress:
             resolved = sum(1 for fd in all_logo_detections for d in fd if d.get("brand"))
@@ -1804,28 +2032,32 @@ class Phase1Pipeline:
         # shows a logo or is spoken — a product match alone is enough. Fails
         # closed (no matches) when the reference index is empty.
         _t_prod = time.monotonic()
-        product_matches = self.product_index.query(
-            embed_raw, embed_indices,
-            video_fps=video_fps,
-            video_stride=video_stride,
-            top_k=int(
-                self.cfg["layer1"].get("product_index", {}).get("top_k", 1)
-            ),
-            similarity_threshold=float(
-                self.cfg["layer1"].get("product_index", {}).get(
-                    "similarity_threshold", 0.80
-                )
-            ),
-            # Pass the live embedding-model version so a stale/rebuilt index
-            # built under a different model (e.g. DINOv2) fails loudly instead
-            # of silently returning wrong nearest neighbors.
-            embedding_version=getattr(
-                self.embedding_extractor, "embedding_version", None
-            ),
+        _product_index_cfg = self.cfg["layer1"].get("product_index", {})
+        product_matches = (
+            self.product_index.query(
+                embed_raw, embed_indices,
+                video_fps=video_fps,
+                video_stride=video_stride,
+                top_k=int(_product_index_cfg.get("top_k", 1)),
+                similarity_threshold=float(
+                    _product_index_cfg.get("similarity_threshold", 0.80)
+                ),
+                # Pass the live embedding-model version so a stale/rebuilt
+                # index fails loudly instead of returning wrong neighbors.
+                embedding_version=getattr(
+                    self.embedding_extractor, "embedding_version", None
+                ),
+            )
+            if bool(_product_index_cfg.get("enabled", False))
+            else []
         )
         timings["product_catalog_match"] = time.monotonic() - _t_prod
         if progress:
-            progress(f"Product match — {len(product_matches)} DINO descriptor match(es)")
+            progress(
+                f"Product match — {len(product_matches)} DINO descriptor match(es)"
+                if _product_index_cfg.get("enabled", False)
+                else "Product match — disabled until reference images are validated"
+            )
         if product_matches:
             logger.info(
                 "Product-catalog match: %d match(es) via DINOv2 similarity",
@@ -2187,6 +2419,7 @@ class Phase1Pipeline:
             "layer1": {
                 "scene_object_detections": all_detections,
                 "logo_detections": all_logo_detections,
+                "logo_search_proposals": logo_search_proposals,
                 "num_embeddings": embeddings.shape[0],
                 "ocr_results": all_ocr_results,
                 "transcript": transcript,
@@ -2524,7 +2757,7 @@ class Phase1Pipeline:
         for frame_ocr in ocr_results:
             for result in frame_ocr:
                 text = result.get("text", "")
-                brand = match_brand(text)
+                brand = match_brand_wordmark(text)
                 if brand:
                     # Direct brand-alias OCR read. Raw OCR box confidence must
                     # still be GATED by the documented OCR resolution quality

@@ -139,7 +139,14 @@ def _subject(tone, brand, creator, rec_type):
     # placeholders; without this they ship in the subject line as raw braces.
     prefix = prefix.format(brand=brand, creator=creator)
     kind = "DIRECT PLACEMENT" if rec_type == "DIRECT" else "CONTENT-FIT OPPORTUNITY"
-    return f"{prefix} — {kind}: {brand} × {creator}"
+    # The brand × creator tail only adds information when the prefix does not
+    # already name it (creator_voice does, professional/data_driven do not) —
+    # otherwise the subject read "Let's do something NIKE × @runner —
+    # DIRECT PLACEMENT: NIKE × @runner".
+    tail = f"{brand} × {creator}"
+    if tail.lower() in prefix.lower():
+        return f"{prefix} — {kind}"
+    return f"{prefix} — {kind}: {tail}"
 
 
 def generate_personalized_outreach(
@@ -187,7 +194,11 @@ def generate_personalized_outreach(
     blurb = _profile_blurb(profile)
 
     facts = _pick_personalization_facts(rec)
-    memory_brands = memory.get("brands") or []
+    # Persisted layer2c uses `memory_brands` (store.py / seed_db.py); the live
+    # pipeline object emits the same key. A miss on either side means no
+    # cross-video claim — never read a key the pipeline does not write.
+    memory = memory or {}
+    memory_brands = memory.get("memory_brands") or memory.get("brands") or []
     cross_video = key in memory_brands
 
     rationale = {
@@ -210,8 +221,7 @@ def generate_personalized_outreach(
     ]
     if cross_video:
         lines.append(
-            f"{brand} has turned up across more than one piece of content we analyzed "
-            f"({len(memory_brands)} brands tracked in our brand memory)."
+            f"{brand} has appeared across more than one piece of content we analyzed."
         )
     lines.extend(f"• {f}." for f in facts)
     personal = "\n".join(lines)
@@ -224,8 +234,8 @@ def generate_personalized_outreach(
         + personal
         + "\n\n"
         + "I'd like to explore a native integration or sponsored segment that "
-        "matches how the content is actually watched. Happy to share full "
-        "view counts, audience demographics, and the complete scene breakdown."
+        "matches how the content is actually watched. Happy to share relevant "
+        "performance details for this integration if helpful."
         + "\n\n"
         + closing
         + "\n"
@@ -260,8 +270,8 @@ def _render_tone(tone, brand, creator, target, personal, cross_video,
         + personal
         + "\n\n"
         + "I'd like to explore a native integration or sponsored segment that "
-        "matches how the content is actually watched. Happy to share full "
-        "view counts, audience demographics, and the complete scene breakdown."
+        "matches how the content is actually watched. Happy to share relevant "
+        "performance details for this integration if helpful."
         + "\n\n"
         + closing
         + "\n"

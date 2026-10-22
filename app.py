@@ -65,10 +65,6 @@ show_raw = st.sidebar.checkbox(
     help="Display the full pipeline output dict.",
 )
 
-# Outside the @st.cache_resource loader — a widget inside a cached function
-# re-emits on every hit and triggers Streamlit's replay warning.
-st.sidebar.info(f"Pipeline device: {resolve_device(device_choice)}")
-
 # ── Load pipeline (cached) ───────────────────────────────────────────────────
 
 def resolve_device(device: str) -> str:
@@ -80,6 +76,11 @@ def resolve_device(device: str) -> str:
     if torch.cuda.is_available():
         return "cuda"
     return "cpu"
+
+
+# Outside the @st.cache_resource loader — a widget inside a cached function
+# re-emits on every hit and triggers Streamlit's replay warning.
+st.sidebar.info(f"Pipeline device: {resolve_device(device_choice)}")
 
 
 @st.cache_resource

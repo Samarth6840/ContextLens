@@ -89,6 +89,42 @@ def test_fully_quarantined_image_is_not_written_as_a_negative(tmp_path):
     assert list((out / "suspect_boxes" / "images" / "train").glob("*.jpg"))
 
 
+def test_keep_outermost_recovers_a_mark_under_an_oversized_container():
+    """The leaf rule drops a cluster whose container exceeds max_area AND whose
+    contained mark is quarantined for being contained -> nothing survives. The
+    alternative keeps the one box in the cluster that still passes the rules
+    (the mark), giving a trainable single target instead of no supervision."""
+    b = np.array([[0.50, 0.50, 0.80, 0.80],   # container, 64% of frame (> cap)
+                  [0.50, 0.50, 0.10, 0.10]])  # mark, 100% inside the container
+    default, _ = san.classify(b, max_area=0.50, max_aspect=20.0, leaf=0.95)
+    assert not default.any()
+    keep, _ = san.classify(b, max_area=0.50, max_aspect=20.0, leaf=0.95,
+                           keep_outermost=True)
+    assert keep.tolist() == [False, True]
+
+
+def test_keep_outermost_keeps_one_target_per_cluster():
+    """A deeply nested region becomes ONE target, and a separate mark is kept."""
+    b = np.array([[0.35, 0.35, 0.50, 0.50],   # 25% outer
+                  [0.30, 0.30, 0.20, 0.20],   # nested
+                  [0.30, 0.30, 0.10, 0.10],   # nested deeper
+                  [0.80, 0.80, 0.20, 0.20]])  # separate 4% mark
+    keep, _ = san.classify(b, max_area=0.50, max_aspect=20.0, leaf=0.95,
+                           keep_outermost=True)
+    assert keep.tolist() == [True, False, False, True]
+
+
+def test_default_leaf_rule_unchanged_by_the_new_mode():
+    """The original quarantine behavior must be byte-identical when the mode is
+    off (explicit flag and default flag agree)."""
+    b = np.array([[0.50, 0.50, 0.90, 0.90],
+                  [0.48, 0.48, 0.56, 0.56]])
+    m1, r1 = san.classify(b, 0.50, 20.0, 0.95)
+    m2, r2 = san.classify(b, 0.50, 20.0, 0.95, False)
+    assert m1.tolist() == m2.tolist()
+    assert dict(r1) == dict(r2)
+
+
 def test_source_root_is_never_modified(tmp_path):
     _root(tmp_path, "train", _yolo([[100, 100, 200, 200], [0, 0, 1000, 1000]]))
     before = (tmp_path / "labels" / "train" / "train.txt").read_text()

@@ -103,9 +103,18 @@ layer1:
     # Only retrain once that pool carries positive boxes from more than one
     # video; a single-video pool cannot separate logo presence from that video's
     # lighting and framing.
-    backend: "yolo"  # "yolo" (trained) | "yolo_world" (zero-shot)
+    # OCR-primary was selected from the frozen realvideo_v1 comparison. On
+    # that holdout, full-frame OCR alone named 13/24 hero brands (54.2%) with
+    # 4 named brands on 135 labeled-free frames; two of those four frames
+    # visibly contain CMF branding and appear mislabeled. The old detector path
+    # named 6/24 and produced 114 false brands. The detector remains available
+    # as a diagnostic/legacy mode, but does not invent identity in production.
+    identity_mode: "hybrid"  # "hybrid" | "ocr_primary" | "detector_fusion"
+    ocr_min_confidence: 0.70
+    backend: "yolo"  # local proposals keep full video frames on-device
     model: "weights/logo_detector/train/weights/best.pt"
-    confidence_threshold: 0.25
+    confidence_threshold: 0.10  # local fallback threshold; identity is resolved independently
+    cloud_min_score: 0.25
     # Must match the loaded checkpoint's training resolution, or mAP drops
     # (a 640 model evaluated at 960 lost ~30% mAP50 here). The current best.pt
     # was trained at imgsz=640; bump this to 960 only alongside a 960 retrain.
@@ -213,17 +222,20 @@ layer1:
       merge_iou: 0.3   # IoU a detection needs for a region to absorb it
       max_frame_gap: 2 # max skipped frames a detection may still join a region
       max_unknown_per_frame: 10  # suppress unresolved logo boxes past this per-frame density
+      max_ocr_crops_per_frame: 12  # bound PaddleOCR work on saturated logo frames
 
   # CLIP logo-retrieval index (Phase 1/2 — the brand-resolution precision fix).
-  # YOLO-World is weak on icon-only / stylized marks where there is no text for
-  # OCR to rescue, and can confidently mislabel such marks (SUPREME on Samsung).
-  # This makes CLIP embedding retrieval against a per-brand reference bank the
-  # PRIMARY classifier for the icon-only case: crop -> CLIP embed -> nearest
-  # reference logo -> brand. OCR still wins when it reads a wordmark; retrieval
-  # fires only when OCR finds none (see src/layer2/brand_resolver.py).
+  # CLIP retrieval can supplement OCR for icon-only marks after the reference
+  # corpus is validated. It is currently disabled because the existing bank
+  # contains several visibly mislabeled brand folders; see the integrity gate
+  # below and benchmark/logo_product_eval/README.md.
   # reference_dir: benchmark/reference_logos_bank  # per-brand subdirectories
   logo_retrieval:
-    enabled: True
+    # Off until the current 543-image reference bank has been audited and
+    # rebuilt. Visual review found mislabeled APPLE cereal packs, SAMSUNG
+    # "Galaxy Counters" packages, and unrelated images in GOOGLE; allowing any
+    # of these into nearest-neighbor retrieval can fabricate brand matches.
+    enabled: False
     # Encoder for the reference-bank query index (Phase 2). Default is the
     # original CLIP ViT-B-32 (openai) — the space every min_similarity /
     # min_margin number below was calibrated in. A documented alternative,
@@ -337,6 +349,10 @@ layer1:
   # benchmark/reference_logos ('<BRAND>_<n>.png', 4 brands) when the bank is
   # absent.
   product_index:
+    # Disabled in the default logo prototype: an audit found category-mismatched
+    # files in the current bank (for example, a Chex cereal package under APPLE).
+    # Re-enable only after the reference directory is curated and benchmarked.
+    enabled: false
     reference_dir: "benchmark/reference_logos_bank/reference"
     top_k: 1
     # DINOv2 cosine threshold for product-catalog matching. 0.80 is very
@@ -379,7 +395,7 @@ layer1:
     det_db_thresh: 0.3
     rec_batch_num: 64
     cpu_threads: 10          # physical core count — PaddleOCR runs on CPU
-    max_frames: 30  # max frames to run OCR on (sampled uniformly from detections)
+    max_frames: 60  # include logo keyframes first, then uniform object frames
 
   # Free.ai API (OCR, STT, Vision) — optional cloud fallback.
   # Requires FREE_AI_API_KEY in .env (30K free tokens/day, no credit card).
@@ -579,40 +595,28 @@ open_set:
   # Every tunable lives here — the code reads config and fails closed if any
   # key is missing. There are no hardcoded fallback values in src/openset.py.
   enabled: true
-  # Whether creator frames may be UPLOADED to a third-party reverse-image
-  # search API. Separate from `enabled`, which only controls whether the
-  # open-set block runs at all.
-  #
-  # This is the same consent decision as freeai below: a crop is the
-  # creator's own image leaving the machine. Detection, the local crop cache
-  # and the whole evidence trail still run with this false — only the outbound
-  # call is withheld, so nothing about a creator's video is disclosed unless an
-  # operator explicitly chooses to disclose it.
-  #
-  # Shipped default is OFF. Set true only after deciding that uploading
-  # customer video frames to Google/Bing/SerpAPI is acceptable.
-  consent_upload: false
-  # backend: google_vision_web | bing_visual | serpapi | browser_grounded | gemini_grounded
-  # browser_grounded drives a real reverse-image search through the agent-browser
-  # CLI (no paid API key required). gemini_grounded uses Google Gemini's free
-  # tier with the built-in google_search tool (real, citable results; needs a
-  # free GEMINI_API_KEY from aistudio.google.com). The shipped default is
-  # gemini_grounded — free and returns grounded sources — with browser_grounded
-  # kept as the keyless fallback when agent-browser is installed.
+  # The user's request explicitly enables online lookup for unknown logos.
+  # Only selected, deduplicated logo/text crops are uploaded; full video frames
+  # remain local in the default detector path.
+  consent_upload: true
+  # backend: auto | google_vision_web | serpapi | browser_grounded | gemini_grounded
+  # auto tries Google Cloud Vision, SerpApi Google Lens, Gemini grounding, then
+  # browser-grounded reverse-image search. (The Bing Search API was retired.)
+  # Every provider must return at least
+  # one source URL; a model-only answer never becomes a brand result. OCR text
+  # is searched directly first, then the crop is sent for visual identification.
   # Keyed backends unlock via their env var in .env (see .env.example):
   #   google_vision_web -> GOOGLE_CLOUD_VISION_API_KEY
-  #   bing_visual       -> BING_VISUAL_SEARCH_KEY
-  #   serpapi           -> SERPAPI_KEY (+ public image host)
+  #   serpapi           -> SERPAPI_KEY (crop uses temporary image upload)
   #   gemini_grounded   -> GEMINI_API_KEY (or ~/.gemini_key; model via GEMINI_MODEL)
-  backend: "gemini_grounded"
+  backend: "auto"
   # Only logo detections with REAL model confidence at/above this threshold
   # become candidates — this is the documented cost guard against calling the
   # (billable) reverse-image API on the detector's confidence noise floor.
-  # REVERTED 0.10 → 0.30 and 12 → 5 pending a labeled precision/recall
-  # comparison. The relaxation contradicted the documented precision-over-recall
-  # design principle (ARCHITECTURE_AND_RESEARCH.md §6, §10) and shipped without
-  # benchmark data; it must earn its way back with evidence, not demo vibes.
-  min_logo_confidence: 0.30
+  # Low-score proposals are only search candidates. They are capped, deduped,
+  # and must be supported by grounded pages plus independent brand validation
+  # before appearing as a verified open-set result.
+  min_logo_confidence: 0.10
   # Editorial search-crop gates. A crop is only ever sent to the (billable)
   # reverse-image API if it is large enough and shaped like a logo, not like a
   # full-width news/broadcast strap. Both gates also surface their rejected
@@ -623,9 +627,14 @@ open_set:
   # so min_crop_area 3000 + max_crop_aspect 3.0 keeps only ABOVE-the-noise,
   # logo-shaped crops.
   # minimum crop pixel area (w*h) to be searchable
-  min_crop_area: 3000
+  min_crop_area: 1000
+  # OCR wordmarks are much smaller than detector crops; this separate floor
+  # keeps readable, compact unknown names searchable without admitting text
+  # banners or whole-frame captions.
+  ocr_min_crop_area: 600
   # maximum bbox/crop aspect (w/h); wider = ticker/strap, not a searchable logo
   max_crop_aspect: 3.0
+  max_crop_area_fraction: 0.75
   # REPORTING ONLY - a frame with at least this many logo proposals is flagged
   # as saturated in the dashboard's detector diagnostics. It never drops,
   # reorders or caps a candidate; the funnel of zeros is a detector diagnosis,
@@ -638,7 +647,7 @@ open_set:
   # reported rather than tuned to look rare.
   saturated_proposals_per_frame: 30
   # Hard cap on reverse-image + logo.dev calls per video.
-  max_candidates_per_video: 5
+  max_candidates_per_video: 3
   crop_cache_dir: "static/openset_crops"
   # Engine wordmark/object tags that must NEVER be derived into a brand
   # candidate (generic descriptors such as "logo", "tshirt", "логотип").
@@ -708,6 +717,16 @@ open_set:
     - "w3.org"
     - "schema.org"
     - "creativecommons.org"
+    - "amazon.com"
+    - "amazon.in"
+    - "ebay.com"
+    - "walmart.com"
+    - "aliexpress.com"
+    - "etsy.com"
+    - "target.com"
+    - "bestbuy.com"
+    - "shopify.com"
+    - "redbubble.com"
   logodev_timeout: 10
 
 ui:

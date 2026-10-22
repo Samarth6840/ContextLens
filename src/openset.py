@@ -13,9 +13,9 @@ Flow (escalation Task 3):
 2. The region is treated as an "unknown brand candidate": never silently
    dropped, never labeled with a guessed name.
 3. The cropped region is sent to a REAL reverse-image-search / grounded
-   web-search backend (Google Cloud Vision Web Detection, Bing Visual Search,
-   SerpApi reverse image search, Google Gemini with google_search grounding,
-   or a browser-driven grounded search against Google Lens / Bing). The
+   web-search backend (Google Cloud Vision Logo/Web Detection, SerpApi Google
+   Lens reverse image search, Google Gemini with google_search grounding, or a
+   browser-driven grounded search). The
    search must return real, citable source URLs — never a free-text guess.
 4. The candidate name is cross-validated against logo.dev's search endpoint
    (the Part A B2b safeguard). A name is only "surfaced as a detection" when
@@ -48,7 +48,20 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from src.brand_catalog import match_brand_wordmark
+
 logger = logging.getLogger(__name__)
+
+
+def _safe_external_error(error: object) -> str:
+    """Redact query-string credentials from third-party exception text."""
+    message = str(error)
+    return re.sub(
+        r"([?&](?:key|api_key|token)=)[^&\s]+",
+        r"\1[REDACTED]",
+        message,
+        flags=re.IGNORECASE,
+    )[:600]
 
 # Backend -> env var that unlocks it (None = no key required).
 # This is a mapping of real backend identifiers to the real env vars that
@@ -62,8 +75,8 @@ BACKEND_ENV = {
 }
 
 GOOGLE_VISION_URL = "https://vision.googleapis.com/v1/images:annotate"
-BING_VISUAL_URL = "https://api.bing.microsoft.com/v7.0/images/visualsearch"
 SERPAPI_URL = "https://serpapi.com/search.json"
+SERPAPI_IMAGE_URL = "https://serpapi.com/image"
 GEMINI_API_URL = (
     "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 )
@@ -99,9 +112,75 @@ class ReverseImageSearchBackend(ABC):
         return True
 
     @abstractmethod
-    def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
+    def search_crop(self, crop: np.ndarray, context_text: str = "") -> List[ReverseImageResult]:
         """Return real search results for a cropped logo image (bytes upload)."""
         raise NotImplementedError
+
+
+class FallbackReverseImageSearchBackend(ReverseImageSearchBackend):
+    """Try configured grounded search providers in order until one responds."""
+
+    name = "auto"
+
+    def __init__(self, backends: List[ReverseImageSearchBackend]):
+        self.backends = [backend for backend in backends if backend.available]
+
+    @property
+    def available(self) -> bool:
+        return any(backend.available for backend in self.backends)
+
+    def search_crop(self, crop: np.ndarray, context_text: str = "") -> List[ReverseImageResult]:
+        errors = []
+        for backend in self.backends:
+            if not backend.available:
+                continue
+            try:
+                if context_text and isinstance(backend, GeminiGroundedBackend):
+                    results = backend.search_crop(crop, context_text=context_text)
+                else:
+                    results = backend.search_crop(crop)
+                # A model's bare answer/description is not grounding. A direct
+                # Google logo annotation is independent visual evidence; all
+                # other label-only replies need a citable page URL.
+                direct_logo_evidence = (
+                    backend.name == "google_vision_web"
+                    and any(r.source == "google_vision_logo_tags" for r in results)
+                )
+                if results and (any(r.url for r in results) or direct_logo_evidence):
+                    logger.info("Open-set search used %s", backend.name)
+                    return results
+                if results:
+                    errors.append(f"{backend.name}: response had no citable source URL")
+            except Exception as exc:  # noqa: BLE001 — try the next real provider
+                safe_error = _safe_external_error(exc)
+                errors.append(f"{backend.name}: {safe_error}")
+                logger.warning("Open-set provider %s failed: %s", backend.name, safe_error)
+        if errors:
+            raise RuntimeError("All grounded search providers failed: " + "; ".join(errors))
+        return []
+
+    def search_text(self, text: str) -> List[ReverseImageResult]:
+        """Use text-grounding providers first when OCR recovered a wordmark."""
+        errors = []
+        for backend in self.backends:
+            if not backend.available:
+                continue
+            search_text = getattr(backend, "search_text", None)
+            if not callable(search_text):
+                continue
+            try:
+                results = search_text(text)
+                if results and any(r.url for r in results):
+                    logger.info("Open-set text search used %s", backend.name)
+                    return results
+                if results:
+                    errors.append(f"{backend.name}: response had no citable source URL")
+            except Exception as exc:  # noqa: BLE001 — try the next text provider
+                safe_error = _safe_external_error(exc)
+                errors.append(f"{backend.name}: {safe_error}")
+        if errors:
+            logger.info("Grounded text search produced no sources: %s", "; ".join(errors))
+        return []
 
 
 _ENV_LOADED = False
@@ -149,32 +228,50 @@ class GoogleVisionWebBackend(ReverseImageSearchBackend):
     def __init__(self, timeout: float = 20.0):
         self.timeout = timeout
         self._key = _env(BACKEND_ENV[self.name])
+        self._disabled = False
 
     @property
     def available(self) -> bool:
-        return bool(self._key)
+        return bool(self._key) and not self._disabled
 
-    def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
+    def search_crop(self, crop: np.ndarray, context_text: str = "") -> List[ReverseImageResult]:
         if not self.available:
             raise RuntimeError("Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY")
         import requests
 
         b64 = base64.b64encode(_img_bytes(crop)).decode("ascii")
-        resp = requests.post(
-            GOOGLE_VISION_URL,
-            params={"key": self._key},
-            json={
-                "requests": [{
-                    "image": {"content": b64},
-                    "features": [{"type": "WEB_DETECTION", "maxResults": 6}],
-                }]
-            },
-            timeout=self.timeout,
-        )
-        resp.raise_for_status()
+        try:
+            resp = requests.post(
+                GOOGLE_VISION_URL,
+                params={"key": self._key},
+                json={
+                    "requests": [{
+                        "image": {"content": b64},
+                    "features": [
+                        {"type": "LOGO_DETECTION", "maxResults": 8},
+                        {"type": "WEB_DETECTION", "maxResults": 6},
+                    ],
+                    }]
+                },
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            if getattr(getattr(exc, "response", None), "status_code", None) in {401, 403, 404}:
+                self._disabled = True
+            raise
         data = resp.json()
         web = (((data.get("responses") or [{}])[0]).get("webDetection")) or {}
+        image_response = ((data.get("responses") or [{}])[0])
         results: List[ReverseImageResult] = []
+        for logo in image_response.get("logoAnnotations") or []:
+            label = str(logo.get("description") or "").strip()
+            if label:
+                results.append(ReverseImageResult(
+                    title=label,
+                    url="",
+                    source="google_vision_logo_tags",
+                ))
         for page in web.get("pagesWithMatchingImages") or []:
             results.append(ReverseImageResult(
                 title=(page.get("pageTitle") or page.get("url") or "page"),
@@ -189,14 +286,14 @@ class GoogleVisionWebBackend(ReverseImageSearchBackend):
             results.append(ReverseImageResult(
                 title=desc,
                 url=ent.get("uri") or "",
-                source="google_vision_web_entities",
+                source="google_vision_web_tags",
                 thumbnail_url="",
             ))
         return results
 
 
 class BingVisualSearchBackend(ReverseImageSearchBackend):
-    """Bing Visual Search API (real API, needs subscription key)."""
+    """Retired Bing Search API adapter, retained for a clear migration error."""
 
     name = "bing_visual"
 
@@ -206,70 +303,110 @@ class BingVisualSearchBackend(ReverseImageSearchBackend):
 
     @property
     def available(self) -> bool:
-        return bool(self._key)
+        return False
 
     def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
-        if not self.available:
-            raise RuntimeError("Bing Visual Search: no BING_VISUAL_SEARCH_KEY")
-        import requests
-
-        knowledge_request = json.dumps({
-            "imageInfo": {"imageInsightsToken": ""},
-            "cropArea": {"top": 0, "left": 0, "width": 1, "height": 1},
-        })
-        files = [
-            ("knowledgeRequest", (None, knowledge_request, "application/json")),
-            ("image", ("crop.png", _img_bytes(crop), "image/png")),
-        ]
-        resp = requests.post(
-            BING_VISUAL_URL,
-            headers={"Ocp-Apim-Subscription-Key": self._key},
-            files=files,
-            timeout=self.timeout,
+        raise RuntimeError(
+            "Bing Visual Search API retired on 2025-08-11; configure SerpApi "
+            "Google Lens, Google Cloud Vision, or Gemini grounding instead."
         )
-        resp.raise_for_status()
-        data = resp.json()
-        results: List[ReverseImageResult] = []
-        for tag in data.get("tags") or []:
-            for action in tag.get("actions") or []:
-                if action.get("actionType") != "PagesIncluding":
-                    continue
-                for page in (action.get("data") or {}).get("value") or []:
-                    results.append(ReverseImageResult(
-                        title=page.get("name") or page.get("hostPageUrl") or "page",
-                        url=page.get("hostPageUrl") or "",
-                        source="bing_visual_pages",
-                        thumbnail_url=(page.get("thumbnailUrl") or {}),
-                    ))
-        return results
 
 
 class SerpApiReverseBackend(ReverseImageSearchBackend):
-    """SerpApi Google reverse-image search (needs key; requires a hosted image URL).
-
-    NOTE: the current pipeline has no object-storage host, so this backend is
-    not wired as a default. It is implemented so a SerpApi user can set
-    SERPAPI_KEY + a public image host later. Fail-closed without a key.
-    """
+    """Google Lens image search through SerpApi's temporary image-upload API."""
 
     name = "serpapi"
 
-    def __init__(self, image_base_url: str = "", timeout: float = 20.0):
+    MAX_UPLOAD_BYTES = 480 * 1024
+
+    def __init__(self, image_base_url: str = "", timeout: float = 30.0):
         self.timeout = timeout
-        self.image_base_url = image_base_url
         self._key = _env(BACKEND_ENV[self.name])
 
     @property
     def available(self) -> bool:
-        return bool(self._key) and bool(self.image_base_url)
+        return bool(self._key)
+
+    @classmethod
+    def _jpeg_bytes(cls, crop: np.ndarray) -> bytes:
+        """Encode a bounded JPEG accepted by SerpApi's 500 KB upload limit."""
+        import cv2
+
+        if crop is None or crop.size == 0:
+            raise ValueError("empty logo crop")
+        h, w = crop.shape[:2]
+        scale = min(1.0, 900.0 / max(h, w))
+        resized = cv2.resize(
+            crop,
+            (max(1, int(round(w * scale))), max(1, int(round(h * scale)))),
+            interpolation=cv2.INTER_AREA if scale < 1 else cv2.INTER_CUBIC,
+        ) if scale < 1 else crop
+        bgr = cv2.cvtColor(resized, cv2.COLOR_RGB2BGR)
+        for quality in (90, 82, 72, 60, 48):
+            ok, encoded = cv2.imencode(
+                ".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, quality]
+            )
+            if ok and encoded.nbytes <= cls.MAX_UPLOAD_BYTES:
+                return encoded.tobytes()
+        raise ValueError("logo crop exceeds SerpApi's 500 KB upload limit")
 
     def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
         if not self.available:
-            raise RuntimeError("SerpApi reverse image: missing SERPAPI_KEY or image host")
-        raise NotImplementedError(
-            "SerpApi reverse-image requires hosting the crop at a public URL; "
-            "set image_base_url and upload via your own object storage."
+            raise RuntimeError("SerpApi Google Lens: missing SERPAPI_KEY")
+        import requests
+
+        image = self._jpeg_bytes(crop)
+        upload = requests.post(
+            SERPAPI_IMAGE_URL,
+            data={"api_key": self._key},
+            files={"image": ("logo-crop.jpg", image, "image/jpeg")},
+            timeout=self.timeout,
         )
+        upload.raise_for_status()
+        upload_data = upload.json()
+        if upload_data.get("error"):
+            raise RuntimeError(f"SerpApi image upload failed: {upload_data['error']}")
+        image_id = str(upload_data.get("image_id") or "").strip()
+        if not image_id:
+            raise RuntimeError("SerpApi image upload returned no image_id")
+
+        response = requests.get(
+            SERPAPI_URL,
+            params={
+                "engine": "google_lens",
+                "image_id": image_id,
+                "type": "all",
+                "hl": "en",
+                "api_key": self._key,
+            },
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("error"):
+            raise RuntimeError(f"SerpApi Google Lens failed: {data['error']}")
+        results = []
+        for match in data.get("visual_matches") or []:
+            url = str(match.get("link") or "").strip()
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                continue
+            results.append(ReverseImageResult(
+                title=match.get("title") or match.get("source") or url,
+                url=url,
+                source="serpapi_google_lens_visual_match",
+                thumbnail_url=match.get("thumbnail") or "",
+            ))
+        for item in data.get("text_results") or []:
+            url = str(item.get("link") or "").strip()
+            if not re.match(r"^https?://", url, re.IGNORECASE):
+                continue
+            results.append(ReverseImageResult(
+                title=item.get("title") or url,
+                url=url,
+                source="serpapi_google_lens_text_result",
+                thumbnail_url=item.get("thumbnail") or "",
+            ))
+        return results
 
 
 class GeminiGroundedBackend(ReverseImageSearchBackend):
@@ -301,17 +438,21 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
     name = "gemini_grounded"
 
     _PROMPT = (
-        "You are a brand-identification tool. Look at this image (usually a "
-        "logo, product, or label crop) and identify the brand or product as "
-        "precisely as you can. Use the google_search tool to verify with real "
-        "web results and base every claim on what you retrieved. End your "
-        "answer with one line in exactly this format:\nBRAND: <name>\n"
+        "Identify the company or consumer brand whose logo or wordmark is "
+        "visibly present in this image crop. Do not infer a brand from a food "
+        "flavor, product category, color, shape, or unrelated surrounding "
+        "packaging text. Use google_search to find an official brand source "
+        "that matches the visible mark. If the mark is not clear, respond "
+        "BRAND: UNKNOWN. Return exactly one final line in this format:\n"
+        "BRAND: <canonical company/brand name>\n"
     )
 
     def __init__(self, timeout: float = 60.0, model: Optional[str] = None):
         self.timeout = timeout
         self.model = model or _env("GEMINI_MODEL") or "gemini-2.5-flash"
         self._key = _env("GEMINI_API_KEY")
+        self._disabled_until = 0.0
+        self._permanently_disabled = False
         if not self._key:
             key_path = Path.home() / ".gemini_key"
             if key_path.is_file():
@@ -322,9 +463,22 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
 
     @property
     def available(self) -> bool:
-        return bool(self._key)
+        return bool(self._key) and not self._permanently_disabled and time.monotonic() >= self._disabled_until
 
-    def search_crop(self, crop: np.ndarray) -> List[ReverseImageResult]:
+    def _check_response(self, response) -> None:
+        if response.status_code == 200:
+            return
+        if response.status_code in {401, 403}:
+            self._permanently_disabled = True
+        elif response.status_code in {429, 503}:
+            # A free-tier quota or transient overload must not trigger one more
+            # doomed call for each remaining candidate in the same video.
+            self._disabled_until = time.monotonic() + 60.0
+        raise RuntimeError(
+            f"Gemini API error {response.status_code}: {response.text[:300]}"
+        )
+
+    def search_crop(self, crop: np.ndarray, context_text: str = "") -> List[ReverseImageResult]:
         if not self.available:
             raise RuntimeError("Gemini: no GEMINI_API_KEY")
         import requests
@@ -334,7 +488,13 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
             "contents": [{
                 "role": "user",
                 "parts": [
-                    {"text": self._PROMPT},
+                    {"text": self._PROMPT + (
+                        " The OCR system read this possible wordmark from the crop: "
+                        f"{context_text[:120]!r}. Search the exact wordmark and verify "
+                        "the official brand site before identifying it. If web search "
+                        "does not return a matching official source, respond BRAND: UNKNOWN."
+                        if context_text else ""
+                    )},
                     {"inline_data": {"mime_type": "image/png", "data": b64}},
                 ],
             }],
@@ -347,8 +507,7 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
             json=payload,
             timeout=self.timeout,
         )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Gemini API error {resp.status_code}: {resp.text[:300]}")
+        self._check_response(resp)
         data = resp.json()
         try:
             cand = data["candidates"][0]
@@ -389,6 +548,64 @@ class GeminiGroundedBackend(ReverseImageSearchBackend):
                 url="",
                 source="gemini_grounded_desc",
                 thumbnail_url="",
+            ))
+        return results
+
+    def search_text(self, text: str) -> List[ReverseImageResult]:
+        """Search an OCR wordmark directly, retaining Google grounding sources."""
+        if not self.available:
+            raise RuntimeError("Gemini: no GEMINI_API_KEY")
+        import requests
+
+        wordmark = re.sub(r"\s+", " ", str(text)).strip()[:100]
+        if not wordmark:
+            return []
+        prompt = (
+            f'Search the web for the exact visible logo wordmark "{wordmark}". '
+            "Identify the company or consumer brand, and verify it against its "
+            "official website. Do not infer from a product category or unrelated "
+            "text. If sources do not match, respond BRAND: UNKNOWN. Return the "
+            "canonical name on one line: BRAND: <name>."
+        )
+        resp = requests.post(
+            GEMINI_API_URL.format(model=self.model),
+            params={"key": self._key},
+            json={
+                "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                "tools": [{"google_search": {}}],
+                "generationConfig": {"temperature": 0.1},
+            },
+            timeout=self.timeout,
+        )
+        self._check_response(resp)
+        data = resp.json()
+        try:
+            cand = data["candidates"][0]
+        except (KeyError, IndexError):
+            raise RuntimeError("Gemini API returned no candidates")
+        parts = ((cand.get("content") or {}).get("parts")) or []
+        answer = " ".join(
+            p.get("text", "") for p in parts if isinstance(p, dict) and p.get("text")
+        )
+        results = []
+        metadata = cand.get("groundingMetadata") or {}
+        for chunk in metadata.get("groundingChunks") or []:
+            web = (chunk or {}).get("web") or {}
+            uri = web.get("uri") or ""
+            if uri:
+                results.append(ReverseImageResult(
+                    title=web.get("title") or uri,
+                    url=uri,
+                    source="gemini_grounded_web",
+                ))
+        name = self._identification_line(answer)
+        if name:
+            results.append(ReverseImageResult(
+                title=name, url="", source="gemini_grounded_tags"
+            ))
+        if answer:
+            results.append(ReverseImageResult(
+                title=answer[:500], url="", source="gemini_grounded_desc"
             ))
         return results
 
@@ -646,13 +863,23 @@ def create_backend(name: str) -> ReverseImageSearchBackend:
     if name == "google_vision_web":
         return GoogleVisionWebBackend()
     if name == "bing_visual":
-        return BingVisualSearchBackend()
+        raise ValueError(
+            "bing_visual is retired; configure serpapi, google_vision_web, "
+            "gemini_grounded, or browser_grounded"
+        )
     if name == "serpapi":
         return SerpApiReverseBackend()
     if name == "browser_grounded":
         return BrowserGroundedSearchBackend()
     if name == "gemini_grounded":
         return GeminiGroundedBackend()
+    if name == "auto":
+        return FallbackReverseImageSearchBackend([
+            GoogleVisionWebBackend(),
+            SerpApiReverseBackend(),
+            GeminiGroundedBackend(),
+            BrowserGroundedSearchBackend(),
+        ])
     raise ValueError(f"unknown reverse-image-search backend: {name}")
 
 
@@ -725,6 +952,21 @@ def _crop_hash(crop: np.ndarray) -> str:
 def _crop_hash_distance(a: str, b: str) -> int:
     """Hamming distance between two hex dHashes, in bits."""
     return bin(int(a, 16) ^ int(b, 16)).count("1")
+
+
+def _boxes_overlap(box_a, box_b, min_iou: float) -> bool:
+    try:
+        ax1, ay1, ax2, ay2 = (float(v) for v in box_a)
+        bx1, by1, bx2, by2 = (float(v) for v in box_b)
+    except (TypeError, ValueError):
+        return False
+    inter_w = max(0.0, min(ax2, bx2) - max(ax1, bx1))
+    inter_h = max(0.0, min(ay2, by2) - max(ay1, by1))
+    inter = inter_w * inter_h
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - inter
+    return union > 0 and inter / union >= min_iou
 
 
 def _read_frame(
@@ -807,17 +1049,40 @@ def _derive_candidate_name(
     if not results:
         return None
     candidates: List[tuple] = []
+    serpapi_brand_hosts: Dict[str, set] = {}
     for r in results:
         if r.source.endswith("_tags") and r.title:
             score = _brand_likeness(r.title, generic_words)
             if score > 0.5:
                 candidates.append((score, r.title))
+        if r.source.startswith("serpapi_google_lens"):
+            # Lens results are pages, not engine-extracted wordmark tags.
+            # Do not turn the most frequent shopping/hosting domain (Amazon,
+            # eBay, etc.) into the brand. Use catalog matches in page titles,
+            # and require agreement from multiple independent result hosts.
+            from src.brand_catalog import match_brand_wordmark
+
+            matched = match_brand_wordmark(r.title or "", max_prefix_words=1)
+            if matched and r.url:
+                host_match = re.match(r"https?://(?:www\.)?([^/]+)", r.url)
+                host = host_match.group(1).lower() if host_match else r.url
+                serpapi_brand_hosts.setdefault(matched.upper(), set()).add(host)
     if candidates:
         _, best = max(candidates, key=lambda c: c[0])
         best = re.sub(r"\s+", " ", best).strip().upper()
         if _is_void_name(best):
             return None
         return best
+    if serpapi_brand_hosts:
+        ranked = sorted(
+            ((len(hosts), brand) for brand, hosts in serpapi_brand_hosts.items()),
+            reverse=True,
+        )
+        if ranked[0][0] >= 2 and (len(ranked) == 1 or ranked[0][0] > ranked[1][0]):
+            return ranked[0][1]
+        # Conflicting/weak Lens page-title evidence stays unresolved; never
+        # fall through and label a logo with the retailer's domain.
+        return None
     domain_counts: Dict[str, int] = {}
     for r in results:
         if not r.url:
@@ -835,6 +1100,10 @@ def _derive_candidate_name(
     if not domain_counts:
         return None
     top_domain = max(domain_counts, key=domain_counts.get)
+    if any(r.source.startswith("serpapi_google_lens") for r in results) and domain_counts[top_domain] < 2:
+        # An isolated Lens page can be a visually similar false match. An
+        # unknown brand inferred from hostnames needs corroborating pages.
+        return None
     # brand-ish token = the registrable part before the TLD. For a two-letter
     # ccTLD ("foo.co.uk", "bar.com.au") the label before it is a pseudo-TLD
     # ("co", "com"), so step one more label back.
@@ -914,6 +1183,8 @@ class OpenSetBrandIdentifier:
         generic_domain_filter,
         logodev_timeout: float,
         saturated_proposals_per_frame: int = 30,
+        ocr_min_crop_area: float = 600.0,
+        max_crop_area_fraction: float = 0.75,
     ):
         """All tunables are explicit and come from config `open_set:`.
 
@@ -947,6 +1218,8 @@ class OpenSetBrandIdentifier:
         self.consent_upload = consent_upload
         self.min_logo_confidence = float(min_logo_confidence)
         self.min_crop_area = float(min_crop_area)
+        self.ocr_min_crop_area = max(1.0, float(ocr_min_crop_area))
+        self.max_crop_area_fraction = min(1.0, max(0.01, float(max_crop_area_fraction)))
         self.max_crop_aspect = float(max_crop_aspect)
         self.max_candidates_per_video = int(max_candidates_per_video)
         # Reporting threshold only. It never drops a candidate: the point is
@@ -976,6 +1249,64 @@ class OpenSetBrandIdentifier:
         if self._logodev_client is None:
             self._logodev_client = LogoDevClient(timeout=self.logodev_timeout)
         return self._logodev_client
+
+    def _unknown_ocr_proposals(self, l1: dict) -> List[List[dict]]:
+        """Extract compact, high-confidence OCR wordmarks absent from catalog.
+
+        This is the path that makes an unknown readable brand searchable even
+        when the trained logo detector misses its box. Long sentence OCR and
+        generic UI labels are deliberately excluded.
+        """
+        from src.layer2.brand_resolver import SCREEN_UI_TOKENS
+
+        proposals: List[List[dict]] = []
+        for regions in l1.get("ocr_results") or []:
+            frame_proposals = []
+            for region in regions or []:
+                text = re.sub(r"\s+", " ", str(region.get("text") or "")).strip()
+                try:
+                    confidence = float(region.get("confidence", 0.0) or 0.0)
+                    points = np.asarray(region.get("bbox"), dtype=float).reshape(-1, 2)
+                except (TypeError, ValueError):
+                    continue
+                if not text or not np.isfinite(confidence) or confidence < 0.88:
+                    continue
+                padded_text = " " + text.lower() + " "
+                if any(" " + token + " " in padded_text for token in SCREEN_UI_TOKENS):
+                    continue
+                # A catalog match is already handled locally; don't pay for a
+                # web lookup when normalization/OCR variations match a known name.
+                if match_brand_wordmark(text, max_prefix_words=1):
+                    continue
+                tokens = re.findall(r"[\w&'’-]+", text, flags=re.UNICODE)
+                if not 1 <= len(tokens) <= 3 or len(text) > 40:
+                    continue
+                letters = [c for c in text if c.isalpha()]
+                if len(letters) < 3:
+                    continue
+                uppercase_ratio = sum(c.isupper() for c in letters) / len(letters)
+                titlecase_single = len(tokens) == 1 and text[:1].isupper() and confidence >= 0.96
+                if uppercase_ratio < 0.72 and not titlecase_single:
+                    continue
+                if any(token.lower() in self.generic_words for token in tokens):
+                    continue
+                if points.shape[0] < 2:
+                    continue
+                # OCR polygons are clipped in _candidate_crops once the source
+                # frame is loaded; reject malformed geometry here only.
+                x1, y1 = points.min(axis=0)
+                x2, y2 = points.max(axis=0)
+                if x2 <= x1 or y2 <= y1:
+                    continue
+                frame_proposals.append({
+                    "bbox": [float(x1), float(y1), float(x2), float(y2)],
+                    "confidence": confidence,
+                    "class_name": "unknown_ocr_wordmark",
+                    "ocr_text": text,
+                    "detection_source": "ocr_unknown_wordmark",
+                })
+            proposals.append(sorted(frame_proposals, key=lambda d: d["confidence"], reverse=True))
+        return proposals
 
     def _candidate_crops(self, result: dict, video_path: str) -> tuple:
         """Collect cost-gated candidate crops from real logo detections.
@@ -1020,94 +1351,138 @@ class OpenSetBrandIdentifier:
         # the confidence gate would report the gate's effect, not the cause.
         proposals_total = 0
         per_frame: List[dict] = []
-        for frame_idx, dets in enumerate(l1.get("logo_detections") or []):
+        detector_rows = l1.get("logo_search_proposals")
+        if detector_rows is None:
+            detector_rows = l1.get("logo_detections") or []
+        ocr_rows = self._unknown_ocr_proposals(l1)
+        known_rows = l1.get("logo_detections") or []
+        proposal_rows = []
+        for frame_idx in range(max(len(detector_rows), len(ocr_rows))):
+            for det_idx, det in enumerate(ocr_rows[frame_idx] if frame_idx < len(ocr_rows) else []):
+                proposal_rows.append((frame_idx, det_idx, det))
+        for frame_idx, dets in enumerate(detector_rows):
             n_dets = len(dets or [])
             proposals_total += n_dets
             if n_dets:
                 per_frame.append({"frame_index": frame_idx, "proposals": n_dets})
             for det_idx, det in enumerate(dets or []):
-                if len(accepted) >= budget:
-                    break
-                conf = float(det.get("confidence", 0.0))
-                if conf < self.min_logo_confidence:
-                    skipped_below_conf += 1
-                    continue
-                bbox = det.get("bbox")
-                if not bbox:
-                    # Recorded, not skipped silently: a detection that cannot
-                    # be located is a detector defect, and dropping it without
-                    # a record is how a stage ends up explaining nothing.
-                    rejected.append({
-                        "frame_index": frame_idx, "det_index": det_idx,
-                        "confidence": round(conf, 3), "bbox": None,
-                        "reason": "no_bbox",
-                    })
-                    continue
-                bw = abs(int(bbox[2]) - int(bbox[0]))
-                bh = abs(int(bbox[3]) - int(bbox[1]))
-                bbox_aspect = bw / max(1, bh)
-                if bbox_aspect >= self.max_crop_aspect:
-                    rejected.append({
-                        "frame_index": frame_idx,
-                        "det_index": det_idx,
-                        "confidence": round(conf, 3),
-                        "bbox": [float(v) for v in bbox],
-                        "width": bw,
-                        "height": bh,
-                        "aspect": round(bbox_aspect, 2),
-                        "reason": "banner_shape",
-                    })
-                    continue
-                frame = _read_frame(video_path, frame_idx, video_stride)
-                if frame is None:
-                    rejected.append({
-                        "frame_index": frame_idx, "det_index": det_idx,
-                        "confidence": round(conf, 3),
-                        "bbox": [float(v) for v in bbox],
-                        "reason": "unreadable_frame",
-                    })
-                    continue
-                crop = _crop_bbox(frame, bbox)
-                if crop is None or crop.size == 0:
-                    rejected.append({
-                        "frame_index": frame_idx, "det_index": det_idx,
-                        "confidence": round(conf, 3),
-                        "bbox": [float(v) for v in bbox],
-                        "reason": "invalid_crop",
-                    })
-                    continue
-                ch, cw = crop.shape[:2]
-                crop_area = cw * ch
-                if crop_area < self.min_crop_area:
-                    rejected.append({
-                        "frame_index": frame_idx,
-                        "det_index": det_idx,
-                        "confidence": round(conf, 3),
-                        "bbox": [float(v) for v in bbox],
-                        "width": cw,
-                        "height": ch,
-                        "aspect": round(cw / max(1, ch), 2),
-                        "reason": "too_small",
-                    })
-                    continue
-                h = _crop_hash(crop)
-                if any(
-                    _crop_hash_distance(h, seen) <= CROP_HASH_MAX_DISTANCE
-                    for seen in seen_hashes
-                ):
-                    skipped_dup += 1
-                    continue
-                seen_hashes.add(h)
-                accepted.append({
-                    "frame_index": frame_idx,
-                    "det_index": det_idx,
-                    "confidence": conf,
-                    "bbox": [float(v) for v in bbox],
-                    "crop": crop,
-                    "crop_hash": h,
-                })
+                proposal_rows.append((frame_idx, det_idx, det))
+        for frame_idx, det_idx, det in proposal_rows:
             if len(accepted) >= budget:
                 break
+            source = str(det.get("detection_source") or "logo_detector")
+            # Search only brands not already confidently named locally.
+            local_known = [
+                d for d in (known_rows[frame_idx] if frame_idx < len(known_rows) else [])
+                if d.get("brand") and d.get("bbox")
+            ]
+            if match_brand_wordmark(str(det.get("class_name") or "")):
+                continue
+            if source != "ocr_unknown_wordmark" and any(
+                _boxes_overlap(det.get("bbox"), known.get("bbox"), 0.35)
+                for known in local_known
+            ):
+                continue
+            conf = float(det.get("confidence", 0.0))
+            if conf < self.min_logo_confidence:
+                skipped_below_conf += 1
+                continue
+            bbox = det.get("bbox")
+            if not bbox:
+                # Recorded, not skipped silently: a detection that cannot
+                # be located is a detector defect, and dropping it without
+                # a record is how a stage ends up explaining nothing.
+                rejected.append({
+                    "frame_index": frame_idx, "det_index": det_idx,
+                    "confidence": round(conf, 3), "bbox": None,
+                    "reason": "no_bbox",
+                })
+                continue
+            bw = abs(int(bbox[2]) - int(bbox[0]))
+            bh = abs(int(bbox[3]) - int(bbox[1]))
+            bbox_aspect = bw / max(1, bh)
+            if bbox_aspect >= self.max_crop_aspect:
+                rejected.append({
+                    "frame_index": frame_idx,
+                    "det_index": det_idx,
+                    "confidence": round(conf, 3),
+                    "bbox": [float(v) for v in bbox],
+                    "width": bw,
+                    "height": bh,
+                    "aspect": round(bbox_aspect, 2),
+                    "reason": "banner_shape",
+                })
+                continue
+            frame = _read_frame(video_path, frame_idx, video_stride)
+            if frame is None:
+                rejected.append({
+                    "frame_index": frame_idx, "det_index": det_idx,
+                    "confidence": round(conf, 3),
+                    "bbox": [float(v) for v in bbox],
+                    "reason": "unreadable_frame",
+                })
+                continue
+            frame_area = max(1, int(frame.shape[0]) * int(frame.shape[1]))
+            box_area_fraction = (bw * bh) / frame_area
+            if box_area_fraction > self.max_crop_area_fraction:
+                rejected.append({
+                    "frame_index": frame_idx,
+                    "det_index": det_idx,
+                    "confidence": round(conf, 3),
+                    "bbox": [float(v) for v in bbox],
+                    "width": bw,
+                    "height": bh,
+                    "aspect": round(bbox_aspect, 2),
+                    "area_fraction": round(box_area_fraction, 3),
+                    "reason": "editorial_box",
+                })
+                continue
+            crop = _crop_bbox(frame, bbox)
+            if crop is None or crop.size == 0:
+                rejected.append({
+                    "frame_index": frame_idx, "det_index": det_idx,
+                    "confidence": round(conf, 3),
+                    "bbox": [float(v) for v in bbox],
+                    "reason": "invalid_crop",
+                })
+                continue
+            ch, cw = crop.shape[:2]
+            crop_area = cw * ch
+            min_area = (
+                float(getattr(self, "ocr_min_crop_area", 600.0))
+                if source == "ocr_unknown_wordmark"
+                else self.min_crop_area
+            )
+            if crop_area < min_area:
+                rejected.append({
+                    "frame_index": frame_idx,
+                    "det_index": det_idx,
+                    "confidence": round(conf, 3),
+                    "bbox": [float(v) for v in bbox],
+                    "width": cw,
+                    "height": ch,
+                    "aspect": round(cw / max(1, ch), 2),
+                    "reason": "too_small",
+                })
+                continue
+            h = _crop_hash(crop)
+            if any(
+                _crop_hash_distance(h, seen) <= CROP_HASH_MAX_DISTANCE
+                for seen in seen_hashes
+            ):
+                skipped_dup += 1
+                continue
+            seen_hashes.add(h)
+            accepted.append({
+                "frame_index": frame_idx,
+                "det_index": det_idx,
+                "confidence": conf,
+                "bbox": [float(v) for v in bbox],
+                "crop": crop,
+                "crop_hash": h,
+                "source": source,
+                "ocr_text": det.get("ocr_text"),
+            })
         skipped = {"below_min_confidence": skipped_below_conf, "duplicate_hash": skipped_dup}
 
         # ── per-frame detector diagnostics. Reporting only, no behaviour
@@ -1166,8 +1541,8 @@ class OpenSetBrandIdentifier:
         if not backend_available:
             reason = (
                 "OPEN-SET IDENTIFICATION UNAVAILABLE — NO RUNNABLE "
-                "REVERSE-IMAGE-SEARCH BACKEND (set GOOGLE_CLOUD_VISION_API_KEY / "
-                "BING_VISUAL_SEARCH_KEY / SERPAPI_KEY / GEMINI_API_KEY, or "
+                "REVERSE-IMAGE-SEARCH BACKEND (set SERPAPI_KEY / "
+                "GOOGLE_CLOUD_VISION_API_KEY / GEMINI_API_KEY, or "
                 "install agent-browser)"
             )
 
@@ -1185,6 +1560,8 @@ class OpenSetBrandIdentifier:
                 "status": "unresolved",
                 "search_results": [],
                 "logo_dev_validation": None,
+                "proposal_source": cand.get("source", "logo_detector"),
+                "ocr_text": cand.get("ocr_text"),
             }
             # Save the crop so the UI evidence trail can display it.
             crop_path = self.crop_cache_dir / f"{cand['crop_hash']}.png"
@@ -1202,13 +1579,28 @@ class OpenSetBrandIdentifier:
                     if cand["crop_hash"] in self._result_cache:
                         results = self._result_cache[cand["crop_hash"]]
                     else:
-                        results = self.backend.search_crop(crop)
+                        results = []
+                        if cand.get("ocr_text"):
+                            search_text = getattr(self.backend, "search_text", None)
+                            if callable(search_text):
+                                results = search_text(cand["ocr_text"])
+                        if not results or not any(r.url for r in results):
+                            search_with_context = getattr(self.backend, "search_crop")
+                            if cand.get("ocr_text") and isinstance(
+                                self.backend,
+                                (FallbackReverseImageSearchBackend, GeminiGroundedBackend),
+                            ):
+                                results = search_with_context(
+                                    crop, context_text=cand["ocr_text"]
+                                )
+                            else:
+                                results = search_with_context(crop)
                         self._result_cache[cand["crop_hash"]] = results
                     entry["search_results"] = [r.to_dict() for r in results]
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("reverse-image search failed for %s: %s", cand["crop_hash"], exc)
                     entry["search_results"] = []
-                    entry["search_error"] = f"Reverse-image search failed: {exc}"
+                    entry["search_error"] = f"Reverse-image search failed: {_safe_external_error(exc)}"
 
                 name = _derive_candidate_name(
                     [ReverseImageResult(**{k: r[k] for k in r}) for r in entry["search_results"]],

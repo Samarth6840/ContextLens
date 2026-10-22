@@ -160,12 +160,16 @@ def extract_price(text: str) -> Dict:
         except ValueError:
             continue
         if suffix in ("k", "thousand"):
-            after = norm_text[m.end():m.end() + 10].lower()
-            if value in (4.0, 8.0) or re.match(r"\s*(tv|video|uhd|display|screen)", after):
+            after = norm_text[m.end():m.end() + 14].lower()
+            if (value in (4.0, 8.0)
+                    or re.match(r"\s*(tv|video|uhd|display|screen)", after)
+                    or re.search(r"\s(followers?|subscribers?|views?|likes?)\b", after)):
                 continue
         return {
             "value": round(_expand_price(value, suffix), 2),
-            "currency": "USD",
+            # lakh/crore/k + Indian digit-grouping are the Hinglish-creator
+            # domain's own currency; USD was never evidence here.
+            "currency": "INR",
             "raw": m.group(0).strip(),
             "suffix": suffix,
         }
@@ -178,7 +182,7 @@ def extract_price(text: str) -> Dict:
             value = 0.0
         return {
             "value": round(value, 2),
-            "currency": "USD",
+            "currency": "INR",
             "raw": m.group(0).strip(),
             "suffix": "",
         }

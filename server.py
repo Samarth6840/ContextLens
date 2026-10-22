@@ -482,6 +482,8 @@ def _build_open_set(result: dict, video_path: str) -> dict:
             generic_tag_filter=list(_OPEN_SET_CFG["generic_tag_filter"] or []),
             generic_domain_filter=list(_OPEN_SET_CFG["generic_domain_filter"] or []),
             logodev_timeout=float(_OPEN_SET_CFG["logodev_timeout"]),
+            ocr_min_crop_area=float(_OPEN_SET_CFG.get("ocr_min_crop_area", 600)),
+            max_crop_area_fraction=float(_OPEN_SET_CFG.get("max_crop_area_fraction", 0.75)),
             saturated_proposals_per_frame=int(
                 _OPEN_SET_CFG.get("saturated_proposals_per_frame", 30) or 30),
         )

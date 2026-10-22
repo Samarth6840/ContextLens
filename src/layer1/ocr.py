@@ -35,6 +35,9 @@ _CONFIG_LANG = "en"
 _WORKER_READ_TIMEOUT_SEC = float(
     os.environ.get("CONTEXTLENS_OCR_WORKER_TIMEOUT", "600")
 )
+# Keep each request short enough that a valid large frame batch cannot consume
+# the entire worker timeout before it returns a single response.
+_WORKER_REQUEST_BATCH_SIZE = 8
 # The worker sends its stdout chatter here rather than to DEVNULL, so a crash
 # or a Paddle warning is actually diagnosable after the fact.
 _WORKER_LOG_DIR = Path(__file__).resolve().parents[2] / "var" / "logs"
@@ -209,10 +212,20 @@ class OCRExtractor:
         return self._worker_exec([image])[0]
 
     def extract_text_batch(self, frames: List[np.ndarray]) -> List[List[dict]]:
-        """Run OCR on a batch of frames, aligning results to inputs."""
+        """Run OCR in bounded chunks, preserving one result per input frame.
+
+        A single 100+ frame request can take longer than the worker's read
+        timeout even when OCR is healthy. Chunking bounds each blocking pipe
+        round-trip and keeps result alignment explicit.
+        """
         if not frames:
             return []
-        return self._worker_exec(frames)
+        results: List[List[dict]] = []
+        for start in range(0, len(frames), _WORKER_REQUEST_BATCH_SIZE):
+            results.extend(self._worker_exec(
+                frames[start:start + _WORKER_REQUEST_BATCH_SIZE]
+            ))
+        return results
 
     def __del__(self):
         try:

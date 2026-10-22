@@ -117,6 +117,7 @@ class BrandResolver:
         max_logo_area_fraction: float = 0.50,
         superset_margin_ratio: float = 0.45,
         max_unknown_per_frame: Optional[int] = None,
+        max_ocr_crops_per_frame: int = 12,
         product_resolver=None,
         progress: Optional[Callable[[str], None]] = None,
     ):
@@ -182,6 +183,12 @@ class BrandResolver:
         self.max_unknown_per_frame = int(
             max_unknown_per_frame if max_unknown_per_frame is not None else 10
         )
+        # Bound OCR work on detector-saturated frames. The detector can emit
+        # up to 100 boxes per frame; sending every box (then every superset)
+        # through PaddleOCR made otherwise valid uploads block for minutes on
+        # background texture. Twelve is above the measured healthy-frame
+        # average while bounding pathological crop counts.
+        self.max_ocr_crops_per_frame = max(1, int(max_ocr_crops_per_frame))
         # Optional tiered product→brand resolver (Layer 2b). When OCR reads a
         # product name but no catalog brand (e.g. "Mac Mini"), this fallback
         # resolves the product to its parent brand via Wikidata / learned
@@ -393,16 +400,29 @@ class BrandResolver:
                     continue
                 crop = self._crop(frame, det.get("bbox"))
                 if crop is not None:
-                    pending.append((di, crop))
+                    pending.append((di, crop, float(det.get("confidence", 0.0) or 0.0)))
             if not pending:
                 continue
 
-            for (di, _), texts in zip(pending,
-                                      self._ocr_crops_batch([c for _, c in pending])):
+            if len(pending) > self.max_ocr_crops_per_frame:
+                # Keep the strongest proposals for expensive OCR and preserve
+                # their original detection indices for the resolver cache.
+                pending = sorted(pending, key=lambda row: row[2], reverse=True)[
+                    :self.max_ocr_crops_per_frame
+                ]
+                logger.warning(
+                    "Logo OCR crop cap: frame %d has more candidates than %d; "
+                    "using highest-confidence proposals",
+                    fi, self.max_ocr_crops_per_frame,
+                )
+
+            for (di, _, _), texts in zip(
+                pending, self._ocr_crops_batch([c for _, c, _ in pending])
+            ):
                 cache[(fi, di, "tight")] = texts
 
             sup_idx, sup_crops = [], []
-            for di, crop in pending:
+            for di, crop, _ in pending:
                 texts = cache.get((fi, di, "tight")) or []
                 if texts and match_brand(" ".join(texts)):
                     continue
@@ -681,6 +701,20 @@ class BrandResolver:
                 class_name, confidence, retrieval_brand, retrieval_sim,
                 retrieval_candidates,
             )
+            return out
+
+        # Cloud Vision's LOGO_DETECTION is a dedicated named-logo model, unlike
+        # YOLO-World's prompted class guesses. After the OCR/UI and editorial
+        # gates above, accept its identity as a separate, explicit evidence
+        # source rather than routing it through the less reliable generic
+        # detector corroboration rule.
+        if det.get("detection_source") == "google_cloud_vision" and class_brand:
+            out["brand"] = class_brand
+            out["class_name"] = class_brand
+            out["class_confirmed"] = True
+            out["resolution_source"] = "google_cloud_vision"
+            out["resolution_quality"] = min(0.92, max(0.65, confidence))
+            out["ocr_text"] = joined_ocr[:40]
             return out
 
         if class_brand and confidence >= self.class_confidence:

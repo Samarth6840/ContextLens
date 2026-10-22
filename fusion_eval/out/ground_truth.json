@@ -15,6 +15,7 @@
         1.0
       ]
     ],
+    "conflict_brand": null,
     "video_path": "fusion_eval/out/easy_ADIDAS.mp4"
   },
   {
@@ -33,6 +34,7 @@
         1.0
       ]
     ],
+    "conflict_brand": null,
     "video_path": "fusion_eval/out/easy_BMW.mp4"
   },
   {
@@ -51,6 +53,7 @@
         1.0
       ]
     ],
+    "conflict_brand": null,
     "video_path": "fusion_eval/out/small_BMW.mp4"
   },
   {
@@ -69,6 +72,7 @@
         1.0
       ]
     ],
+    "conflict_brand": null,
     "video_path": "fusion_eval/out/blur_BMW.mp4"
   },
   {
@@ -87,6 +91,7 @@
         1.0
       ]
     ],
+    "conflict_brand": "PEPSI",
     "video_path": "fusion_eval/out/conflict_BMW_vs_PEPSI.mp4"
   },
   {
@@ -105,6 +110,7 @@
         1.0
       ]
     ],
+    "conflict_brand": null,
     "video_path": "fusion_eval/out/negative_NEG.mp4"
   }
 ]

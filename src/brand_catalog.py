@@ -102,6 +102,13 @@ BRAND_CATALOG: Dict[str, dict] = {
         "aliases": ['samsung', 'सैमसंग', 'सैमसन', 'सामसंग'],
         "contact_website": "https://www.samsung.com",
     },
+    "MOTOROLA": {
+        "product": "Moto G",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "TECH"],
+        "aliases": ["motorola", "moto"],
+        "contact_website": "https://www.motorola.com",
+    },
     "SONY": {
         "product": "Sony WH-1000XM5",
         "category": "ELECTRONICS",
@@ -143,6 +150,43 @@ BRAND_CATALOG: Dict[str, dict] = {
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['xiaomi', 'श्याओमी', 'ज़ियाओमी'],
         "contact_website": "https://www.mi.com/global",
+    },
+    "REALME": {
+        "product": "realme smartphones",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "TECH"],
+        "aliases": ["realme", "real me"],
+        "contact_website": "https://www.realme.com/global/",
+    },
+    "CMF": {
+        "product": "CMF Phone",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "TECH"],
+        "aliases": ["cmf", "cmf by nothing"],
+        "contact_website": "https://nothing.tech/collections/cmf",
+    },
+    "BROADCOM": {
+        "product": "Broadcom semiconductor products",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "SEMICONDUCTOR", "TECH"],
+        "aliases": ["broadcom"],
+        "contact_website": "https://www.broadcom.com",
+    },
+    "HONDA": {
+        "product": "Honda vehicles",
+        "category": "AUTOMOTIVE",
+        "categories": ["AUTOMOTIVE", "MOBILITY"],
+        "aliases": ["honda", "होंडा"],
+        "contact_website": "https://global.honda/en/",
+    },
+    # VENGEANCE is a Corsair product line. The visible product mark is often
+    # just VENGEANCE, so preserve that identity for OCR and benchmark matching.
+    "VENGEANCE": {
+        "product": "Corsair Vengeance memory",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "COMPUTING", "TECH"],
+        "aliases": ["vengeance", "corsair vengeance"],
+        "contact_website": "https://www.corsair.com",
     },
     "OPPO": {
         "product": "OPPO Find",
@@ -422,6 +466,37 @@ def match_brand(text: str) -> Optional[str]:
             if best is None or cand > best:
                 best = cand
     return best[2] if best else None
+
+
+def match_brand_wordmark(text: str, max_prefix_words: int = 0) -> Optional[str]:
+    """Resolve a brand when its OCR region reads like a wordmark/product label.
+
+    ``match_brand`` intentionally finds aliases anywhere in a larger string.
+    That is useful for transcripts and context, but full-frame OCR also reads
+    headlines and article copy (for example, "the price of every Apple
+    product"). For visual brand detections, require the matched alias to begin
+    at the start of its OCR region. Short labels such as ``CMF Phone 1`` and
+    ``Samsung Galaxy M07`` still match, while brands mentioned mid-sentence do
+    not become on-screen logo detections.
+    """
+    norm = normalize_text(text)
+    brand = match_brand(norm)
+    if not brand:
+        return None
+
+    matches = []
+    for alias in _ordered_aliases(BRAND_CATALOG[brand]):
+        alias_norm = normalize_text(alias)
+        if len(alias_norm) < 2:
+            continue
+        found = _alias_pattern(alias_norm).search(norm)
+        if found:
+            matches.append((len(alias_norm), found.start()))
+    if not matches:
+        return None
+    _, start = max(matches, key=lambda row: (row[0], -row[1]))
+    prefix_words = norm[:start].strip().split()
+    return brand if len(prefix_words) <= max(0, int(max_prefix_words)) else None
 
 
 def _levenshtein_bounded(a: str, b: str, max_dist: int) -> int:

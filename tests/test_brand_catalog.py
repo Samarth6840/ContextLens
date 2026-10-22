@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 # Ensure src is on path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -23,6 +24,7 @@ from src.brand_catalog import (
     find_brand_mentions,
     lookup,
     match_brand,
+    match_brand_wordmark,
     normalize_text,
     product_for,
 )
@@ -83,6 +85,25 @@ class TestBrandCatalog:
     def test_match_brand_alias(self):
         assert match_brand("check out this swoosh") == "NIKE"
         assert match_brand("grab a coke") == "COCA-COLA"
+
+    def test_wordmark_matching_rejects_brand_mentions_in_article_copy(self):
+        assert match_brand_wordmark("CMF Phone 1") == "CMF"
+        assert match_brand_wordmark("Price of every Apple product that got costlier") is None
+        assert match_brand_wordmark("growth, Oppo and Vivo suffered amid dependence") is None
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("realme P4 5G", "REALME"),
+            ("Moto G96", "MOTOROLA"),
+            ("CMF Phone", "CMF"),
+            ("Broadcom", "BROADCOM"),
+            ("HONDA", "HONDA"),
+            ("VENGEANCE", "VENGEANCE"),
+        ],
+    )
+    def test_real_video_holdout_brands_are_catalogued(self, text, expected):
+        assert match_brand(text) == expected
 
     def test_match_brand_short_alias(self):
         # 2-char aliases with enforced letter boundaries are real brands (LG);
@@ -320,6 +341,37 @@ class TestBrandResolver:
         dets = [[{"class_name": "brand logo", "bbox": [10, 10, 40, 30], "confidence": 0.9}]]
         out = resolver.resolve(dets, [self._frame()])
         assert out[0][0]["brand"] is None
+
+    def test_crop_ocr_is_bounded_on_detector_saturated_frames(self):
+        class BatchOCR:
+            def __init__(self):
+                self.batch_sizes = []
+
+            def extract_text_batch(self, crops):
+                self.batch_sizes.append(len(crops))
+                return [[] for _ in crops]
+
+        ocr = BatchOCR()
+        resolver = BrandResolver(
+            ocr_extractor=ocr,
+            max_ocr_crops_per_frame=3,
+        )
+        frame = np.zeros((100, 200, 3), dtype=np.uint8)
+        dets = [[
+            {
+                "bbox": [i * 8, 10, i * 8 + 5, 20],
+                "confidence": i / 20,
+                "class_name": "logo",
+            }
+            for i in range(20)
+        ]]
+
+        cache = resolver._prefetch_ocr([frame], dets)
+
+        # Tight, original-crop fallback, and superset batches are each capped;
+        # highest-confidence detections keep their original cache indexes.
+        assert ocr.batch_sizes and all(size <= 3 for size in ocr.batch_sizes)
+        assert {key[1] for key in cache if key[2] == "tight"} == {17, 18, 19}
 
     def test_multiline_card_ocr_superset_resolves_brand(self):
         # A chip/product card like "Snapdragon / 8 Elite / Gen 5": the detector's

@@ -1,0 +1,888 @@
+{
+  "arms_file": "benchmark/results/realvideo_v1_1p8_arms.json",
+  "arm2_hero_hits": 6,
+  "arm2_hero_total": 24,
+  "misses_classified": 18,
+  "cause_counts": {
+    "brand_not_in_catalog": 15,
+    "ocr_miss": 1,
+    "match_brand_reject": 0,
+    "retrieval_too_small": 2,
+    "fusion_suppressed": 0
+  },
+  "precedence": [
+    "brand_not_in_catalog",
+    "ocr_miss",
+    "match_brand_reject",
+    "retrieval_too_small",
+    "fusion_suppressed"
+  ],
+  "misses": {
+    "88b0502222_000520.jpg": {
+      "gold": "SNAPDRAGON",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('SNAPDRAGON') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Snapdragon",
+            "7s",
+            "Gen 2"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "Snapdragon"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "LULULEMON",
+            "top1_sim": 0.6962,
+            "top2_sim": 0.6914,
+            "margin": 0.0048,
+            "top3": [
+              [
+                "LULULEMON",
+                0.696
+              ],
+              [
+                "ROLEX",
+                0.691
+              ],
+              [
+                "ADIDAS",
+                0.688
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_005280.jpg": {
+      "gold": "CMF",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('CMF') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "MediaTek",
+            "Dimensity 7300",
+            "Pro"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_006280.jpg": {
+      "gold": "SAMSUNG",
+      "cause": "retrieval_too_small",
+      "detail": "gold in bank; retrieval did not accept it: {\"top1\": \"SAMSUNG\", \"top1_sim\": 0.7041, \"top2_sim\": 0.6961, \"margin\": 0.008, \"top3\": [[\"SAMSUNG\", 0.704], [\"ADIDAS\", 0.696], [\"LULULEMON\", 0.692]], \"reason\": \"small_margin\"}",
+      "stages": {
+        "catalog": {
+          "in_catalog": true,
+          "match_brand_gold": "SAMSUNG",
+          "in_retrieval_bank": true
+        },
+        "ocr": {
+          "regions": [
+            "OS SEV AXDJD9"
+          ],
+          "per_region_match": [
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "SAMSUNG",
+            "top1_sim": 0.7041,
+            "top2_sim": 0.6961,
+            "margin": 0.008,
+            "top3": [
+              [
+                "SAMSUNG",
+                0.704
+              ],
+              [
+                "ADIDAS",
+                0.696
+              ],
+              [
+                "LULULEMON",
+                0.692
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_009560.jpg": {
+      "gold": "REALME",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('REALME') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "P4",
+            "realme",
+            "Credit:Tech Unboxing"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "realme"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_011320.jpg": {
+      "gold": "REALME",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('REALME') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "",
+            "realme P4 5G",
+            "Credit:Tech Unboxing"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "realme P4 5G"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "ROLEX",
+            "top1_sim": 0.6988,
+            "top2_sim": 0.6946,
+            "margin": 0.0042,
+            "top3": [
+              [
+                "ROLEX",
+                0.699
+              ],
+              [
+                "ZARA",
+                0.695
+              ],
+              [
+                "LULULEMON",
+                0.689
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_011560.jpg": {
+      "gold": "REALME",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('REALME') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "1801",
+            "-RIE",
+            "boMmisimage",
+            "whichh te standard gaepsd for in",
+            "P4",
+            "Hayduation 4 consoie. The tet Overiay",
+            "indicates tha the image is fron a video",
+            "tled Yeteg Ciernunk 2077 on P54n",
+            "2N",
+            "Vieuai matches",
+            "Rviatedsearch",
+            "yPevleter",
+            "Credit:Tech Unboxing"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "ROLEX",
+            "top1_sim": 0.6745,
+            "top2_sim": 0.6622,
+            "margin": 0.0123,
+            "top3": [
+              [
+                "ROLEX",
+                0.674
+              ],
+              [
+                "ADIDAS",
+                0.662
+              ],
+              [
+                "NEW BALANCE",
+                0.654
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_012040.jpg": {
+      "gold": "REALME",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('REALME') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Credit: Tech Therapy",
+            "104156",
+            "P4",
+            "H9504",
+            "TM0L270N",
+            "13265",
+            "54023",
+            "BSLOMAI",
+            "106.0n67",
+            "584.0M",
+            "15540",
+            "TEST AGAIN"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_016080.jpg": {
+      "gold": "MOTOROLA",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('MOTOROLA') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Moto G96",
+            "SPECS",
+            "11:35",
+            "6.67 144Hz FHD+ pOLED",
+            "snapdragon 7s Gen 2",
+            "Price",
+            "50MP OIS + 8MP back",
+            "32MP front",
+            "\u20b9 18,999",
+            "5500mAh"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_017560.jpg": {
+      "gold": "SAMSUNG",
+      "cause": "retrieval_too_small",
+      "detail": "gold in bank; retrieval did not accept it: {\"reason\": \"below_similarity_floor\"}",
+      "stages": {
+        "catalog": {
+          "in_catalog": true,
+          "match_brand_gold": "SAMSUNG",
+          "in_retrieval_bank": true
+        },
+        "ocr": {
+          "regions": [
+            "Snapdragon",
+            "RAM TYPE-",
+            "6 Gen",
+            "4",
+            "LPDDR4X",
+            "Storoge TYPE-",
+            "UFS3.1",
+            "0000"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "88b0502222_018840.jpg": {
+      "gold": "REALME",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('REALME') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Gaming",
+            "Realme",
+            "P4",
+            "U"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "Realme"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_004000.jpg": {
+      "gold": "CMF",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('CMF') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "LAIIMEFEEEH",
+            "CER",
+            "CmT"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_007520.jpg": {
+      "gold": "NVIDIA",
+      "cause": "ocr_miss",
+      "detail": "full-frame OCR returned zero text regions",
+      "stages": {
+        "catalog": {
+          "in_catalog": true,
+          "match_brand_gold": "NVIDIA",
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [],
+          "per_region_match": [],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "ADIDAS",
+            "top1_sim": 0.6849,
+            "top2_sim": 0.6704,
+            "margin": 0.0145,
+            "top3": [
+              [
+                "ADIDAS",
+                0.685
+              ],
+              [
+                "NEW BALANCE",
+                0.67
+              ],
+              [
+                "ROLEX",
+                0.658
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_007960.jpg": {
+      "gold": "BROADCOM",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('BROADCOM') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "M",
+            "BROADCOM"
+          ],
+          "per_region_match": [
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "BROADCOM"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "SONY",
+            "top1_sim": 0.6731,
+            "top2_sim": 0.6526,
+            "margin": 0.0205,
+            "top3": [
+              [
+                "SONY",
+                0.673
+              ],
+              [
+                "ZARA",
+                0.653
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_008400.jpg": {
+      "gold": "HONDA",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('HONDA') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "HONDA"
+          ],
+          "per_region_match": [
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "HONDA"
+          ]
+        },
+        "retrieval": {
+          "named_top1": "SONY",
+          "candidates": [
+            [
+              "SONY",
+              0.7129
+            ]
+          ],
+          "diag": {
+            "top1": "SONY",
+            "top1_sim": 0.7129,
+            "top2_sim": null,
+            "margin": null,
+            "top3": [
+              [
+                "SONY",
+                0.713
+              ]
+            ]
+          }
+        },
+        "arm2_final_named": [
+          "SONY"
+        ]
+      }
+    },
+    "df01d5a843_010160.jpg": {
+      "gold": "MI",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('MI') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Global Smartphone Market Share and YoY Growth by Key OEM, 2026(E)",
+            "26%",
+            "YoY Growth",
+            "Overall",
+            "-2.1%",
+            "19%",
+            "-2.5%",
+            "19%",
+            "-3.4%",
+            "14%",
+            "-1.2%",
+            "9NNSWVS",
+            "-1.2%",
+            "9%",
+            "8%",
+            "-1.8%",
+            "nI",
+            "OAA",
+            "6%",
+            "oddo",
+            "SJ041O",
+            "HONOH",
+            "-2.1%",
+            "-2.2%",
+            "Counterpoint"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_012600.jpg": {
+      "gold": "VENGEANCE",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('VENGEANCE') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "VENGEANCE"
+          ],
+          "per_region_match": [
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "VENGEANCE"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "reason": "below_similarity_floor"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_013040.jpg": {
+      "gold": "SNAPDRAGON",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('SNAPDRAGON') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [
+            "Snopdragon",
+            "Elite",
+            "FORGALAXY",
+            "1",
+            "Snapdragon\u2022 & Elite for Galaxy"
+          ],
+          "per_region_match": [
+            null,
+            null,
+            null,
+            null,
+            null
+          ],
+          "named": [],
+          "texts_containing_gold": [
+            "Snapdragon\u2022 & Elite for Galaxy"
+          ]
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "NEW BALANCE",
+            "top1_sim": 0.6698,
+            "top2_sim": 0.6661,
+            "margin": 0.0037,
+            "top3": [
+              [
+                "NEW BALANCE",
+                0.67
+              ],
+              [
+                "MICROSOFT",
+                0.666
+              ],
+              [
+                "SONY",
+                0.661
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    },
+    "df01d5a843_015280.jpg": {
+      "gold": "SNAPDRAGON",
+      "cause": "brand_not_in_catalog",
+      "detail": "match_brand('SNAPDRAGON') is None; in_retrieval_bank=False",
+      "stages": {
+        "catalog": {
+          "in_catalog": false,
+          "match_brand_gold": null,
+          "in_retrieval_bank": false
+        },
+        "ocr": {
+          "regions": [],
+          "per_region_match": [],
+          "named": [],
+          "texts_containing_gold": []
+        },
+        "retrieval": {
+          "named_top1": null,
+          "candidates": [],
+          "diag": {
+            "top1": "NEW BALANCE",
+            "top1_sim": 0.7189,
+            "top2_sim": 0.6936,
+            "margin": 0.0253,
+            "top3": [
+              [
+                "NEW BALANCE",
+                0.719
+              ],
+              [
+                "ZARA",
+                0.694
+              ],
+              [
+                "ROLEX",
+                0.692
+              ]
+            ],
+            "reason": "small_margin"
+          }
+        },
+        "arm2_final_named": []
+      }
+    }
+  }
+}

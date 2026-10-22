@@ -115,7 +115,7 @@ frames land in `model_prelabelled.json` and are excluded when grading that
 detector (circular). NO LOGO is a first-class verdict and is the only source
 of FP/free-frame denominators.
 
-### The 1.7 decision pools val+test (160 frames)
+### The 1.7 decision pools val+test (159 labeled of 160 extracted)
 
 Neither arm is fit on this data (OWLv2 zero-shot, YOLO already trained), and one
 80-frame video is too small AND too correlated to carry a pass/fail. Decision is
@@ -129,8 +129,12 @@ one video for confirmation when it gets there.
 ### 1.7 verdict (2026-10-11): FAIL — see `../results/realvideo_v1_yolo.grade.json`
 
 OWLv2 zero-shot and the LogoDet-trained detector both lost on the real holdout.
-Composition of the pooled 160: **24 logo frames with hero, 0 logo frames
-without hero, 135 free**. At its best threshold (conf 0.05) OWLv2 reached
+Composition of the pooled labeled holdout: **24 logo frames with hero, 0 logo
+frames without hero, 135 free** (159 labeled of 160 extracted — the one frame
+without a label row is `df01d5a843_017480.jpg`, an all-black tail frame the
+labeler deferred (SKIP records no verdict) and never judged; it is excluded
+from every metric in this README and the harness prints the accounting on each
+run). At its best threshold (conf 0.05) OWLv2 reached
 top-1 recall **6/24 (0.25)** — below the pre-registered ≥0.3 bar, so no
 threshold entered the FP-margin comparison and the decision fails outright
 (`chosen_owlv2_conf: None`). The detector's best top-1 was **9/24 (0.375)** at
@@ -144,3 +148,21 @@ Decision consequence: OWLv2 is dropped with no further rescoring; Phase 3.1
 (cancelled, its verifier would sit on OWLv2 proposals); Phase 3 on hold until
 Phase 1.8 (detector+OCR+retrieval+fusion vs OCR+retrieval-only on this same
 holdout) decides between 3.2 and OCR+CLIP-primary.
+
+### Accounting questions resolved (2026-10-12)
+
+Three loose ends were chased down while preparing the 1.8 re-score; each had one
+verifiable answer:
+
+1. **160 extracted vs 159 labeled.** The frame without a label row is
+   `df01d5a843_017480.jpg` — verified all-black (mean pixel 0.0, std 0.0), the
+   video's tail frame. The labeler's SKIP records no verdict, so it was deferred
+   at labeling time and never judged. It is excluded from every metric here; the
+   1.8 harness prints the accounting as a WARNING on each run.
+2. **42 SKIP on `7864fa1c52`.** Re-judged as logo-free in commit `0ad2fd2`
+   after frame inspection (that video shows no on-screen logos). Current label
+   counts: 44 free, 36 logo, 0 skip; the prior SKIP state is preserved in
+   `labels.jsonl.bak_skip`.
+3. **636 vs 626 tests collected.** The `wip/dedupe` branch adds exactly +10
+   tests over `main` (14 vs 4 in `test_logo_batch_contract.py`); no other test
+   file differs. 626 on `main` is the correct number.

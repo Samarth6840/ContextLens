@@ -1,0 +1,1983 @@
+{
+  "frames": {
+    "hero": 24,
+    "free": 135,
+    "labeled_total": 159,
+    "extracted_holdout": 160,
+    "unlabeled_excluded": [
+      "df01d5a843_017480.jpg"
+    ]
+  },
+  "arm1_as_shipped": {
+    "hero_brand_recall": "6/24",
+    "hero_brand_recall_frac": 0.25,
+    "false_brands_per_free": 0.844,
+    "false_brands_total": 114,
+    "per_video": {
+      "88b0502222": {
+        "hero": {
+          "hits": 1,
+          "n": 11
+        },
+        "free": {
+          "false": 62,
+          "n": 69
+        }
+      },
+      "df01d5a843": {
+        "hero": {
+          "hits": 5,
+          "n": 13
+        },
+        "free": {
+          "false": 52,
+          "n": 66
+        }
+      }
+    },
+    "per_frame": {
+      "88b0502222_000000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_000240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_000520.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [
+          "ZARA"
+        ],
+        "hero_named": false
+      },
+      "88b0502222_000760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_001000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_001240.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_001520.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_001760.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_002000.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_002280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_002520.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_002760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_003000.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "SONY"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_003280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_003520.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "LULULEMON"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_003760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_005040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_005280.jpg": {
+        "kind": "hero",
+        "gold": "CMF",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_005520.jpg": {
+        "kind": "free",
+        "named": [
+          "NEW BALANCE",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_005760.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_006040.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_006280.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "ZARA"
+        ],
+        "hero_named": false
+      },
+      "88b0502222_006520.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_006800.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_007040.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_007280.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_007520.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_007800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_008040.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_008280.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "OPPO",
+          "ROLEX",
+          "ZARA"
+        ],
+        "false_count": 4
+      },
+      "88b0502222_008520.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_008800.jpg": {
+        "kind": "hero",
+        "gold": "OPPO",
+        "named": [
+          "OPPO"
+        ],
+        "hero_named": true
+      },
+      "88b0502222_009040.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_009280.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "OPPO"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_009560.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [
+          "ADIDAS"
+        ],
+        "hero_named": false
+      },
+      "88b0502222_009800.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_010040.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "SONY"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_010280.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_010560.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_010800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_011040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_011320.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_011560.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_011800.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "SONY"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_012040.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_012320.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_012560.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "SONY"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_012800.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_013040.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "SONY",
+          "ZARA"
+        ],
+        "false_count": 3
+      },
+      "88b0502222_013320.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_013560.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "NEW BALANCE",
+          "ZARA"
+        ],
+        "false_count": 3
+      },
+      "88b0502222_013800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015840.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_016080.jpg": {
+        "kind": "hero",
+        "gold": "MOTOROLA",
+        "named": [
+          "NEW BALANCE"
+        ],
+        "hero_named": false
+      },
+      "88b0502222_016320.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_016560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_016840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_017080.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_017320.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_017560.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "OPPO",
+          "ZARA"
+        ],
+        "hero_named": false
+      },
+      "88b0502222_017840.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_018080.jpg": {
+        "kind": "free",
+        "named": [
+          "OPPO",
+          "ZARA"
+        ],
+        "false_count": 2
+      },
+      "88b0502222_018320.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_018600.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_018840.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_019080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_019320.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_019600.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_019840.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_000000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_000240.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "ASICS"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_000440.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_000680.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "SAMSUNG"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_000880.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_001120.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_001320.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_001560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_001760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_002000.jpg": {
+        "kind": "free",
+        "named": [
+          "AMAZON"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_002200.jpg": {
+        "kind": "free",
+        "named": [
+          "AMAZON",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_002440.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "AMAZON",
+          "SAMSUNG"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_002640.jpg": {
+        "kind": "free",
+        "named": [
+          "AMAZON"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_002880.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "AMAZON",
+          "SAMSUNG"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_003080.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_003320.jpg": {
+        "kind": "hero",
+        "gold": "APPLE",
+        "named": [
+          "APPLE"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_003560.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_003760.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_004000.jpg": {
+        "kind": "hero",
+        "gold": "CMF",
+        "named": [
+          "ROLEX"
+        ],
+        "hero_named": false
+      },
+      "df01d5a843_004200.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_004440.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_004640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_004880.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005960.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_006200.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006400.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006640.jpg": {
+        "kind": "free",
+        "named": [
+          "MICROSOFT"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_006840.jpg": {
+        "kind": "free",
+        "named": [
+          "MICROSOFT"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_007080.jpg": {
+        "kind": "hero",
+        "gold": "MICROSOFT",
+        "named": [
+          "MICROSOFT",
+          "NVIDIA"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_007320.jpg": {
+        "kind": "free",
+        "named": [
+          "NVIDIA",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_007520.jpg": {
+        "kind": "hero",
+        "gold": "NVIDIA",
+        "named": [
+          "MICROSOFT",
+          "NVIDIA"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_007760.jpg": {
+        "kind": "free",
+        "named": [
+          "NVIDIA"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_007960.jpg": {
+        "kind": "hero",
+        "gold": "BROADCOM",
+        "named": [
+          "NVIDIA"
+        ],
+        "hero_named": false
+      },
+      "df01d5a843_008200.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_008400.jpg": {
+        "kind": "hero",
+        "gold": "HONDA",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_008640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_008840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009520.jpg": {
+        "kind": "free",
+        "named": [
+          "MICROSOFT"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_009720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009960.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_010160.jpg": {
+        "kind": "hero",
+        "gold": "MI",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_010400.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_010640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_010840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011080.jpg": {
+        "kind": "free",
+        "named": [
+          "GOOGLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_011280.jpg": {
+        "kind": "free",
+        "named": [
+          "GOOGLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_011520.jpg": {
+        "kind": "free",
+        "named": [
+          "GOOGLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_011720.jpg": {
+        "kind": "free",
+        "named": [
+          "GOOGLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_011960.jpg": {
+        "kind": "free",
+        "named": [
+          "GOOGLE",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_012160.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_012400.jpg": {
+        "kind": "hero",
+        "gold": "GOOGLE",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_012600.jpg": {
+        "kind": "hero",
+        "gold": "VENGEANCE",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_012840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013040.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_013280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013480.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_013720.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_013920.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_014160.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "NEW BALANCE"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_014400.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "NEW BALANCE"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_014600.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "NEW BALANCE"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_014840.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE",
+          "NEW BALANCE",
+          "ROLEX"
+        ],
+        "false_count": 3
+      },
+      "df01d5a843_015040.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "APPLE",
+          "NEW BALANCE",
+          "ZARA"
+        ],
+        "false_count": 4
+      },
+      "df01d5a843_015280.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_015480.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015920.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016160.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016360.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016600.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS",
+          "ROLEX"
+        ],
+        "false_count": 2
+      },
+      "df01d5a843_016800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_017040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_017240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      }
+    }
+  },
+  "arm2_ocr_fullframe": {
+    "hero_brand_recall": "6/24",
+    "hero_brand_recall_frac": 0.25,
+    "false_brands_per_free": 0.119,
+    "false_brands_total": 16,
+    "per_video": {
+      "88b0502222": {
+        "hero": {
+          "hits": 1,
+          "n": 11
+        },
+        "free": {
+          "false": 9,
+          "n": 69
+        }
+      },
+      "df01d5a843": {
+        "hero": {
+          "hits": 5,
+          "n": 13
+        },
+        "free": {
+          "false": 7,
+          "n": 66
+        }
+      }
+    },
+    "per_frame": {
+      "88b0502222_000000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_000240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_000520.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_000760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_001000.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_001240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_001520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_001760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_002000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_002280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_002520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_002760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_003000.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_003280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_003520.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_003760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_004760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_005040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_005280.jpg": {
+        "kind": "hero",
+        "gold": "CMF",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_005520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_005760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_006040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_006280.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_006520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_006800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_007040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_007280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_007520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_007800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_008040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_008280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_008520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_008800.jpg": {
+        "kind": "hero",
+        "gold": "OPPO",
+        "named": [
+          "OPPO"
+        ],
+        "hero_named": true
+      },
+      "88b0502222_009040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_009280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_009560.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_009800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_010040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_010280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_010560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_010800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_011040.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_011320.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_011560.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_011800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_012040.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_012320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_012560.jpg": {
+        "kind": "free",
+        "named": [
+          "ADIDAS"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_012800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_013040.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_013320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_013560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_013800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014080.jpg": {
+        "kind": "free",
+        "named": [
+          "ZARA"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_014320.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_014560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_014800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_015840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_016080.jpg": {
+        "kind": "hero",
+        "gold": "MOTOROLA",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_016320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_016560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_016840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_017080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_017320.jpg": {
+        "kind": "free",
+        "named": [
+          "SONY"
+        ],
+        "false_count": 1
+      },
+      "88b0502222_017560.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_017840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_018080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_018320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_018600.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_018840.jpg": {
+        "kind": "hero",
+        "gold": "REALME",
+        "named": [],
+        "hero_named": false
+      },
+      "88b0502222_019080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_019320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_019600.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "88b0502222_019840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_000000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_000240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_000440.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_000680.jpg": {
+        "kind": "free",
+        "named": [
+          "APPLE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_000880.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_001120.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_001320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_001560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_001760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_002000.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_002200.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_002440.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "AMAZON",
+          "SAMSUNG"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_002640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_002880.jpg": {
+        "kind": "hero",
+        "gold": "SAMSUNG",
+        "named": [
+          "SAMSUNG"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_003080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_003320.jpg": {
+        "kind": "hero",
+        "gold": "APPLE",
+        "named": [
+          "APPLE"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_003560.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_003760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_004000.jpg": {
+        "kind": "hero",
+        "gold": "CMF",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_004200.jpg": {
+        "kind": "free",
+        "named": [
+          "VIVO"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_004440.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_004640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_004880.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_005960.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006200.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006400.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_006840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_007080.jpg": {
+        "kind": "hero",
+        "gold": "MICROSOFT",
+        "named": [
+          "MICROSOFT"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_007320.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_007520.jpg": {
+        "kind": "hero",
+        "gold": "NVIDIA",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_007760.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_007960.jpg": {
+        "kind": "hero",
+        "gold": "BROADCOM",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_008200.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_008400.jpg": {
+        "kind": "hero",
+        "gold": "HONDA",
+        "named": [
+          "SONY"
+        ],
+        "hero_named": false
+      },
+      "df01d5a843_008640.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_008840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009080.jpg": {
+        "kind": "free",
+        "named": [
+          "NEW BALANCE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_009280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_009960.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_010160.jpg": {
+        "kind": "hero",
+        "gold": "MI",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_010400.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_010640.jpg": {
+        "kind": "free",
+        "named": [
+          "NEW BALANCE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_010840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011080.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011520.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_011960.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_012160.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_012400.jpg": {
+        "kind": "hero",
+        "gold": "GOOGLE",
+        "named": [
+          "GOOGLE"
+        ],
+        "hero_named": true
+      },
+      "df01d5a843_012600.jpg": {
+        "kind": "hero",
+        "gold": "VENGEANCE",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_012840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013040.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_013280.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013480.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_013920.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_014160.jpg": {
+        "kind": "free",
+        "named": [
+          "ROLEX"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_014400.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_014600.jpg": {
+        "kind": "free",
+        "named": [
+          "NEW BALANCE"
+        ],
+        "false_count": 1
+      },
+      "df01d5a843_014840.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015280.jpg": {
+        "kind": "hero",
+        "gold": "SNAPDRAGON",
+        "named": [],
+        "hero_named": false
+      },
+      "df01d5a843_015480.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015720.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_015920.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016160.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016360.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016600.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_016800.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_017040.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      },
+      "df01d5a843_017240.jpg": {
+        "kind": "free",
+        "named": [],
+        "false_count": 0
+      }
+    }
+  },
+  "decision": "OCR-primary wins if arm2 recall within 3 frames of arm1 or better AND fewer false brands per free frame; Phase 3.2 only if arm1 beats arm2 on recall by more than 3 frames.",
+  "verdict": "OCR_Primary",
+  "decision_detail": {
+    "arm2_recall_within_3_or_better": true,
+    "arm2_fewer_false_per_free": true,
+    "recall_delta_arm1_minus_arm2": 0,
+    "false_delta_arm1_minus_arm2": 0.726,
+    "winning_false_rate": 0.119
+  }
+}

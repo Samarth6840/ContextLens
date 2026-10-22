@@ -423,24 +423,31 @@ class AudioEventDetector:
             raise FileNotFoundError(f"BEATs checkpoint not found: {checkpoint_path}")
         if not resolved.is_file():
             raise ValueError(f"BEATs checkpoint path is not a file: {checkpoint_path}")
-        # Full pickle deserialization (weights_only=False) is required because
-        # BEATs checkpoints use a non-standard format PyTorch's safe loader
-        # cannot parse. For the third-party mirror, verify the pinned sha256
-        # first so a swapped file cannot execute code at load time.
-        if resolved.name == BEATS_PINNED_NAME:
-            digest = file_sha256(resolved)
+        # Full pickle deserialization (weights_only=False) executes arbitrary
+        # code at load. Prefer the safe loader for ANY checkpoint path and hash
+        # every file up front. The non-standard BEATs format may legitimately
+        # need the pickle fallback — allowed ONLY when the file matches the
+        # pinned artifact sha256, so a swapped/injected file can never be
+        # unpickled.
+        digest = file_sha256(resolved)
+        try:
+            checkpoint = torch.load(
+                str(resolved), map_location=device, weights_only=True
+            )
+        except Exception as exc_pickle:  # noqa: BLE001 — format fallback below
             if digest != BEATS_TRUSTED_SHA256:
                 raise ValueError(
-                    f"BEATs checkpoint {resolved.name} sha256 mismatch "
-                    f"(got {digest}, expected {BEATS_TRUSTED_SHA256}); refusing "
-                    "to pickle-load an unverified artifact."
-                )
-        logger.info(
-            "Loading BEATs checkpoint (verified local artifact: %s)", resolved
-        )
-        checkpoint = torch.load(
-            str(resolved), map_location=device, weights_only=False
-        )
+                    f"BEATs checkpoint {resolved.name} is not safe-loadable and "
+                    f"does not match the pinned artifact sha256 (got {digest}); "
+                    "refusing to pickle-load an unverified artifact."
+                ) from exc_pickle
+            logger.info(
+                "Safe load failed for %s — verified pinned artifact, using pickle",
+                resolved,
+            )
+            checkpoint = torch.load(
+                str(resolved), map_location=device, weights_only=False
+            )
         cfg = BEATsConfig(checkpoint["cfg"])
         self.model = BEATs(cfg)
         self.model.load_state_dict(checkpoint["model"])

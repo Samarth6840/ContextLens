@@ -105,6 +105,7 @@ button{font:inherit;padding:5px 12px;border:0;border-radius:5px;cursor:pointer}
 <script>
 let cur=null, boxes=[], nat=[0,0], cv=null, sel=-1;
 const $=s=>document.querySelector(s);
+const REQUIRE_BRAND={REQUIRE_BRAND};
 async function load(){
   const r=await fetch('/api/next'); cur=await r.json();
   if(!cur){$('#id').textContent='DONE - every frame reviewed or skipped';return}
@@ -184,6 +185,9 @@ async function save(verdict){
   // One brand per frame. A frame usually carries one mark repeated on product,
   // endcard and overlay; where it does not, leave it blank rather than guess.
   const br=$('#br').value.trim();
+  if(verdict==='logo'&&REQUIRE_BRAND&&!br){
+    alert('Type the brand in the field first, then press l (LOGO).\\n\\nThe brand is REQUIRED for this labelling pass.');
+    return}
   if(verdict==='logo'&&br)keep.forEach(b=>b.brand=br);
   await fetch('/api/label',{method:'POST',body:JSON.stringify(
     {file:cur.file,video:cur.video,frame_index:cur.frame_index,
@@ -354,6 +358,9 @@ def serve(args: argparse.Namespace, files: list[Path],
         def log_message(self, *a):  # one line per keystroke is not a log
             pass
 
+        def _page(self) -> bytes:
+            return PAGE.replace("{REQUIRE_BRAND}", "true" if args.require_brand else "false").encode()
+
         def _send(self, code: int, body: bytes, ctype: str) -> None:
             self.send_response(code)
             self.send_header("Content-Type", ctype)
@@ -364,7 +371,7 @@ def serve(args: argparse.Namespace, files: list[Path],
         def do_GET(self) -> None:
             p = self.path.split("?")[0]
             if p in ("/", "/index.html"):
-                return self._send(200, PAGE.encode(), "text/html")
+                return self._send(200, self._page(), "text/html")
             if p == "/api/next":
                 f = store.next_frame(files, store.labelled(), deferred)
                 if f is None:
@@ -668,6 +675,8 @@ def main() -> int:
                     help="restrict the queue to one video md5 prefix, so labeling "
                          "effort goes to the videos that move the audit")
     ap.add_argument("--export", default="", help="write the YOLO dataset and exit")
+    ap.add_argument("--require-brand", action="store_true",
+                    help="force a brand in the logo box before a LOGO save")
     ap.add_argument("--use-cache", action="store_true",
                     help="reuse a cached --propose run instead of recomputing. "
                          "Off by default: a cache must never reappear on its own, "

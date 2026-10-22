@@ -4,7 +4,7 @@
 Usage:
     python3 scripts/gemini_image_search.py <image_url>
     python3 scripts/gemini_image_search.py /local/file.png
-    MODEL=gemini-2.0-flash python3 scripts/gemini_image_search.py <image_url> "extra question"
+    MODEL=gemini-2.5-flash python3 scripts/gemini_image_search.py <image_url> "extra question"
 
 Key: $GEMINI_API_KEY or ~/.gemini_key (chmod 600)
 """
@@ -45,7 +45,7 @@ def main():
         sys.exit(__doc__)
     src = sys.argv[1]
     extra = sys.argv[2] if len(sys.argv) > 2 else ""
-    model = os.environ.get("MODEL", "gemini-2.0-flash")
+    model = os.environ.get("MODEL", "gemini-2.5-flash")
     key = get_key()
 
     data, mime = load_image(src)

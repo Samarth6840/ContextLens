@@ -94,19 +94,73 @@ def containment_max(b: np.ndarray) -> np.ndarray:
     return cov.max(1)
 
 
+def _containment_clusters(boxes: np.ndarray, leaf: float) -> list[list[int]]:
+    """Group boxes into containment clusters.
+
+    Two boxes are in the same cluster when either one is `leaf`-covered by the
+    other (a nested hierarchy flattened flat). Purely disjoint marks stay
+    separate clusters.
+    """
+    n = len(boxes)
+    if n == 0:
+        return []
+    x1, y1, x2, y2 = to_xyxy(boxes).T
+    area = np.maximum(0.0, x2 - x1) * np.maximum(0.0, y2 - y1)
+    iw = np.clip(np.minimum(x2[:, None], x2[None])
+                 - np.maximum(x1[:, None], x1[None]), 0, None)
+    ih = np.clip(np.minimum(y2[:, None], y2[None])
+                 - np.maximum(y1[:, None], y1[None]), 0, None)
+    cov = (iw * ih) / np.maximum(area[:, None], 1e-9)  # cov[i,j] = frac of i in j
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            if cov[i, j] >= leaf or cov[j, i] >= leaf:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[max(ri, rj)] = min(ri, rj)
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+    return list(groups.values())
+
+
 def classify(boxes: np.ndarray, max_area: float, max_aspect: float,
-             leaf: float) -> tuple[np.ndarray, Counter]:
+             leaf: float, keep_outermost: bool = False) -> tuple[np.ndarray, Counter]:
     """-> (keep mask, per-reason quarantine counts). Reasons are ordered, so a
     box is attributed to the first rule that caught it and the counts sum to the
-    number of quarantined boxes."""
+    number of quarantined boxes.
+
+    keep_outermost=False (default): the leaf rule — every contained box is
+    quarantined. keep_outermost=True: keep ONE box per containment cluster —
+    the largest member that still passes the area/aspect rules — so a deeply
+    nested region yields a single trainable target instead of dropping the whole
+    cluster. A cluster with no box under the area/aspect caps is still dropped.
+    """
     reason = Counter()
-    cov = containment_max(boxes)
     area = boxes[:, 2] * boxes[:, 3]
     aspect = boxes[:, 2] / np.maximum(boxes[:, 3], 1e-9)
+    elongation = np.maximum(aspect, 1 / np.maximum(aspect, 1e-9))
+    if keep_outermost:
+        ok = (area <= max_area) & (elongation <= max_aspect)
+        keep = np.zeros(len(boxes), bool)
+        for members in _containment_clusters(boxes, leaf):
+            passing = [i for i in members if ok[i]]
+            if passing:
+                keep[max(passing, key=lambda i: area[i])] = True
+        reason["contained"] = int((~keep).sum())
+        return keep, reason
+    contained = containment_max(boxes) > leaf
     bad = np.zeros(len(boxes), bool)
-    for name, m in (("contained", cov > leaf),
+    for name, m in (("contained", contained),
                     ("over_max_area", area > max_area),
-                    ("extreme_aspect", np.maximum(aspect, 1 / np.maximum(aspect, 1e-9)) > max_aspect)):
+                    ("extreme_aspect", elongation > max_aspect)):
         m = m & ~bad
         reason[name] = int(m.sum())
         bad |= m
@@ -121,7 +175,8 @@ _STATS = ("images_in", "images_out", "images_dropped_dense",
 
 
 def sanitize_split(root: Path, out: Path, split: str, max_area: float,
-                   max_aspect: float, leaf: float, max_boxes: int) -> dict:
+                   max_aspect: float, leaf: float, max_boxes: int,
+                   keep_outermost: bool = False) -> dict:
     lab_dir = root / "labels" / split
     img_dir = root / "images" / split
     stat = Counter({k: 0 for k in _STATS})
@@ -142,7 +197,7 @@ def sanitize_split(root: Path, out: Path, split: str, max_area: float,
             stat["boxes_quarantined_dense"] += len(b)
             _quarantine(out, split, lab, img, raw, ["over_density"])
             continue
-        keep, reason = classify(b, max_area, max_aspect, leaf)
+        keep, reason = classify(b, max_area, max_aspect, leaf, keep_outermost)
         stat.update(reason)
         if not keep.any():
             stat["images_dropped_all_quarantined"] += 1
@@ -204,6 +259,10 @@ def main() -> int:
                     help="quarantine a box this fraction inside any other box")
     ap.add_argument("--max-boxes-per-image", type=int, default=0,
                     help="drop whole images over this density (0 = no cap)")
+    ap.add_argument("--keep-outermost", action="store_true",
+                    help="keep the outermost box of each containment cluster "
+                         "(one-box-per-region retrain target) instead of "
+                         "quarantining every contained box")
     ap.add_argument("--hard", action="store_true",
                     help="overwrite an existing --out")
     args = ap.parse_args()
@@ -220,14 +279,15 @@ def main() -> int:
     report = {"root": str(root.resolve()), "out": str(out.resolve()),
               "rules": {"max_area": args.max_area, "max_aspect": args.max_aspect,
                         "leaf_containment": args.leaf,
-                        "max_boxes_per_image": args.max_boxes_per_image},
+                        "max_boxes_per_image": args.max_boxes_per_image,
+                        "keep_outermost": args.keep_outermost},
               "splits": {}}
     for s in args.splits:
         if not (root / "labels" / s).is_dir():
             continue
         report["splits"][s] = sanitize_split(
             root, out, s, args.max_area, args.max_aspect, args.leaf,
-            args.max_boxes_per_image)
+            args.max_boxes_per_image, args.keep_outermost)
     _carry_negatives(root, out)
 
     total = Counter()

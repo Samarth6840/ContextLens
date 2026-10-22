@@ -116,10 +116,17 @@ def main() -> int:
         h, w = img.shape[:2]
         lines = []
         for b in r["boxes"]:
-            x, y, bw, bh = b["x"], b["y"], b["w"], b["h"]
+            # Clamp the box to the frame (see label_frames.py export): an
+            # out-of-bounds box normalizes to corrupt (>1/<0) coordinates and
+            # Ultralytics silently drops the whole image.
+            x0 = max(0.0, float(b["x"]))
+            y0 = max(0.0, float(b["y"]))
+            x1 = min(w, float(b["x"]) + float(b["w"]))
+            y1 = min(h, float(b["y"]) + float(b["h"]))
+            bw, bh = x1 - x0, y1 - y0
             if bw < 1 or bh < 1:
                 continue
-            lines.append(f"0 {(x+bw/2)/w:.6f} {(y+bh/2)/h:.6f} {bw/w:.6f} {bh/h:.6f}")
+            lines.append(f"0 {(x0+bw/2)/w:.6f} {(y0+bh/2)/h:.6f} {bw/w:.6f} {bh/h:.6f}")
         (out / "labels" / split / f"{Path(r['file']).stem}.txt").write_text(
             "\n".join(lines) + ("\n" if lines else ""))
         return {"video": r["video"], "boxes": len(lines), "wh": [w, h],

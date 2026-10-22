@@ -20,6 +20,7 @@ Honesty contract (matches the rest of the pipeline):
     brand timeline, and recommendations coherently.
 """
 
+import hashlib
 import logging
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -47,8 +48,9 @@ class ProductEmbeddingIndex:
     query() returns [] for every frame (fail-closed).
     """
 
-    def __init__(self, reference_dir: str = "benchmark/product_logos"):
+    def __init__(self, reference_dir: str = "benchmark/product_logos", cache_path: Optional[str] = None):
         self.reference_dir = Path(reference_dir)
+        self.cache_path = Path(cache_path) if cache_path else None
         self._matrix: Optional[np.ndarray] = None  # (N, D) unit-normalized
         self._labels: List[Tuple[str, str]] = []   # (brand, path) per row
         self._built = False
@@ -127,6 +129,20 @@ class ProductEmbeddingIndex:
             Number of reference images indexed (0 if none found / fail-closed).
         """
         images = self._discover_images()
+        version = getattr(embed_extractor, "embedding_version", None)
+        fingerprint = self._fingerprint(images, version)
+        if self.cache_path is not None and self.cache_path.is_file():
+            try:
+                with np.load(self.cache_path, allow_pickle=False) as cached:
+                    if str(cached["fingerprint"].item()) == fingerprint:
+                        self._matrix = cached["matrix"].astype(np.float32, copy=False)
+                        self._labels = [tuple(row) for row in cached["labels"].tolist()]
+                        self.embedding_version = version
+                        self._built = True
+                        logger.info("Loaded product embedding index cache (%d images)", len(self._labels))
+                        return len(self._labels)
+            except Exception as exc:  # noqa: BLE001 — rebuild a stale/corrupt cache
+                logger.warning("Ignoring unreadable product index cache %s: %s", self.cache_path, exc)
         if not images:
             logger.warning(
                 "No reference images found under %s — product-index evidence "
@@ -136,9 +152,7 @@ class ProductEmbeddingIndex:
             self._built = True
             self._matrix = None
             self._labels = []
-            self.embedding_version = getattr(
-                embed_extractor, "embedding_version", None
-            )
+            self.embedding_version = version
             return 0
 
         # Load + embed in batches (reuse PIL path from the extractor).
@@ -181,15 +195,38 @@ class ProductEmbeddingIndex:
         # Record WHICH embedding model produced these vectors so a later query
         # from a different-space extractor fails loudly instead of returning
         # plausible-but-wrong nearest neighbors.
-        self.embedding_version = getattr(
-            embed_extractor, "embedding_version", None
-        )
+        self.embedding_version = version
+        if self.cache_path is not None:
+            try:
+                self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+                temp_path = self.cache_path.with_name(self.cache_path.name + ".tmp.npz")
+                np.savez_compressed(
+                    temp_path,
+                    fingerprint=np.asarray(fingerprint),
+                    matrix=self._matrix,
+                    labels=np.asarray(self._labels, dtype=str),
+                )
+                temp_path.replace(self.cache_path)
+            except OSError as exc:
+                logger.warning("Could not persist product index cache %s: %s", self.cache_path, exc)
         logger.info(
             "Product index built: %d reference image(s) for %d brand(s)",
             len(self._labels),
             len(set(b[0] for b in batch_labels)),
         )
         return len(self._labels)
+
+    @staticmethod
+    def _fingerprint(images, embedding_version) -> str:
+        digest = hashlib.sha256(str(embedding_version or "").encode("utf-8"))
+        for brand, path in images:
+            try:
+                stat = path.stat()
+                stamp = f"{brand}\0{path}\0{stat.st_size}\0{stat.st_mtime_ns}\n"
+            except OSError:
+                stamp = f"{brand}\0{path}\0missing\n"
+            digest.update(stamp.encode("utf-8", errors="replace"))
+        return digest.hexdigest()
 
     @property
     def is_empty(self) -> bool:

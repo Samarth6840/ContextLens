@@ -589,14 +589,21 @@ class ProductNameExtractor:
                 "span": span,
                 "normalized": norm,
                 "position": m.start(),
-                "boost": 1.0,
+                # Plausibility baseline. A MULTI-token phrase ("Mac Mini",
+                # "Galaxy Z Fold8 Ultra") is a product-name candidate on its own;
+                # a SINGLE capitalized token is indistinguishable from an OCR
+                # headline word, so it sits below the 0.5 gate and only becomes
+                # worth a Wikidata/expert query once a price/spec callout lifts
+                # it (see below).
+                "boost": 1.0 if len(norm.split()) >= 2 else 0.0,
             })
-        # Boost spans that co-occur with a price or spec callout.
+        # A price/spec callout nearby confirms a real product mention, lifting
+        # even a single-token span above the gate.
         price = extract_price(text)
         specs = extract_specs(text) if self.spec_signal_boost else []
         if price or specs:
             for c in out:
-                c["boost"] += 0.5
+                c["boost"] = 1.5
                 c["price_nearby"] = bool(price)
                 c["spec_nearby"] = bool(specs)
         return out

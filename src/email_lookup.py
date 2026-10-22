@@ -307,7 +307,7 @@ def lookup_brand_emails(brand: str, timeout: float = 120.0, model: Optional[str]
         # pinned every brand to "unavailable" for the life of the process.
         return {"status": "unavailable", "reason": "no GEMINI_API_KEY", "emails": []}
 
-    model = model or _env("GEMINI_MODEL") or "gemini-2.0-flash"
+    model = model or _env("GEMINI_MODEL") or "gemini-2.5-flash"
     payload = {
         "contents": [{
             "role": "user",
