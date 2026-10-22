@@ -1,0 +1,1129 @@
+{
+  "benchmark": "logo_product_eval_pilot",
+  "live": true,
+  "manifest": "benchmark/logo_product_eval/serpapi_google_lens_pilot.jsonl",
+  "sample_count": 14,
+  "image_policy": "gold hero crops only; full video frames are not sent",
+  "providers": [
+    {
+      "provider": "serpapi",
+      "status": "completed",
+      "samples": 14,
+      "attempted": 14,
+      "requests": 14,
+      "completed": 14,
+      "top1_accuracy": 0.7143,
+      "top5_accuracy": 0.8571,
+      "conditional_top1_accuracy": 0.7143,
+      "conditional_top5_accuracy": 0.8571,
+      "source_return_rate": 1.0,
+      "conditional_source_return_rate": 1.0,
+      "success_rate": 1.0,
+      "not_run": 0,
+      "mean_latency_seconds": 3.739,
+      "errors": [],
+      "per_sample": [
+        {
+          "sample_id": "df01d5a843:df01d5a843_003320:APPLE",
+          "brand": "APPLE",
+          "status": "ok",
+          "latency_seconds": 2.32,
+          "source_count": 60,
+          "top1_brand": null,
+          "top1_hit": false,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "APPLE",
+            "APPLE",
+            "APPLE",
+            "APPLE"
+          ],
+          "results": [
+            {
+              "title": "iPhone wallpapers 4k 💕",
+              "url": "https://www.threads.com/@broken_thoughts_0425/post/DCgx681pBbU",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQ_rlqTyvey5cJDSAhEz-duoZiLM5Vl402k2-J6qDNINXjOJF7_"
+            },
+            {
+              "title": "Apple Inc. | Disney Wiki | Fandom",
+              "url": "https://disney.fandom.com/wiki/Apple_Inc.",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTWLA680xLKcu-F6DuusdYOELFz_YIeoYIdOWIvCyJDOkss4ZEx"
+            },
+            {
+              "title": "Apple Logo Black Wallpaper by superquanganh on DeviantArt",
+              "url": "https://www.deviantart.com/superquanganh/art/Apple-Logo-Black-Wallpaper-664498098",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcR3PW45-qAMFKXmOWXNKGeynGiUdMBFcHaMZXtXrbpO-ssw0zva"
+            },
+            {
+              "title": "Apple TV 4K (3rd generation) Wi-Fi + Ethernet | AppleDB",
+              "url": "https://appledb.dev/device/identifier/AppleTV14,1.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSn7sM9c_KuUXueqpF0ukfacK-45-aCw9KAEnU8_szT9RulgdN2"
+            },
+            {
+              "title": "Apple Logo Wallpaper for iPhone | Geometric wallpaper hd ...",
+              "url": "https://ca.pinterest.com/pin/apple-logo-wallpaper-for-iphone--17521886043497248/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSqHsytFYgpErJqQuBgddJJ0Cj2zhYqpUAcb91ZywNzAevG9EMk"
+            },
+            {
+              "title": "Купить Apple iPad Pro 11 2024 M4 512Gb Wi-Fi Space Black ...",
+              "url": "https://zurmarket.ru/catalog/apple/apple_ipad/ipad_pro_11_5_go_pokoleniya_2024/apple_ipad_pro_11_m4_512gb_wi_fi_space_black_with_standart_glass.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSFNCf45Hq-D9EgucyJ98uFePolBnsiyRP8zfsfLrSZU7m5RRwa"
+            },
+            {
+              "title": "Apple MacBook Skins & Wraps » dbrand",
+              "url": "https://dbrand.com/search?brands=apple&deviceSeries=macbook-pro-16&deviceSeries=macbook-pro-14&deviceSeries=macbook-air-136&deviceSeries=macbook-air-15&deviceTypes=laptops&productTypes=skins&query=m4&sort=new",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcROeo_UDBwPQRgoTY9HQWI9zV3LBTApLYOV3IWzy-QY0oO31qbJ"
+            },
+            {
+              "title": "Adesivo maçã mordida Apple 6CM | Shopee Brasil",
+              "url": "https://shopee.com.br/Adesivo-maçã-mordida-Apple-6CM-i.265554715.23698008146",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSo8NG-1_sc5V63a_g6dx_E4LcBCuUUr-Sq8RF5aCDp4TEma_q2"
+            },
+            {
+              "title": "Apple is officially moving to ARM processors in Macs | KitGuru",
+              "url": "https://www.kitguru.net/lifestyle/mobile/apple/matthew-wilson/apple-is-officially-moving-to-arm-processors-in-macs/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQqZ6wRSZkPWCP8fH-rXEiC14Zqcu8A-k99abb2fhYci2xtTBLi"
+            },
+            {
+              "title": "Apple's Next Launch is 'Imminent' - MacRumors",
+              "url": "https://www.macrumors.com/2026/02/01/apples-next-launch-is-imminent/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTzlYWFP117G7wX18GWX8jVCoQbdI6xi1P5VQQPKVjwm6GGnHn0"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007960:BROADCOM",
+          "brand": "BROADCOM",
+          "status": "ok",
+          "latency_seconds": 4.474,
+          "source_count": 59,
+          "top1_brand": "BROADCOM",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "BROADCOM",
+            "BROADCOM",
+            "BROADCOM",
+            "BROADCOM"
+          ],
+          "results": [
+            {
+              "title": "Broadcom Should Take the Hint - WSJ",
+              "url": "https://www.wsj.com/articles/broadcom-should-take-the-hint-1520276958",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSo4q-8RotTxGeuuzL91Wp5P-cL2LYHKYeApZh_LBPRdBN3fOXX"
+            },
+            {
+              "title": "How Broadcom chief Hock Tan shaped a US$225b tech giant ...",
+              "url": "https://www.techpartner.news/news/how-broadcom-chief-hock-tan-shaped-a-us225b-tech-giant-through-acquisitions-580684",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQvMByJRChy1uAIPyUp1_-5SHXX4sm7208lqnQcUjErl3Ddlg71"
+            },
+            {
+              "title": "Broadcom Corporation（A publicly traded company primarily ...",
+              "url": "https://baike.baidu.com/en/item/Broadcom Corporation/1458239",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSP0O5Y9yAOlG_XpAyVBa5aTM_rU1b2P8oRDuv_79OT5w1q8wh-"
+            },
+            {
+              "title": "Craig Nelson - Lafayette, California, United States ...",
+              "url": "https://www.linkedin.com/in/craignelson",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQgFxTV-XEvoE34pbVkhrdqkcR_PZK-VpJgVrkkTgkiYMZvcZws"
+            },
+            {
+              "title": "Broadcom is growing rapidly thanks to AI, but investors are ...",
+              "url": "https://www.techzine.eu/news/infrastructure/137266/broadcom-is-growing-rapidly-thanks-to-ai-but-investors-are-critical/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcRi0xLFuwnGdi0BYgXmojIBMkD06za6Ynr30BldslLFUMVp7N1S"
+            },
+            {
+              "title": "Broadcom set to gain conditional EU approval for proposed ...",
+              "url": "https://www.communicationstoday.co.in/broadcom-set-to-gain-conditional-eu-approval-for-proposed-acquisition-of-vmware/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSBgHxkuY-yaIgNl5KthjJD1g4NGu8KHv0ZysXCcOXnhhGIb8GD"
+            },
+            {
+              "title": "FTC OKs order against Broadcom in chip monopoly case",
+              "url": "https://www.lightreading.com/cable-technology/ftc-oks-order-against-broadcom-in-chip-monopoly-case",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQvSgWmYJJFcdV5aoKgvze1BmObuw9rzDEWK0ZxmKWdsH2zCyRj"
+            },
+            {
+              "title": "Broadcom (AVGO) Q4 earnings 2025",
+              "url": "https://www.cnbc.com/2025/12/11/broadcom-avgo-q4-earnings-2025.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSgFbWBo7PtdNOAJHFSNyu4z2RwikDZDNMTm5ghuJ-REnZaKMkH"
+            },
+            {
+              "title": "Broadcom in talks to purchase cloud computing company VMware ...",
+              "url": "https://www.foxbusiness.com/economy/broadcom-purchase-vmware",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcRV4loyvL92iL4HUIY9NPo11QhhF70o9mHkTx58ZNkn-JSr-BCO"
+            },
+            {
+              "title": "Broadcom, Ra'anana - תדהר",
+              "url": "https://tidhar.co.il/en/project/broadcom-raanana/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcThrYhHC5kG2dBKfW_cop1vNFq4FTHnsr7OczpjY5K3IFT8yWIG"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_005280:CMF",
+          "brand": "CMF",
+          "status": "ok",
+          "latency_seconds": 3.541,
+          "source_count": 60,
+          "top1_brand": "CMF",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "CMF",
+            "CMF",
+            "CMF",
+            "CMF",
+            "CMF"
+          ],
+          "results": [
+            {
+              "title": "Amazon.com: CMF By Nothing Buds 2 48dB Hybrid ANC True ...",
+              "url": "https://www.amazon.com/clp/B0DXP6PPT8",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQVcJ_HyGZQC5z-nMFnFmWeVvqailWsngTNwKYrE7O6DnU653xw"
+            },
+            {
+              "title": "Amazon.com: CMF By Nothing Buds 2 48dB Hybrid ANC True ...",
+              "url": "https://www.amazon.com/clp/B0DXP6PPT8",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcR68iBkVrJZ68PxpS69lhgSVW0nH0P4TBB2tCdB-xSTTQYtpRQT"
+            },
+            {
+              "title": "CMF Buds Pro 2 | Audio | Nothing | US",
+              "url": "https://us.nothing.tech/products/cmf-buds-pro-2",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSaNTNOdTBkahoJhwlteWiJOJ8QECjNYFnZK9AQOVOg1d9bgsTJ"
+            },
+            {
+              "title": "Amazon.com: CMF BY NOTHING Buds 2a Wireless Earbuds 2025 New ...",
+              "url": "https://www.amazon.com/clp/B0F2M1KYR7",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQea6booDnnMkz8aTbSEDYzMlscvLZZVGpnouvgOzZkCYjH6qfM"
+            },
+            {
+              "title": "CMF by Nothing, Buds 2 True Wireless Earbuds, 55H Playtime ...",
+              "url": "https://www.walmart.com/ip/CMF-Nothing-Buds-2-48dB-Hybrid-ANC-True-Wireless-Earbuds-Strong-Comfort-Noise-Cancelling-Ultra-Bass-Dirac-Sound-in-Ear-Detection-55H-Playtime-6ENC-Mi/20050770676",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTPJzmpBUlGKgQ1nxkuMiDVfKlLU3oHjB-7oCDzMXXHTnXps-bK"
+            },
+            {
+              "title": "CMF by Nothing Buds 2a, 42 dB ANC, 12.4mm Driver, Dirac ...",
+              "url": "https://www.flipkart.com/cmf-nothing-buds-2a-42-db-anc-12-4mm-driver-dirac-tuned-ultra-bass-tech-35-5-hrs-bluetooth/p/itmf191868cdd2b5",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSgg-6f7ZkgTtQs-OapkJ9HenN0zWQCp1yKt2f0OuO-TogLPAzw"
+            },
+            {
+              "title": "Amazon.com: CMF BY NOTHING Buds 2a Wireless Earbuds 2025 New ...",
+              "url": "https://www.amazon.com/clp/B0F2M1KYR7",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSGbJI5k6FnLnkVCMamd9kjbKiW5we1OCf3JnRphyVyf4s0oX2Y"
+            },
+            {
+              "title": "CMF by Nothing, Buds 2 True Wireless Earbuds, 55H Playtime ...",
+              "url": "https://www.walmart.com/ip/CMF-Nothing-Buds-2-48dB-Hybrid-ANC-True-Wireless-Earbuds-Strong-Comfort-Noise-Cancelling-Ultra-Bass-Dirac-Sound-in-Ear-Detection-55H-Playtime-6ENC-Mi/20050770676",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTeCBJQNsUliWLBskgP1bhEkPZYxxqvuEjO04ZCVgtOu670zy19"
+            },
+            {
+              "title": "CMF Buds | Nothing | US",
+              "url": "https://us.nothing.tech/products/cmf-buds",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQo-VTxD0AnPaZhsc0uBiEQj8TRDB46_nL1XiJ3nlwopekCYMLj"
+            },
+            {
+              "title": "25+ Nothing Buds for sale | Updated Oct 2026",
+              "url": "https://www.ebay.com/shop/nothing-buds?_nkw=nothing+buds",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTtpJ3H5DlDOw_dq7gDUetmxn9L6RkgxM1lYwdm8cz_XP4ptBOd"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012400:GOOGLE",
+          "brand": "GOOGLE",
+          "status": "ok",
+          "latency_seconds": 3.842,
+          "source_count": 59,
+          "top1_brand": null,
+          "top1_hit": false,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "GOOGLE",
+            "GOOGLE",
+            "GOOGLE",
+            "GOOGLE"
+          ],
+          "results": [
+            {
+              "title": "Econet Rolled Out Free Gemini Plus Offer: How Zimbabweans ...",
+              "url": "https://technomag.co.zw/econet-rolled-out-free-gemini-plus-offer-how-zimbabweans-can-access-googles-premium-ai-service/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcRiPNRD2K7x2wQ-kLnzFUQjhac3vZGF2w-Bb6mpcCp1II3A_06y"
+            },
+            {
+              "title": "Google Cloud Offers Free Software Developer Assistant",
+              "url": "https://www.forbes.com/sites/adrianbridgwater/2025/02/25/google-cloud-offers-free-software-developer-assistant/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQd6V59Pus6GksUoBrrJvk9HTQjBOKHW0FlbikTau-7DQ0aAIDG"
+            },
+            {
+              "title": "Google Faces Fresh Copyright Lawsuit Over Gemini AI Training ...",
+              "url": "https://www.bwmarketingworld.com/article/google-faces-fresh-copyright-lawsuit-over-gemini-ai-training-614846",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSsPKkXhul3jCyOBVQQjPkDYIc1cwN08vNCPS0eMWI-WndjaEIC"
+            },
+            {
+              "title": "Google adding Gemini-powered analysis to Google Trends isn't ...",
+              "url": "https://www.instagram.com/p/DUDdxETjecq/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSDMnlRxHcPE0FSVs9IBaQGdoRerzP1hQ2c22_XBfvs2kiMHbFU"
+            },
+            {
+              "title": "Unlock the Power of Images with Google Cloud Vision API",
+              "url": "https://www.ikomia.ai/blog/google-cloud-vision-api-features-applications",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQluL6skARILdk-8odUSp8oW_zlibO8mzz7Y6nNhBz0-q-tNUhu"
+            },
+            {
+              "title": "Econet google gemini Archives - TechnoMag",
+              "url": "https://technomag.co.zw/tag/econet-google-gemini/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcS9CK3xjr4jk6Yrn-nKkSWUi9w3doqG1wENZyNgrFAHm3NkH72c"
+            },
+            {
+              "title": "Google Gemini （旧：Bard）でパソコンが苦手な人でも簡単に情報 ...",
+              "url": "https://is-com.co.jp/googlebard/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQuoXMiVmIDXxTYfwoUf927sATZbSfQSPGeanwWy7Tyuw-r9iTP"
+            },
+            {
+              "title": "Google AI Overview logo – Alexis Chateau PR",
+              "url": "https://alexischateaupr.com/history/google-ai-overview-logo/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcS9lrN6nRCFyd-rj0NpPzUzcJ1gKlYWxpCbpM-57KfOpUi2cOqf"
+            },
+            {
+              "title": "GeminiやChatGPTは仕事で危なっかしい Googleの無料×最強AI ...",
+              "url": "https://xtrend.nikkei.com/atcl/contents/18/00589/00289/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQIy-GaOofyxILb7wQWgoa2IVDq08Bz6AWX6N5Ugpb9m68pUAek"
+            },
+            {
+              "title": "Google логотип змінився — який він тепер має вигляд / NV",
+              "url": "https://techno.nv.ua/ukr/it-industry/ikonka-google-50513471.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcRcW3spNGqWIHe2sbG4DmLa4FVtfHwvkh9_L3GWb2-HoQg0Wqnt"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_008400:HONDA",
+          "brand": "HONDA",
+          "status": "ok",
+          "latency_seconds": 3.675,
+          "source_count": 60,
+          "top1_brand": "HONDA",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "HONDA",
+            "HONDA",
+            "HONDA",
+            "HONDA",
+            "HONDA"
+          ],
+          "results": [
+            {
+              "title": "Genuine Honda Gold 24K Front Emblem 75700-SLJ-0030 for ...",
+              "url": "https://www.ebay.com/itm/335652904787",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSzv5zHRqd5FoLO01ZT5EQZuC5Zaq42XLskiG-dMLtVvI5h5SWs"
+            },
+            {
+              "title": "If you look closely, the Honda vehicle logo contains a ...",
+              "url": "https://www.reddit.com/r/notinteresting/comments/u3gcss/if_you_look_closely_the_honda_vehicle_logo/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSmD0XjzoLajSml1ZhO-8G5OArDc06SUCYAW-lE7Nv80msRCVSP"
+            },
+            {
+              "title": "Honda recalls 668,000 more cars in Japan over Takata air ...",
+              "url": "https://www.reuters.com/article/business/honda-recalls-668000-more-cars-in-japan-over-takata-air-bags-idUSKCN11E0FK/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQIG5bP66DK8QvVJ8K2jww2svPUB3VEIkl94Vb5PV9LLEjqTMPh"
+            },
+            {
+              "title": "Honda Usa Logo",
+              "url": "https://www.pinterest.com/ideas/honda-usa-logo/914292977004/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcS1vOhrFSQERno3AJlPq56kT-NV5vnUi4cWSQNQS6S6iOPdBHq5"
+            },
+            {
+              "title": "11th Gen Front Honda Emblems - Etsy",
+              "url": "https://www.etsy.com/market/11th_gen_front_honda_emblems",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcS2vqzNI7N9uLwJ9UytMwHciGRnlfFW2mj6CkjVNeThSER_P7Um"
+            },
+            {
+              "title": "Amazon.com: Genuine Honda 75700-TR0-000 Emblem : Automotive",
+              "url": "https://www.amazon.com/Honda-75700-TR0-000-Genuine-Emblem/dp/B00FSCJ600",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTxmz8dHlW3g-fUfqBCQB_3zypTqNtAp8SM0x0Rnec_1ThYYHaQ"
+            },
+            {
+              "title": "Honda Jazz GK Rear bone Emblem Emas FIT, Honda Logo ori ...",
+              "url": "https://www.facebook.com/groups/697795350288999/posts/8820668644668255/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQeLKRO7ZqqSmlwrGGg9w_0CYCah0MjU2zVXkBb0CuuTXHvM4Ln"
+            },
+            {
+              "title": "Honda CR-V RW Gold Emblem Modulo JDM OEM 08F20-TLA-000A ...",
+              "url": "https://www.ebay.com/itm/364199198029",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQ2COzmr11Z5uXl6SwI24ge8RtOGVStlvge6tYspkBbpGABIKCN"
+            },
+            {
+              "title": "A detail that makes all the difference ✨ The new Honda ...",
+              "url": "https://www.instagram.com/p/DUBtG2LEq4v/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTEoD2CHdREer6unPkMA6_2E1KNIvIbZykwqNsXO5RoGni1WM7H"
+            },
+            {
+              "title": "75701-S84-A01 - Genuine Honda Emblem, Rear Center (H)",
+              "url": "https://www.hondapartsnow.com/genuine/honda~emblem~75701-s84-a01.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTrUD-GOYEb0wC_IWcrUlVOQIb6Vs5E_0KsGUV8vYLLVPVx2pf2"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_010160:MI",
+          "brand": "MI",
+          "status": "ok",
+          "latency_seconds": 3.08,
+          "source_count": 60,
+          "top1_brand": "GOOGLE",
+          "top1_hit": false,
+          "top5_hit": false,
+          "matched_brands_top5": [
+            "GOOGLE",
+            "XIAOMI",
+            "XIAOMI",
+            "AMAZON",
+            "XIAOMI"
+          ],
+          "results": [
+            {
+              "title": "Mi Store – Apps on Google Play",
+              "url": "https://play.google.com/store/apps/details?id=com.mi.global.shop&hl=en_GB",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcRSxnLFuabCWvuAmVBsmE4GKMtBHv_HEl-P63mjbKgqoQMFonRV"
+            },
+            {
+              "title": "Android Apps by Xiaomi Inc. on Google Play",
+              "url": "https://play.google.com/store/apps/dev?id=5113340212256272297",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTJ1UY0-I4eB0KVjBXdQ7sKYXFyaBtkf2AkLjvnEA7jD_aCgTZ9"
+            },
+            {
+              "title": "Xiaomi - Wikipedia",
+              "url": "https://en.wikipedia.org/wiki/Xiaomi",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSxluqS3WROUdJQu0mbwGv21i0af66evykqIeMXr8hY_bokdbLp"
+            },
+            {
+              "title": "MIUI V5 Wallpaper - App on Amazon Appstore",
+              "url": "https://www.amazon.com/张海龙-MIUI-V5-Wallpaper/dp/B00JXNUVQ8",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTk6peFXAeldaX_a-ezHZ1Y9D7bb-lSKYc_rHcnlLCPPGlK-Vqi"
+            },
+            {
+              "title": "Xiaomi Global Reviews | Read Customer Service Reviews of mi.com",
+              "url": "https://www.trustpilot.com/review/mi.com",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTJYzyHkicMyLPvmwXASA48T9YQJvA1MK2fKoVtQtvvJer-3GNt"
+            },
+            {
+              "title": "Xiamoi @ The Grand Egyptian Museum Organized By : Strike ...",
+              "url": "https://www.instagram.com/reel/CyThEYCNYvQ/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTjAeO483tYJFc96jwrH9J9L8q_ChPogsrFTabIlhCnsYYBRE2f"
+            },
+            {
+              "title": "User guide for Android - Download the APK from Uptodown",
+              "url": "https://user-guide.en.uptodown.com/android",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTnu8TdSSqvEK_OJ1PUukU9t1aN4FD4jBgzYOvdGW1yScdrf28M"
+            },
+            {
+              "title": "The Xiaomi 18 is getting highlighted now, and these battery ...",
+              "url": "https://www.facebook.com/AndroidCentral/posts/the-xiaomi-18-is-getting-highlighted-now-and-these-battery-rumors-arent-that-gra/1446382490863443/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT0Q58ezKteP27fohKnsmPNBNRWKtiqju8Q3my_TvzYQAoqy4kw"
+            },
+            {
+              "title": "Xiaomi reportedly ups its yearly smartphone sales target as ...",
+              "url": "https://www.gsmarena.com/xiaomi_yearly_smartphone_sales_target_revised-news-73808.php",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQXx-lJGb-Ffbvp_2kpr2aRz8V7w5i8CF7nyln4sXL6w98x6MsJ"
+            },
+            {
+              "title": "Xiaomi launches electric car division, and a new logo that ...",
+              "url": "https://thechinaproject.com/2021/03/31/xiaomi-launches-electric-car-division-and-a-new-logo-that-looks-exactly-like-its-old-logo/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcT7gokf8aqx9q6YKIrhMaxzf0fkl50uHj9O87gL51jjkdQTFDSi"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007080:MICROSOFT",
+          "brand": "MICROSOFT",
+          "status": "ok",
+          "latency_seconds": 3.162,
+          "source_count": 59,
+          "top1_brand": "MICROSOFT",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "MICROSOFT",
+            "MICROSOFT",
+            "MICROSOFT",
+            "MICROSOFT",
+            "MICROSOFT"
+          ],
+          "results": [
+            {
+              "title": "Microsoft Cuts 4,800 Jobs, Plans 20% Reduction At Xbox - CRE ...",
+              "url": "https://www.credaily.com/briefs/microsoft-cuts-4-800-jobs-plans-20-reduction-at-xbox/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQc3-ZoM2j_rO10bsu5eDK91OoBE1Lo3h002hed-HFy6TJx7wIP"
+            },
+            {
+              "title": "Microsoft lays off 10K as job cuts in tech sector spread ...",
+              "url": "https://www.reviewjournal.com/business/microsoft-lays-off-10k-as-job-cuts-in-tech-sector-spread-2714407/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTPLJbim8z1IDHtUGzJYawdLsTEcwi6WWQiY8s4kJ51vPI2zl6V"
+            },
+            {
+              "title": "Microsoft to cut 4,800 jobs, overhaul Xbox unit | Reuters",
+              "url": "https://www.reuters.com/business/world-at-work/microsoft-joins-ai-driven-tech-layoff-wave-with-4800-job-cuts-2026-07-06/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQssWooEWtozat_3g32F2Cz4UYGNsB7gqAzt581w3XZvCrPvp63"
+            },
+            {
+              "title": "Microsoft Targets Trimmed: What It Means for Investors ...",
+              "url": "https://www.tradingview.com/news/marketbeat:ff8920af7094b:0-microsoft-targets-trimmed-what-it-means-for-investors/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ_nInOCngT9kqpXbVgxLjJPk6kOE2lvXEVEaF1Rg-albbRX5h4"
+            },
+            {
+              "title": "Microsoft announces another round of layoffs | FOX 13 Seattle",
+              "url": "https://www.fox13seattle.com/news/microsoft-announces-another-round-layoffs",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQbKYg7VbaDTS5Jfwcc8fVJQB0sshiK8nuwB7cFsmF5cMQZbsW5"
+            },
+            {
+              "title": "Microsoft's largest layoff in years hits Xbox, sales and ...",
+              "url": "https://pix11.com/ap-technology/ap-microsoft-announces-another-mass-layoff-thousands-of-workers-affected/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSZFaC1YeGZbJQDhLlp9CotrqcDi1wkwB_a7TYOYHUgfc4CQkiV"
+            },
+            {
+              "title": "Microsoft Cuts Thousands Of Jobs, Xbox 'Resets'",
+              "url": "https://finance.yahoo.com/technology/articles/microsoft-cuts-thousands-jobs-xbox-194738628.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTJKT5QZBp42cYG0R_RO7HfstnaadLRhsQcPXtDG83tXaIeFbtk"
+            },
+            {
+              "title": "Microsoft to lay off 300 Washington-based employees - YouTube",
+              "url": "https://www.youtube.com/watch?v=5sN7zKl8IGQ",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSmsT--eDzkXcHrFf08m87hC33_QbMYk2ZaEZi5kOTubg-t6u6O"
+            },
+            {
+              "title": "Microsoft to cut up to 9,000 jobs as it invests in AI",
+              "url": "https://www.bbc.com/news/articles/cdxl0w1w394o",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQEmklikB82OWr4tIFD0xqw5cvNwusrNsEq3ughAtAi81nq9FdZ"
+            },
+            {
+              "title": "Microsoft rejects speculation it's axing its carbon business ...",
+              "url": "https://www.gmtoday.com/business/microsoft-rejects-speculation-it-s-axing-its-carbon-business/article_1eb483b8-a47f-46b7-8293-09c61fd30abb.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSCJxRjPSflqW_mOe3kcVJA6mMCzsUigPI4_eycW0MozRRonbDD"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_016080:MOTOROLA",
+          "brand": "MOTOROLA",
+          "status": "ok",
+          "latency_seconds": 2.549,
+          "source_count": 60,
+          "top1_brand": "MOTOROLA",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "MOTOROLA",
+            "MOTOROLA",
+            "MOTOROLA",
+            "MOTOROLA",
+            "MOTOROLA"
+          ],
+          "results": [
+            {
+              "title": "Amazon.com: Motorola Moto G04 XT2421-2 (Dual Sim) Factory ...",
+              "url": "https://www.amazon.com/Motorola-XT2421-2-Factory-Unlocked-International/dp/B0D6Z8P67Y",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcRDSz-sxnkfDnDGqIXr-OtxjT_mGHH-NrdtGimubp_iL9fIg1yb"
+            },
+            {
+              "title": "Motorola: The Beauty in New Poses and Expressions | TikTok",
+              "url": "https://www.tiktok.com/@rola_kalange/photo/7498909737778564407?image_index=24",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcR-F4-jUP9Muw-jyHQRhklvIYr0I3Oh_ukFm7iGQsFIDYq-pyI-"
+            },
+            {
+              "title": "Moto Discovery (Android 12+) APKs - APKMirror",
+              "url": "https://www.apkmirror.com/apk/motorola-mobility-llc/moto-discovery/variant-{\"minapi_slug\":\"minapi-31\"}/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTsMQ2kOIN_LTxYauZxqdjGESO-EwIzOYbYfAxqEZ_ygRdbHuy1"
+            },
+            {
+              "title": "Motorola Moto G04s DUAL SIM 64GB ROM + 4GB RAM (GSM ONLY ...",
+              "url": "https://www.walmart.com/ip/Motorola-Moto-G04s-DUAL-SIM-64GB-ROM-4GB-RAM-GSM-ONLY-NO-CDMA-Factory-Unlocked-4G-LTE-Smartphone-Satin-Blue-International-Version/5754710619",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQOpKWyBPaBx0xyubPCIk_vBjSH3XAitcZ9k_Pdxh0XdFf_LOOR"
+            },
+            {
+              "title": "Motorola: Focus on strengthening offline retail, customer ...",
+              "url": "https://m.economictimes.com/tech/hardware/focus-on-strengthening-offline-retail-customer-expansion-motorola/articleshow/61633125.cms",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTod_X90Gyw-mzOj-kzO7CevHR3pQ-ng9LescJ2vDPYZSLHoO71"
+            },
+            {
+              "title": "Motorola Mobility/Other | Logopedia | Fandom",
+              "url": "https://logos.fandom.com/wiki/Motorola_Mobility/Other",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSiFYaYi7SEpP_d7qmzL2jI5GvReTloeb1kYsEoV6sxgHTvoVFe"
+            },
+            {
+              "title": "BOOT LOGO] Motorola Series [Project 9 ¾] | XDA Forums",
+              "url": "https://xdaforums.com/t/boot-logo-motorola-series-project-9-3-4.4044943/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTbg8WUV81yk3wqppH2AipkLjAqDIRC-291qnR8APsTwhZ1qTtg"
+            },
+            {
+              "title": "CommandCentral Responder – Apps on Google Play",
+              "url": "https://play.google.com/store/apps/details?id=com.commandcentral.responder&hl=en_NZ",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQVi7l5En6zSFxcqpcDex6BLL2OFQr7d5x_HSQaE-N6_7UkonFE"
+            },
+            {
+              "title": "Motorola Updates Boot Services App With April Fools ...",
+              "url": "https://www.androidpolice.com/2014/03/31/motorola-updates-boot-services-app-with-april-fools-animation-powered-by-android-branding/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRjhCMSTxaYjErKDnKFrWSMYUo-rE5QFko7zSljSpY4R3Bi5KL4"
+            },
+            {
+              "title": "Smartphone Motorola Moto G17 4G 256GB 4GB RAM - Schumann",
+              "url": "https://www.schumann.com.br/smartphone-motorola-moto-g17-4g-256gb-4gb-ram8gb-ram-boost-camera-dupla-frontal-32mp-tela-6-7-azul-p1222560",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSoXU6MyKsDKzPXLvwQ9-juJyzs2QKPMV_3N41CZIgOhSe8aaPO"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007520:NVIDIA",
+          "brand": "NVIDIA",
+          "status": "ok",
+          "latency_seconds": 4.385,
+          "source_count": 59,
+          "top1_brand": "NVIDIA",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "NVIDIA",
+            "AMAZON",
+            "NVIDIA",
+            "NVIDIA"
+          ],
+          "results": [
+            {
+              "title": "NVIDIA RTX PRO 6000 GPU Servers | Arc Compute",
+              "url": "https://www.arccompute.io/solutions/gpu-servers/nvidia-rtx-pro-6000",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTOTaZ1LNYQzQvs64eV6s4GADOBgkm2_jS2GHuZ2Tl6s0KIK1Rb"
+            },
+            {
+              "title": "RTX PRO 6000 Blackwell Server Edition,3DSTOR Technology ...",
+              "url": "https://www.3dstor.com/product-item-205.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTUR78yKsP3vEqGuX1OOkuC7MgDc9EPZ5rYHGUr3K1gdB1MQI8Z"
+            },
+            {
+              "title": "Amazon.com: NVIDIA RTX PRO 6000 Blackwell Server Edition",
+              "url": "https://www.amazon.com/clp/B0FXMY871V",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSTMLdeaOIdUCKL5YKRHP17Nolq4zAARHku5UkIN1orbRXvqxYc"
+            },
+            {
+              "title": "NVIDIA RTX PRO 6000 Blackwell 96GB Server Edition @ Cloud Ninjas",
+              "url": "https://cloudninjas.com/products/nvidia-rtx-pro-6000-blackwell-96gb-server-edition-gpu",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQo9ypgkf_Z7_b3raTy21NUB-L2VGZXz3M5wrBtbE3cZqW5RvCI"
+            },
+            {
+              "title": "NVIDIA RTX A6000 Review - StorageReview.com",
+              "url": "https://www.storagereview.com/review/nvidia-rtx-a6000-review",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTHaRCVSqjxWtsq5TstjuQcc-BGwRnZfF0vCENAZoYekVlyd_c0"
+            },
+            {
+              "title": "Nvidia eyes $30 billion custom chip market with new unit ...",
+              "url": "https://www.cnbctv18.com/technology/nvidia-30-billion-dollar-custom-chip-market-new-unit-19020251.htm",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRrAs9_hZIsIi2Amlth8BWovqQP19zNzISoZ07d-Lx0THT4aKS9"
+            },
+            {
+              "title": "Nvidia's networking chief: Deep buffer switches are 'a ...",
+              "url": "https://www.sdxcentral.com/analysis/nvidias-networking-chief-deep-buffer-switches-are-a-disaster-for-ai-networking/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcRTm-FjYx6MnkHmXwkY3eHybhMqHfeyxt2WMscGmC8cL4fszYqN"
+            },
+            {
+              "title": "Scaling the AI-Ready Data Center with NVIDIA RTX PRO ...",
+              "url": "https://developer.nvidia.com/blog/scaling-the-ai-ready-data-center-with-nvidia-rtx-pro-4500-blackwell-server-edition-and-nvidia-vgpu-20/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSGQ3jU2FjMWRhkVIsSwdCyqlVDCqXo_I0FoycdFUYHAPcjpZjx"
+            },
+            {
+              "title": "NVIDIA RTX PRO 6000 Server Edition 96GB Rack GPU | MillionMiner",
+              "url": "https://millionminer.com/product/ai-hardware/nvidia-rtx-pro-6000-server",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcT1xybHbk-CbvSPGZzDUTnCkW7XehucqMXNrHGZjcvYzlPSydH-"
+            },
+            {
+              "title": "NVIDIA RTX PRO 6000 Blackwell Server Edition is live at ...",
+              "url": "https://www.instagram.com/p/Ddiy4pijsg3/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcT0PBR09uERmuFc3oCIcpn9_VfNr0OKEjzjBHwkZR4M6CZZ7Gza"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_008800:OPPO",
+          "brand": "OPPO",
+          "status": "ok",
+          "latency_seconds": 4.709,
+          "source_count": 59,
+          "top1_brand": "OPPO",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "OPPO",
+            "OPPO",
+            "OPPO",
+            "OPPO",
+            "OPPO"
+          ],
+          "results": [
+            {
+              "title": "Oppo F25 Pro 5G Smartphone",
+              "url": "https://www.amazon.in/Oppo-Storage-Additional-Exchange-Offers/dp/B0CVL84QHT",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcR1fiZ9oPbynU3pM4dQIZp-hG_gjxyvsG_Syyv4bVK6X3lMOxnP"
+            },
+            {
+              "title": "Oppo F25 Pro 5G",
+              "url": "https://www.amazon.in/Oppo-Storage-Additional-Exchange-Offers/dp/B0CVLBYDQQ",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcRSE3VK5AFeRSYSR7Thlwv_zc8nfPbdswTqMsjIsJTWWWZLBIBg"
+            },
+            {
+              "title": "OPPO F25 Pro 5G: Specifications, Features & Review",
+              "url": "https://factsminder.com/technology/oppo-f25-pro-5g-features-review/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSWm6Pw343z24g_Hn3tJ_qi85ENSS7wZ2e1FaQ4-L_h6jFjC7NZ"
+            },
+            {
+              "title": "OPPO F25 Pro: 120Hz AMOLED display, MediaTek Dimensity 7050 ...",
+              "url": "https://gagadget.com/en/announce/406925-oppo-f25-pro-120hz-amoled-display-mediatek-dimensity-7050-chip-ip65-protection-and-64-mp-camera-for-290/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcR943MTmm0bAQI3T4khkeMpMzu6sSLw3J1ZNBGDcuvGCzmDwYT0"
+            },
+            {
+              "title": "Oppo F25 Pro smartphone with IP65 rating, MediaTek Dimesnity ...",
+              "url": "https://timesofindia.indiatimes.com/gadgets-news/oppo-f25-pro-smartphone-with-ip65-rating-mediatek-dimesnity-chipset-launched-price-offers-and-more/articleshow/108098845.cms",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQCtsNC-LRTcq13WtLjpi2h4-2QWXp-Yya-dmxZyAB8kMWsOtc8"
+            },
+            {
+              "title": "Get Oppo F25 Pro 5G (Ocean Blue, 8GB-256GB) for Best Price.",
+              "url": "https://www.poorvika.com/oppo-f25-pro-5g-ocean-blue-256gb-8gb-ram/p",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTNWW5OjkjEY6RjKKPqoZhl9wiAwyFe2tHMXP15kCqWnRpzCCat"
+            },
+            {
+              "title": "OPPO F25 Pro 5G Unboxing #shorts #unboxing #youtubeshorts ...",
+              "url": "https://www.youtube.com/shorts/b4NDG_-leyI",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcT5CAmQh4FdbMs8DaZqOzKnFa5dyDGlY7lGEWhLbcjixdbAElM5"
+            },
+            {
+              "title": "Is the OPPO F35 Pro 5G more than just a camera-focused ...",
+              "url": "https://www.facebook.com/91mobiles/posts/is-the-oppo-f35-pro-5g-more-than-just-a-camera-focused-smartphone-with-ai-powere/1558349042990003/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSHwVQk60CWjzLEn3hSRmJM2CCWaJpIrAI2EteUH9Dk_Rld3Noo"
+            },
+            {
+              "title": "OPPO F25 Pro 5G Brown High Poly 3D model | CGTrader",
+              "url": "https://www.cgtrader.com/3d-models/electronics/phone/oppo-f25-pro-5g-brown-high-poly",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTJCha143ohGOGB2mtOLIrgadzNlnHkRhkNqEQkwbmYr8evtfIV"
+            },
+            {
+              "title": "OPPO F25 Pro 5G Specifications, Box Price, and Render Images ...",
+              "url": "https://www.thetechoutlook.com/new-release/gadgets-release/mobile/oppo-f25-pro-5g-specifications-box-price-and-render-images-revealed-a-day-ahead-of-debut/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTrI4nmYqT7PiXRVVKPXEmhpGqSBLjNXFkamlmwfvjiwS-6hmkF"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_009560:REALME",
+          "brand": "REALME",
+          "status": "ok",
+          "latency_seconds": 7.738,
+          "source_count": 59,
+          "top1_brand": "REALME",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "REALME",
+            "REALME",
+            "REALME",
+            "REALME",
+            "REALME"
+          ],
+          "results": [
+            {
+              "title": "Realme P4 Power 5G 6.8\"AMOLED 144Hz GLOBAL VERSION 50MP ...",
+              "url": "https://www.ebay.com/itm/389580858858",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcT0e0ZlUlSy--P9QZc-p8PSA_nQy64kjSoznfOUuUv1xKFiXGDg"
+            },
+            {
+              "title": "realme P4 5G Unboxing ⚡️🤍💥🤩 In the box: Handset • 80 W ...",
+              "url": "https://www.instagram.com/p/DNuXzPOUhdv/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcT1M_Zn5hDZCxqQiJ_otRnzDu5okKgNigdIZ9wYhJWGtf-DshLS"
+            },
+            {
+              "title": "Смартфон REALME P4 6/128Gb, 6.8\", AMOLED, 120Гц, 7000мAч, 2 ...",
+              "url": "https://www.citilink.ru/product/smartfon-realme-p4-rmx5555-128gb-6gb-zelenyi-3g-4g-6-8-2344x1080-and15-2194006/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSqWePNdG5EBSoptmUQlg3wnXdN0ggFxbSdCQfD30g21uYv3P6H"
+            },
+            {
+              "title": "realme P4 Power 5G (Blue 256GB 12GB Ram) Global Version.“NO ...",
+              "url": "https://www.ebay.com/itm/236663833683",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTzhoBQpmQPvTMdSILxBi0Ejjzje4AjGWWbd7NBb8Divr2LOc81"
+            },
+            {
+              "title": "Realme P4 Pro Exclusive Box Unboxing",
+              "url": "https://www.youtube.com/shorts/yfqA3YT-sJc",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcSUCAf5Y9DdKvb4VKYsGSk8ESAi8b-2jVPlon4Y41nsGep301oR"
+            },
+            {
+              "title": "Flipkart and \"Untraceability\" : r/GadgetsIndia",
+              "url": "https://www.reddit.com/r/GadgetsIndia/comments/1vxr3hp/flipkart_and_untraceability/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSgDC9pMN4l5bpwzSdU2_zhoiq7PWGBpo4OVDY9aEPnj1_38Fp_"
+            },
+            {
+              "title": "Metal Design Realme P4 5G Steel Grey 💀💥🩶",
+              "url": "https://www.facebook.com/factsbanglaoriginal/posts/metal-design-realme-p4-5g-steel-grey-/830384022987134/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQdBmPFo3fyPuW7JkCpysk-jOU6c9-1xAQjlb_V_cHw-xk0V1cE"
+            },
+            {
+              "title": "Reel by electroniq walid (@walidnasy2) · October 4, 2026",
+              "url": "https://www.instagram.com/reel/DeDVIPwI_us/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSQ41YD1BqCqbxvRU2GLZ2JbLmNJlMAaUpcr7BTqW54gIKWg1V1"
+            },
+            {
+              "title": "realme P4 Smartphone (Steel Grey, 256.0, GB, 8.0, GB): Buy ...",
+              "url": "https://www.amazon.eg/-/en/realme-P4-Smartphone-Steel-256-0/dp/B0FMDRJWFJ",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSv8KN7uLIG5cNekIKU3VDfAgCXbDYaJ4Mzw2hEdxHUm7hxaHNv"
+            },
+            {
+              "title": "realme P4 Power 5G (Silver 128GB 8GB Ram) Dimensity 7400 ...",
+              "url": "https://www.ebay.com/itm/188011958934",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcQ0MdjKP06887QU-k3pizS55tw9-SyVXTPblalTs9VPPFs-98j3"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_006280:SAMSUNG",
+          "brand": "SAMSUNG",
+          "status": "ok",
+          "latency_seconds": 2.497,
+          "source_count": 59,
+          "top1_brand": "SAMSUNG",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "SAMSUNG",
+            "SAMSUNG",
+            "SAMSUNG",
+            "SAMSUNG",
+            "SAMSUNG"
+          ],
+          "results": [
+            {
+              "title": "Samsung Galaxy A35 5G + 4G LTE (128GB + 6GB) 6.6\" 120Hz ...",
+              "url": "https://www.walmart.com/ip/Samsung-Galaxy-A35-5G-4G-LTE-128GB-6GB-6-6-120Hz-Display-50MP-Triple-Camera-GSM-Unlocked-International-Version-Dual-SIM-Smartphone-Brand-New-SM-A356E/17435123132",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTTyUl4bqZ9XbQ_ipBjGSL5A0kZb-vMFuRL7cyns9yO6jDZqYs3"
+            },
+            {
+              "title": "Samsung Galaxy A35 5G Awesome Lilac 128GB + 8GB Dual-SIM ...",
+              "url": "https://www.ebay.com/itm/126777054032",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcT5w-3kCP2m6nH-i3qYNExVGPiIUyqeHOWmMAbzxUmrMP8ZOAAC"
+            },
+            {
+              "title": "Amazon.com: Samsung Galaxy A35 5G (128GB, 6GB RAM) - Boost ...",
+              "url": "https://www.amazon.com/clp/B0F4BZLQB8",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcRK_KMP6SwqA55snVAD-Y2Pn8iuBnJre7kYYopV_XD7BGfNoNBg"
+            },
+            {
+              "title": "Samsung Galaxy A35 (128GB + 8GB) | 6.6\" 120Hz Display 5G + ...",
+              "url": "https://www.walmart.com/ip/Samsung-Galaxy-A35-128GB-8GB-6-6-120Hz-Display-5G-4G-LTE-GSM-Unlocked-Smartphone-International-Version/6556261155",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSKxI8JlQWRD-PBtIc0a0v_0ZtToT07ClWslisqBys0cY5nJGUX"
+            },
+            {
+              "title": "Samsung Galaxy A35 '5G' Dual Sim GSM Unlocked Android ...",
+              "url": "https://cowboyusa.com/products/cb-samsung-galaxy-a51",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSVT8gm8zWgljtcrAXAH__8Um3gqrcRIaEA1hArpB8_NPNF92xg"
+            },
+            {
+              "title": "Samsung's New Galaxy A35 5G Phone Starts at $399.99",
+              "url": "https://news.samsung.com/us/samsung-galaxy-a35-5g-now-available-in-the-us-offering-awesome-mobile-experiences-to-everyone/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSXyu34SQA-KDQm7Gr3N5_if4j88zUT1nfqUrFd5dabJ6QG8alZ"
+            },
+            {
+              "title": "👉🏽Samsung Galaxy A35 5g ▫Exynos 1380 (5 nm) ▫8GB RAM ...",
+              "url": "https://www.instagram.com/p/DSHXk6wEfYi/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQMTvpz4gd5HMrE4UwSqH7GRAOPDMnEyK_pPkcuUZcvjYwBxoR4"
+            },
+            {
+              "title": "Samsung Galaxy A35 Review - One Month Later - YouTube",
+              "url": "https://www.youtube.com/watch?v=NowbhQQP1IY",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ8LS803s_BaKBfXH3aV_LNBg4X4OkgiiAdoHEtWpjOlstHlG2m"
+            },
+            {
+              "title": "✨ **Samsung Galaxy A35 5G — Premium Design, Stunning ...",
+              "url": "https://www.facebook.com/61593440108418/videos/-samsung-galaxy-a35-5g-premium-design-stunning-details-unboxing-the-beauty-with-/1084760294547668/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcRd3_wTf5KrbWqeInwT9fjdjksrQsRbuLHxfmGbAVhDBKho9Tm_"
+            },
+            {
+              "title": "Samsung Galaxy A35 5G Awesome Navy 256GB + 8GB Dual ...",
+              "url": "https://www.ebay.com/itm/126387032585",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcT-S1NezuxpK44mK5ZPmu4Mws9XaXzgY17gUh_OYaxbNyFXXcF3"
+            }
+          ]
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_000520:SNAPDRAGON",
+          "brand": "SNAPDRAGON",
+          "status": "ok",
+          "latency_seconds": 3.886,
+          "source_count": 59,
+          "top1_brand": "QUALCOMM",
+          "top1_hit": false,
+          "top5_hit": false,
+          "matched_brands_top5": [
+            "QUALCOMM",
+            "QUALCOMM",
+            "QUALCOMM"
+          ],
+          "results": [
+            {
+              "title": "Qualcomm Snapdragon 7s Gen 2 Processor - Benchmarks and ...",
+              "url": "https://www.notebookcheck.net/Qualcomm-Snapdragon-7s-Gen-2-Processor-Benchmarks-and-Specs.795461.0.html",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTwjbUeQhiJoAiwia228i_ZTAq6gPdkbfvjdx24h0Ny3LDP5RYT"
+            },
+            {
+              "title": "Snapdragon® 7s Gen 2 Mobile Platform | Qualcomm",
+              "url": "https://www.qualcomm.com/smartphones/products/7-series/snapdragon-7s-gen-2-mobile-platform",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQ0Ft5E4-gyJYcX8HUa65CLCEMEgDDtV8EvMytl9dd_HiWcSN3u"
+            },
+            {
+              "title": "Qualcomm launches Snapdragon 7s Gen 2 for cheaper mid-range ...",
+              "url": "https://liliputing.com/qualcomm-launches-snapdragon-7s-gen-2-for-cheaper-mid-range-phones/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcTBkBQY4-M2ZVGFf09NYs2Ekj83qZrPyueQDnBDWSIrDaoWLpdS"
+            },
+            {
+              "title": "SNAPDRAGON® 7s GEN 2 MOBILE PLATFORM",
+              "url": "https://docs.qualcomm.com/doc/87-64361-1/87-64361-1_REV_B_Snapdragon_7s_Gen_2_Mobile_Platform_Product_Brief.pdf",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSgz6ASdWDkSnerDQR4ig2ByrdBeQ3QNhjFc4mGl-jZj699pCMM"
+            },
+            {
+              "title": "Snapdragon 7s Gen 2 is a 4nm chipset for mid-range phones",
+              "url": "https://www.androidheadlines.com/qualcomm-snapdragon-7s-gen-2-official-specs-features",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTmGkxmBD8siB6HBkme-rLk_6BZ_Q5ehir11GTvg4kOmWvncz-d"
+            },
+            {
+              "title": "Qualcomm's new Snapdragon 7s Gen 4 brings Elite Gaming ...",
+              "url": "https://www.androidcentral.com/phones/qualcomm-snapdragon-7s-gen-4-announced",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcTiDLGiJ5pCgpImhCQf7Ya6M0uBVBL_KYImiZGoYVeitymWyN1s"
+            },
+            {
+              "title": "Snapdragon 7s Gen 3 Mobile Platform | Qualcomm",
+              "url": "https://www.qualcomm.com/smartphones/products/7-series/snapdragon-7s-gen-3-mobile-platform",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSVKjBOmm1nPBXM80nVshUptF2elONwfF7C_RqmA8IKNQeieIjZ"
+            },
+            {
+              "title": "Snapdragon 7+ Gen 2 Chip Will Give Budget Phones a Boost",
+              "url": "https://www.howtogeek.com/879844/snapdragon-7-gen-2-chip-will-give-budget-phones-a-boost/",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcSqyH94CfpZHKsuj_QjKB8CaJkVxzxKGx7oC8gms6uy6hEYGUQH"
+            },
+            {
+              "title": "Qualcomm introduces new Snapdragon 7s Gen 2 chip for mid-end ...",
+              "url": "https://www.phonearena.com/news/qualcomm-snapdragon-7s-gen-2-chipset-official_id150738",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQmOUc9XKd8raDMRJT7v4fsnb1s5xcJUmCF6HVq6Zr3f5wUZJ4_"
+            },
+            {
+              "title": "Snapdragon 7s Gen 4 Platform | Snapdragon",
+              "url": "https://www.qualcomm.com/smartphones/products/7-series/snapdragon-7-gen-4-mobile-platform",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcTwHzKQyXtsSoK9ECNLNpLmf4Ukn2sbJqfKTDYVabLxxPNPQyNi"
+            }
+          ]
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012600:VENGEANCE",
+          "brand": "VENGEANCE",
+          "status": "ok",
+          "latency_seconds": 2.488,
+          "source_count": 59,
+          "top1_brand": "VENGEANCE",
+          "top1_hit": true,
+          "top5_hit": true,
+          "matched_brands_top5": [
+            "VENGEANCE",
+            "VENGEANCE",
+            "VENGEANCE",
+            "VENGEANCE",
+            "VENGEANCE"
+          ],
+          "results": [
+            {
+              "title": "CORSAIR VENGEANCE 32GB (2x16GB) DDR5 6000MHz C36 UDIMM ...",
+              "url": "https://www.bestbuy.com/product/corsair-vengeance-32gb-2x16gb-ddr5-6000mhz-c36-udimm-desktop-memory-black/J39QHTJQZH",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQot-dHkDH2gTkn9W4R-gtamH4Nl111qsWWPqvk6_PQXsLmn_9T"
+            },
+            {
+              "title": "Corsair Vengeance RGB RT 32GB (2x16GB) DDR4 4600MHz C18 ...",
+              "url": "https://www.amazon.com.be/-/en/Corsair-Vengeance-Lighting-Optimized-Compatible/dp/B09C5TVH3V",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSvGkvWD_KP0mEZ-sWHvXVYpOmS5AUoIL1o4dSQ3Wc_0H4VLWth"
+            },
+            {
+              "title": "CORSAIR VENGEANCE 64GB (2x32GB) DDR5 5200MHz C40 UDIMM ...",
+              "url": "https://www.bestbuy.com/product/corsair-vengeance-64gb-2x32gb-ddr5-5200mhz-c40-udimm-desktop-memory-black/J39QHTJGVZ",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcT1dTWKnS-peXAK5WAVrhin--4O4Mr96135Z8ZcQyn1madxGqxT"
+            },
+            {
+              "title": "VENGEANCE® RGB 16GB (1x16GB) DDR5 DRAM 5600MT/s CL40 Memory ...",
+              "url": "https://www.corsair.com/us/en/p/memory/cmh16gx5m1b5600c40/vengeance-rgb-16gb-1x16gb-ddr5-dram-5600mts-cl40-memory-kit-black-cmh16gx5m1b5600c40",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn3.gstatic.com/images?q=tbn:ANd9GcRt0toPpTgv3d979jSqI1FLYIM3jyPZ17DOJDbA9cVQuGKO-xte"
+            },
+            {
+              "title": "VENGEANCE® 32GB (1x32GB) DDR5 DRAM 5600MHz C40 Memory Kit ...",
+              "url": "https://www.corsair.com/us/en/p/memory/cmk32gx5m1b5600c40/vengeance-32gb-1x32gb-ddr5-dram-5600mhz-c40-memory-kit-black-cmk32gx5m1b5600c40",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcRZN743Fgc4gwb2MajpTw4jYPGVmOF8SMzTzliDv75y6tinWkYF"
+            },
+            {
+              "title": "VENGEANCE® RGB 32GB (2x16GB) DDR5 DRAM 5200MHz C40 Memory ...",
+              "url": "https://www.corsair.com/us/en/p/memory/cmh32gx5m2b5200c40w/vengeance-rgb-32gb-2x16gb-ddr5-dram-5200mhz-c40-memory-kit-white-cmh32gx5m2b5200c40w",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQmJhtg8wN9zNHLcGMTHffAChxuZCV9nGUhF_T46lCML7IbxTT2"
+            },
+            {
+              "title": "VENGEANCE® 32GB (1x32GB) DDR5 DRAM 5600MHz C40 Memory Kit ...",
+              "url": "https://www.corsair.com/us/en/p/memory/cmk32gx5m1b5600c40/vengeance-32gb-1x32gb-ddr5-dram-5600mhz-c40-memory-kit-black-cmk32gx5m1b5600c40",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcSRF18_z0F4wYWAUR8hD88xfLCDVxifRnIPtYk3NjYE-xrwLlKj"
+            },
+            {
+              "title": "CORSAIR Vengeance DDR5 64GB (2 x 32GB) Up to 6400MHz Intel ...",
+              "url": "https://us.amazon.com/CORSAIR-Vengeance-6400MHz-CL42-52-52-104-Computer/dp/B0F945WT8N",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQDuGr2O9saVbiTTxuar04KqrCzPacB9vZa8-UUu4q9zaKsSMXE"
+            },
+            {
+              "title": "VENGEANCE® 32GB (2x16GB) DDR5 DRAM 6000MT/S CL30 AMD EXPO ...",
+              "url": "https://www.corsair.com/us/en/p/memory/cmk32gx5m2b6000z30/vengeance-32gb-2x16gb-ddr5-dram-6000mt-s-cl30-amd-expo-memory-black-cmk32gx5m2b6000z30",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn1.gstatic.com/images?q=tbn:ANd9GcQ-XMcUkY8mrpBS3k0vi_EQdvVrRdTcz6q7Yyc_zZjr4GkmaoTV"
+            },
+            {
+              "title": "Corsair Vengeance DDR5 64GB (2x32GB) 5200MHz C40 ...",
+              "url": "https://www.youtube.com/watch?v=fmGzeoMzpRE",
+              "source": "serpapi_google_lens_visual_match",
+              "thumbnail_url": "https://encrypted-tbn2.gstatic.com/images?q=tbn:ANd9GcQqyuLF8JNWcH0eib1iB1rXpHCiracsdnS5GsCzZcv-IQSIp_7p"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
