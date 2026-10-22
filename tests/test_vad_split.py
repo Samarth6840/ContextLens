@@ -8,6 +8,8 @@ hallucination measure (fresh decoder state per segment) silently never fired.
 
 import numpy as np
 import pytest
+import sys
+from types import SimpleNamespace
 
 from src.layer1.audio import SpeechToText
 
@@ -57,3 +59,23 @@ def test_short_or_empty_audio_does_not_raise(n):
     audio = np.zeros(n, dtype=np.float32) if n == 0 else _tone(n / SR, rng)
 
     assert all(s < e for s, e in SpeechToText._vad_split(audio, SR))
+
+
+def test_cpu_backend_never_initializes_mlx(monkeypatch):
+    mlx_calls = []
+    monkeypatch.setitem(
+        sys.modules,
+        "mlx_whisper",
+        SimpleNamespace(transcribe=lambda *args, **kwargs: mlx_calls.append(kwargs)),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "whisper",
+        SimpleNamespace(load_model=lambda *args, **kwargs: object()),
+    )
+    monkeypatch.setattr(SpeechToText, "_is_fw_cached", staticmethod(lambda _repo: False))
+
+    stt = SpeechToText(model_name="tiny", device="cpu")
+
+    assert stt._backend == "openai"
+    assert mlx_calls == []

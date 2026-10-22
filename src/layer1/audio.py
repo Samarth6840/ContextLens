@@ -76,7 +76,11 @@ class SpeechToText:
         self._backend = None  # "mlx", "faster", or "openai"
 
         # Prefer mlx-whisper on Apple Silicon (uses GPU/Neural Engine via Metal)
-        if device == "mps" or device == "cpu":
+        # MLX is Apple Metal-only. Attempting to initialize it on CPU-only
+        # hosts can abort the interpreter in native code (it is not always a
+        # catchable Python exception), so only select it when the pipeline
+        # explicitly probed an available MPS device.
+        if device == "mps":
             try:
                 import mlx_whisper
                 # mlx-whisper uses its own model path resolution
@@ -89,7 +93,10 @@ class SpeechToText:
                 _ = mlx_whisper.transcribe(
                     np.zeros(16000, dtype=np.float32),  # 1 second of silence
                     path_or_hf_repo=mlx_model,
-                    verbose=False,
+                    # MLX Whisper interprets verbose=False as "show language
+                    # and progress"; None suppresses both while keeping the
+                    # warmup free of terminal output from a background thread.
+                    verbose=None,
                 )
                 self.model_path = mlx_model
                 self._backend = "mlx"
@@ -298,7 +305,7 @@ class SpeechToText:
                         audio[seg_start:seg_end],
                         path_or_hf_repo=self.model_path,
                         language=self.language,
-                        verbose=False,
+                        verbose=None,
                     )
                     seg_text = (result.get("text") or "").strip()
                 except Exception as e:

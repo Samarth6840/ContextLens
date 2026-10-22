@@ -799,7 +799,11 @@ class Phase1Pipeline:
             # parallel (PaddleOCR #11559/#16199: "Tensor holds no memory" in
             # torchvision NMS). It initializes lazily in the job's sequential
             # OCR pass instead.
-            ("_stt", self._stt_factory),
+            # MLX Whisper shares the Apple Metal runtime with PyTorch/MPS. Do
+            # not warm it on a background thread: concurrent MLX and Torch
+            # initialization/inference can terminate the process in native
+            # code rather than raising a catchable Python exception. STT is
+            # initialized and run after the visual/audio model pool drains.
             ("_audio_events", self._audio_events_factory),
             ("_product_index", self._product_index_factory),
             ("_logo_retrieval", self._logo_retrieval_factory),
@@ -1615,18 +1619,6 @@ class Phase1Pipeline:
                 wall_times=_model_wall_times,
             )] = "embeddings"
 
-            if audio is not None and len(audio) > 0:
-                # Prefer the timestamped transcription (real per-segment times
-                # for clip links); fall back to the plain-text path for STT
-                # backends that only expose transcribe_segment.
-                _transcribe = getattr(self.stt, "transcribe_segments", None)
-                if _transcribe is None:
-                    _transcribe = self.stt.transcribe_segment
-                futures[self._locked_submit(
-                    executor, "stt", _transcribe, audio,
-                    wall_times=_model_wall_times,
-                )] = "stt"
-
             if audio is not None and self.audio_events:
                 _t_beats = time.monotonic()
                 # Per-chunk callback: uncapped audio (`max_audio_seconds: null`)
@@ -1680,9 +1672,6 @@ class Phase1Pipeline:
                         all_detections = [[] for _ in frames]
                     elif modality == "embeddings":
                         embed_raw = None
-                    elif modality == "stt":
-                        transcript = ""
-                        _stt_segments = []
                     elif modality == "audio_events":
                         audio_events_list = []
                     continue
@@ -1706,27 +1695,6 @@ class Phase1Pipeline:
                             open_vocab_by_index[idx] = dets
                 elif modality == "embeddings":
                     embed_raw = result
-                elif modality == "stt":
-                    if isinstance(result, list):
-                        _stt_segments = [
-                            s for s in result if (s.get("text") or "").strip()
-                        ]
-                        transcript = " ".join(
-                            s["text"].strip() for s in _stt_segments
-                        )
-                    else:
-                        transcript = result or ""
-                        if transcript:
-                            _duration = (
-                                len(audio) / 16000.0
-                                if audio is not None and len(audio) > 0
-                                else 0.0
-                            )
-                            _stt_segments = [{
-                                "text": transcript,
-                                "start": 0.0,
-                                "end": _duration,
-                            }]
                 elif modality == "audio_events":
                     timings["audio_events"] = time.monotonic() - _t_beats
                     audio_events_list = result
@@ -1851,6 +1819,37 @@ class Phase1Pipeline:
         # Null-guard Qwen results for downstream reads.
         if _qwen_results is None:
             _qwen_results = []
+
+        # Run Whisper after the executor drains. On Apple Silicon, MLX and
+        # PyTorch/MPS both use Metal; running MLX transcription in a worker
+        # alongside Torch inference has caused native process crashes that
+        # Python cannot catch (including leaked loky semaphore warnings).
+        # Treat transcription as an optional modality so an ASR failure never
+        # takes down otherwise valid video analysis.
+        if audio is not None and len(audio) > 0:
+            try:
+                _transcribe = getattr(self.stt, "transcribe_segments", None)
+                if _transcribe is None:
+                    _transcribe = self.stt.transcribe_segment
+                result = _transcribe(audio)
+                if isinstance(result, list):
+                    _stt_segments = [
+                        s for s in result if (s.get("text") or "").strip()
+                    ]
+                    transcript = " ".join(
+                        s["text"].strip() for s in _stt_segments
+                    )
+                else:
+                    transcript = result or ""
+                    if transcript:
+                        _stt_segments = [{
+                            "text": transcript,
+                            "start": 0.0,
+                            "end": len(audio) / 16000.0,
+                        }]
+            except Exception as exc:  # noqa: BLE001 — ASR is best-effort
+                logger.exception("Layer 1 modality 'stt' failed: %s", exc)
+                modality_failed.append("stt")
 
         # Guard against catastrophic failures
         if all_logo_detections is None:
