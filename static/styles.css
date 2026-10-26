@@ -1555,6 +1555,22 @@ select.input {
 
 /* Spoken mentions */
 .ads-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
+.audio-view { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+.transcript-card, .audio-events-card {
+  padding: var(--space-4);
+  background: var(--sheet);
+  border: 1px solid var(--rule-2);
+}
+.transcript-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.transcript-copy { margin: var(--space-3) 0 0; white-space: pre-wrap; line-height: 1.7; }
+.transcript-copy.is-empty { color: var(--ink-2); }
+.transcript-full { margin-top: var(--space-2); }
+.transcript-full summary { width: fit-content; color: var(--verified); cursor: pointer; font-size: var(--t-sm); text-underline-offset: 3px; }
+.transcript-full[open] summary { margin-bottom: var(--space-2); }
+.transcript-meta { margin: var(--space-2) 0 0; color: var(--ink-3); font-family: var(--font-mono); font-size: var(--t-xs); }
+.audio-events-card .card-title { margin-bottom: var(--space-3); }
+.audio-unavailable strong { display: block; }
+.audio-unavailable p { max-width: 46ch; margin: var(--space-2) 0 0; color: var(--ink-2); line-height: 1.6; }
 .ads-player {
   padding: var(--space-3);
   background: var(--paper-deep);

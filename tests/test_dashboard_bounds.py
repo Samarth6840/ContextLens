@@ -113,6 +113,27 @@ def test_archived_pipeline_and_scene_preview_survive_server_restart(monkeypatch)
     assert seeks == [("archived-video.mp4", 50, 1)]
 
 
+def test_archived_audio_player_recovers_uploaded_video_after_restart(tmp_path, monkeypatch):
+    import server
+    from types import SimpleNamespace
+
+    job_id = "ARCHIVED-AUDIO-TEST"
+    source = tmp_path / f"{job_id}_clip.mp4"
+    source.write_bytes(b"fake mp4 bytes")
+    job = {"job_id": job_id, "status": "done", "result": {}}
+    monkeypatch.setattr(server, "AUTH_ENABLED", False)
+    monkeypatch.setattr(server, "_job", lambda _job_id: None)
+    monkeypatch.setattr(server, "JOB_STORE", SimpleNamespace(load=lambda _job_id: job))
+    monkeypatch.setattr(server, "UPLOAD_DIR", tmp_path)
+
+    response = server.app.test_client().get(
+        f"/api/video/{job_id}", headers={"Range": "bytes=0-3"},
+    )
+
+    assert response.status_code == 206
+    assert response.data == b"fake"
+
+
 def _dashboard(num_frames, scenes, products=None, ads=None, open_set=None):
     return {
         "num_frames": num_frames,

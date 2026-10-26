@@ -65,6 +65,60 @@ def probe_hardware() -> dict:
     return info
 
 
+def _run_speech_to_text(stt_factory: Callable, audio: Optional[np.ndarray]):
+    """Transcribe audio and retain a concise status for logs and the UI."""
+    if audio is None or len(audio) == 0:
+        return "", [], {
+            "status": "no_audio",
+            "backend": None,
+            "message": "No audio track was available to transcribe.",
+            "elapsed_seconds": 0.0,
+        }
+
+    started = time.monotonic()
+    backend = None
+    try:
+        stt = stt_factory()
+        backend = getattr(stt, "_backend", None)
+        transcribe = getattr(stt, "transcribe_segments", None)
+        if transcribe is None:
+            transcribe = stt.transcribe_segment
+        result = transcribe(audio)
+        if isinstance(result, list):
+            segments = [
+                dict(segment) for segment in result
+                if isinstance(segment, dict) and str(segment.get("text") or "").strip()
+            ]
+            transcript = " ".join(segment["text"].strip() for segment in segments)
+        else:
+            transcript = str(result or "").strip()
+            duration = len(audio) / 16000.0
+            segments = ([{"text": transcript, "start": 0.0, "end": duration}]
+                        if transcript else [])
+
+        elapsed = time.monotonic() - started
+        status = "transcribed" if transcript else "no_speech_recognized"
+        message = (
+            "Speech was transcribed."
+            if transcript else "The speech model returned no words for this audio."
+        )
+        return transcript, segments, {
+            "status": status,
+            "backend": backend,
+            "message": message,
+            "elapsed_seconds": round(elapsed, 3),
+        }
+    except Exception as exc:  # noqa: BLE001 — ASR is optional for video analysis
+        logger.exception("Layer 1 modality 'stt' failed: %s", exc)
+        elapsed = time.monotonic() - started
+        return "", [], {
+            "status": "failed",
+            "backend": backend,
+            "message": str(exc).strip()[:240] or "Speech transcription failed.",
+            "elapsed_seconds": round(elapsed, 3),
+        }
+
+
 def _profile_categories(timeline: Dict[str, dict]) -> Dict[str, int]:
     """Derive a {category: count} map from a brand timeline for creator profiling.
 
@@ -1564,6 +1618,12 @@ class Phase1Pipeline:
         all_ocr_results = None
         transcript = ""
         _stt_segments: List[dict] = []
+        speech_to_text_status = {
+            "status": "no_audio",
+            "backend": None,
+            "message": "No audio track was available to transcribe.",
+            "elapsed_seconds": 0.0,
+        }
         brand_mentions = []
         product_resolutions: List[dict] = []
         audio_events_list = []
@@ -1841,30 +1901,20 @@ class Phase1Pipeline:
         # Python cannot catch (including leaked loky semaphore warnings).
         # Treat transcription as an optional modality so an ASR failure never
         # takes down otherwise valid video analysis.
+        transcript, _stt_segments, speech_to_text_status = _run_speech_to_text(
+            lambda: self.stt, audio,
+        )
         if audio is not None and len(audio) > 0:
-            try:
-                _transcribe = getattr(self.stt, "transcribe_segments", None)
-                if _transcribe is None:
-                    _transcribe = self.stt.transcribe_segment
-                result = _transcribe(audio)
-                if isinstance(result, list):
-                    _stt_segments = [
-                        s for s in result if (s.get("text") or "").strip()
-                    ]
-                    transcript = " ".join(
-                        s["text"].strip() for s in _stt_segments
-                    )
-                else:
-                    transcript = result or ""
-                    if transcript:
-                        _stt_segments = [{
-                            "text": transcript,
-                            "start": 0.0,
-                            "end": len(audio) / 16000.0,
-                        }]
-            except Exception as exc:  # noqa: BLE001 — ASR is best-effort
-                logger.exception("Layer 1 modality 'stt' failed: %s", exc)
+            timings["speech_to_text"] = speech_to_text_status["elapsed_seconds"]
+            if speech_to_text_status["status"] == "failed":
                 modality_failed.append("stt")
+            if progress:
+                if speech_to_text_status["status"] == "transcribed":
+                    progress(f"Speech-to-text — transcribed {len(transcript)} characters")
+                elif speech_to_text_status["status"] == "failed":
+                    progress("Speech-to-text — unavailable; see audio details")
+                else:
+                    progress("Speech-to-text — no words recognized")
 
         # Guard against catastrophic failures
         if all_logo_detections is None:
@@ -2435,6 +2485,7 @@ class Phase1Pipeline:
                 "num_embeddings": embeddings.shape[0],
                 "ocr_results": all_ocr_results,
                 "transcript": transcript,
+                "speech_to_text": speech_to_text_status,
                 "brand_mentions": brand_mentions,
                 "product_resolutions": product_resolutions,
                 "audio_events": audio_events,

@@ -1385,8 +1385,55 @@ function recommendPanel(d) {
 }
 
 function adsPanel(d) {
+  const speech = d.speech_to_text || { status: 'unknown' };
+  const speechStatus = speech.status === 'unknown' && d.transcript
+    ? 'transcript_saved'
+    : speech.status;
+  const speechDetected = (d.audio_events || []).some((ev) =>
+    String(ev.event || '').toLowerCase() === 'speech');
+  const stateLabels = {
+    transcribed: 'Transcript ready',
+    transcript_saved: 'Transcript saved',
+    no_speech_recognized: 'No words recognized',
+    failed: 'Transcription failed',
+    no_audio: 'No audio track',
+    unknown: 'Status not recorded',
+  };
+  const hasTranscript = Boolean(d.transcript);
+  const fullTranscript = hasTranscript ? escapeHtml(d.transcript) : '';
+  const transcriptMessage = hasTranscript
+    ? (d.transcript.length > 720
+      ? `<p class="transcript-copy">${escapeHtml(d.transcript.slice(0, 680).trim())}…</p><details class="transcript-full"><summary>Read full transcript</summary><p class="transcript-copy">${fullTranscript}</p></details>`
+      : fullTranscript)
+    : (speech.status === 'failed'
+      ? `Transcription could not run: ${escapeHtml(speech.message || 'Speech model unavailable.')}`
+      : (speech.status === 'no_speech_recognized' && speechDetected
+        ? 'The audio classifier detected speech, but speech recognition returned no transcript.'
+        : (speech.status === 'no_audio'
+          ? 'No audio track was found in this video.'
+          : (speech.status === 'unknown'
+            ? 'This analysis did not save a transcript or transcription status.'
+            : 'No transcript was produced for this audio.'))));
+  const transcriptBlock = `
+    <section class="transcript-card" aria-labelledby="transcript-title">
+      <div class="transcript-head">
+        <h3 class="card-title" id="transcript-title">Transcript</h3>
+        <span class="chip ${speechStatus === 'failed' ? 'chip--unknown' : 'chip-ghost'}">${escapeHtml(stateLabels[speechStatus] || stateLabels.unknown)}</span>
+      </div>
+      ${hasTranscript ? transcriptMessage : `<p class="transcript-copy is-empty">${transcriptMessage}</p>`}
+      <p class="transcript-meta">${speech.backend ? `Model: ${escapeHtml(speech.backend)}` : ''}${speech.elapsed_seconds != null ? ` · ${Number(speech.elapsed_seconds).toFixed(1)}s` : ''}</p>
+    </section>`;
+  const audioEvents = (d.audio_events || []).length
+    ? `<section class="audio-events-card"><h3 class="card-title">Sound events</h3><div class="scene-chips">${d.audio_events.slice(0, 12).map((ev) => metaChip(
+      `${ev.event}${ev.start_time != null ? ' @ ' + fmtTime(ev.start_time) : ''}`,
+      pct(ev.confidence),
+      ev.mode === 'fallback' ? (ev.fallback_reason || 'AUDIO ENERGY HEURISTIC') : 'BEATs CLASS CONFIDENCE',
+      ev.mode === 'fallback' ? 'chip--audio-fallback' : 'chip--audio-real',
+    )).join('')}${d.audio_events.length > 12 ? chip('+' + (d.audio_events.length - 12), 'chip-ghost') : ''}</div></section>`
+    : '<section class="audio-events-card"><h3 class="card-title">Sound events</h3><p class="card-sub">No sound events were returned.</p></section>';
+
   if (!d.ads || !d.ads.length) {
-    return `<div class="empty">No spoken brand mentions were found in the audio.</div>`;
+    return `<div class="audio-view">${transcriptBlock}${audioEvents}<div class="empty">No spoken brand mentions were found in the audio.</div></div>`;
   }
   const rows = d.ads.map((a) => `
     <div class="ads-row">
@@ -1396,18 +1443,19 @@ function adsPanel(d) {
       </div>
       <p class="ads-where">${a.start_time != null ? `Mentioned at ${fmtTime(a.start_time)}` : 'No timestamp for this mention'}</p>
       <div class="ads-row-actions">
-        ${a.start_time != null ? `<button type="button" class="btn btn-sm ads-play" data-ts="${Number(a.start_time).toFixed(2)}">&blacktriangleright; Play @ ${fmtTime(a.start_time)}</button>` : ''}
+        ${a.start_time != null && d.video_available ? `<button type="button" class="btn btn-sm ads-play" data-ts="${Number(a.start_time).toFixed(2)}">&blacktriangleright; Play @ ${fmtTime(a.start_time)}</button>` : ''}
         ${a.start_time != null ? `<a class="ads-scene-link" href="#/pipeline/${encodeURIComponent(d.job_id)}?tab=scenes&clip=${Number(a.start_time).toFixed(2)}">See it in the scene &rarr;</a>` : ''}
       </div>
     </div>`).join('');
 
   return `
-    <p class="card-sub" style="max-width:66ch;margin-bottom:var(--space-4)">${d.ads.length} brand${d.ads.length === 1 ? '' : 's'} named out loud in the audio. Play the moment, or open the scene it landed in.</p>
+    <div class="audio-view">${transcriptBlock}${audioEvents}</div>
+    <p class="card-sub" style="max-width:66ch;margin:var(--space-4) 0">${d.ads.length} spoken brand mention${d.ads.length === 1 ? '' : 's'} found.${d.video_available ? ' Play a moment or open its scene.' : ' Playback is unavailable for this saved analysis; its scene links still work.'}</p>
     <div class="ads-grid">
-      <div class="ads-player">
+      ${d.video_available ? `<div class="ads-player">
         <video id="ads-player" class="clip-player" controls preload="metadata" src="/api/video/${encodeURIComponent(d.job_id)}"></video>
         <span class="ads-player-hint" id="ads-hint">Pick a mention to play the moment it was said.</span>
-      </div>
+      </div>` : `<div class="ads-player audio-unavailable"><strong>Source video unavailable</strong><p>This saved analysis has no playable source file. You can still read the transcript and open the matching scenes.</p></div>`}
       <div class="ads-list">${rows}</div>
     </div>`;
 }

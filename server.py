@@ -355,6 +355,26 @@ def _job(job_id: str) -> dict:
         return JOBS.get(job_id)
 
 
+def _source_video_path(job: dict) -> str:
+    """Find a completed job's uploaded video, including after server restart."""
+    video_path = job.get("video_path") or ""
+    if video_path and os.path.isfile(video_path):
+        return video_path
+
+    job_id = str(job.get("job_id") or "")
+    if not job_id or not job_id.replace("-", "").isalnum():
+        return ""
+    prefix = f"{job_id}_"
+    try:
+        return next(
+            (str(path) for path in UPLOAD_DIR.iterdir()
+             if path.is_file() and path.name.startswith(prefix)),
+            "",
+        )
+    except OSError:
+        return ""
+
+
 def _scene_number_map(scene_indexes):
     """Map ordinal position → SCENE 001-style numbering."""
     return {idx: n + 1 for n, idx in enumerate(sorted(scene_indexes))}
@@ -976,6 +996,11 @@ def _build_dashboard(result: dict, job: dict) -> dict:
         "outreach_enabled": OUTREACH_ENABLED,
         "outreach_reason": OUTREACH_REASON,
         "transcript": l1.get("transcript", ""),
+        "speech_to_text": l1.get("speech_to_text") or {
+            "status": "unknown",
+            "backend": None,
+            "message": "Transcription status was not saved for this analysis.",
+        },
         "audio_events": l1.get("audio_events", [])[:20],
         "unknown_brand_regions": (result.get("layer2c") or {}).get("unknown_brand_regions", []),
         # Canary metric for the brand-attribution re-enable: fraction of logo
@@ -1406,6 +1431,10 @@ def pipeline_dashboard(job_id: str):
     if job.get("status") != "done" or job.get("dashboard") is None:
         return jsonify({"error": "JOB NOT COMPLETE", "status": job.get("status")}), 409
     dash = dict(job["dashboard"])
+    # Archived job snapshots intentionally omit the source path. Expose that
+    # playback state explicitly so the audio panel can explain why seeking is
+    # unavailable instead of leaving the browser's broken media controls.
+    dash["video_available"] = bool(_source_video_path(job))
     # Older archived jobs predate persisted stage timings. Their creation and
     # completion timestamps still give an honest end-to-end wall-clock value.
     if dash.get("processing_seconds") is None:
@@ -1607,11 +1636,13 @@ def source_video(job_id: str):
     """
     job = _job(job_id)
     if job is None:
+        job = JOB_STORE.load(job_id)
+    if job is None:
         return jsonify({"error": "JOB NOT FOUND"}), 404
     if job.get("status") != "done" or job.get("result") is None:
         return jsonify({"error": "JOB NOT COMPLETE"}), 409
-    video_path = job.get("video_path") or ""
-    if not video_path or not os.path.isfile(video_path):
+    video_path = _source_video_path(job)
+    if not video_path:
         return jsonify({"error": "SOURCE VIDEO NOT FOUND"}), 404
     return send_file(video_path, conditional=True)
 
