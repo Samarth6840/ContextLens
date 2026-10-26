@@ -1,0 +1,142 @@
+{
+  "benchmark": "logo_product_eval_pilot",
+  "live": true,
+  "manifest": "benchmark/logo_product_eval/serpapi_google_lens_pilot.jsonl",
+  "sample_count": 14,
+  "image_policy": "gold hero crops only; full video frames are not sent",
+  "providers": [
+    {
+      "provider": "google_vision_web",
+      "status": "partial",
+      "samples": 14,
+      "attempted": 14,
+      "requests": 14,
+      "completed": 0,
+      "top1_accuracy": 0.0,
+      "top5_accuracy": 0.0,
+      "conditional_top1_accuracy": 0.0,
+      "conditional_top5_accuracy": 0.0,
+      "source_return_rate": 0.0,
+      "conditional_source_return_rate": 0.0,
+      "success_rate": 0.0,
+      "not_run": 0,
+      "mean_latency_seconds": 0.096,
+      "errors": [
+        "403 Client Error: Forbidden for url: https://vision.googleapis.com/v1/images:annotate?key=[REDACTED]",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY",
+        "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+      ],
+      "per_sample": [
+        {
+          "sample_id": "df01d5a843:df01d5a843_003320:APPLE",
+          "brand": "APPLE",
+          "status": "error",
+          "latency_seconds": 1.347,
+          "error": "403 Client Error: Forbidden for url: https://vision.googleapis.com/v1/images:annotate?key=[REDACTED]"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007960:BROADCOM",
+          "brand": "BROADCOM",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_005280:CMF",
+          "brand": "CMF",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012400:GOOGLE",
+          "brand": "GOOGLE",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_008400:HONDA",
+          "brand": "HONDA",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_010160:MI",
+          "brand": "MI",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007080:MICROSOFT",
+          "brand": "MICROSOFT",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_016080:MOTOROLA",
+          "brand": "MOTOROLA",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_007520:NVIDIA",
+          "brand": "NVIDIA",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_008800:OPPO",
+          "brand": "OPPO",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_009560:REALME",
+          "brand": "REALME",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_006280:SAMSUNG",
+          "brand": "SAMSUNG",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "88b0502222:88b0502222_000520:SNAPDRAGON",
+          "brand": "SNAPDRAGON",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        },
+        {
+          "sample_id": "df01d5a843:df01d5a843_012600:VENGEANCE",
+          "brand": "VENGEANCE",
+          "status": "error",
+          "latency_seconds": 0.0,
+          "error": "Google Cloud Vision: no GOOGLE_CLOUD_VISION_API_KEY"
+        }
+      ]
+    }
+  ]
+}
