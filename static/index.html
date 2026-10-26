@@ -4,21 +4,24 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Contextlens — Video brand intelligence</title>
+  <meta name="description" content="Contextlens reads the audio, sampled video frames and on-screen text, then shows which brands appeared and what evidence stands behind each one.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/styles.css?v=16">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,75..125,100..900;1,75..125,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css?v=20">
 </head>
 <body>
 
 <div class="app">
 
-  <!-- ── Masthead (replaces sidebar) ─────────────────────────── -->
+  <!-- ── Masthead ────────────────────────────────────────────── -->
   <header class="masthead">
     <a class="masthead-logo" href="#/">
-      Contextlens <span class="logo-dot">/</span>
+      <span class="logo-mark" aria-hidden="true"></span>
+      Contextlens
     </a>
-    <nav class="nav">
+    <p class="masthead-note">Video brand intelligence</p>
+    <nav class="nav" aria-label="Main">
       <a class="nav-item" id="nav-home" href="#/">
         <span>Home</span>
       </a>
@@ -31,7 +34,7 @@
       <a class="nav-item" id="nav-insights" href="#/insights">
         <span>Insights</span>
       </a>
-      <a class="nav-item" id="nav-auth" href="#/login">
+      <a class="nav-item nav-item--auth" id="nav-auth" href="#/login">
         <span>Log in</span>
       </a>
     </nav>
@@ -43,59 +46,176 @@
     <!-- Landing -->
     <section id="view-landing" class="view view-landing">
       <div class="landing-inner">
-        <div class="landing-grid">
-          <div>
-            <h1 class="landing-title">Every brand in your video, with the timestamp that proves it.</h1>
-            <p class="landing-sub">
-              Contextlens reads the audio, every frame and the on-screen text, then shows
-              you which brands appeared and what evidence stands behind each one.
-            </p>
-            <div class="landing-actions">
-              <a class="btn-primary" href="#/analyse">Analyse a video</a>
-              <a class="btn-secondary" href="#/pipeline">Open a project</a>
-            </div>
-          </div>
 
-          <div class="reel">
-            <div class="reel-plate">
-              <div class="reel-slate">
-                <span class="reel-tc">00:00:42:11</span>
-                <span>Frame 01043</span>
-              </div>
-              <div class="reel-frame">
-                <div class="reel-box">
-                  <span class="reel-box-label">Logo <span>87%</span></span>
-                </div>
-              </div>
-              <div class="reel-foot">
-                <span>1280&times;720</span>
-                <span>30.0 fps</span>
+        <div class="landing-hero">
+          <h1 class="landing-title">Find brands in your video,<br>with the evidence to<br>check every match.</h1>
+
+          <div class="landing-hero-row">
+            <div class="landing-copy">
+              <p class="landing-sub">
+                Contextlens reads the audio, sampled video frames and on-screen text, then shows
+                you which brands appeared and what evidence stands behind each one.
+              </p>
+              <div class="landing-actions">
+                <a class="btn-primary" href="#/analyse">Analyse a video</a>
+                <a class="btn-secondary" href="#/pipeline">Open projects</a>
               </div>
             </div>
-            <div class="reel-ruler">
-              <div class="reel-track"><span class="reel-playhead"></span></div>
-              <div class="reel-ticks">
-                <span>00:00</span><span>00:10</span><span>00:20</span>
-                <span>00:30</span><span>00:40</span><span>00:50</span>
+
+            <aside class="tape" aria-label="Example of one evidence strip">
+              <div class="tape-perf" aria-hidden="true"></div>
+              <div class="tape-bar">
+                <span>Example read / 01</span>
+                <span class="tape-tc">00:03:42:11</span>
               </div>
-            </div>
+              <div class="tape-stage" role="img" aria-label="A video frame with a detected logo marked at 87 percent">
+                <div class="tape-box"><span>Logo <b>87%</b></span></div>
+                <span class="tape-frame-label">Frame 01043</span>
+              </div>
+              <div class="tape-ruler" aria-hidden="true">
+                <span class="tape-event" style="--x:18%"></span>
+                <span class="tape-event" style="--x:31%"></span>
+                <span class="tape-event" style="--x:64%"></span>
+                <span class="tape-playhead" style="--x:64%"></span>
+              </div>
+              <div class="tape-ticks" aria-hidden="true">
+                <span>00:00</span><span>01:00</span><span>02:00</span><span>03:00</span><span>04:00</span>
+              </div>
+              <div class="tape-events">
+                <span class="tape-legend"><i class="k-logo"></i>Logo 87%</span>
+                <span class="tape-legend"><i class="k-text"></i>Text 92%</span>
+                <span class="tape-legend"><i class="k-audio"></i>Audio 78%</span>
+              </div>
+              <div class="tape-perf" aria-hidden="true"></div>
+            </aside>
           </div>
         </div>
 
         <div class="landing-signals">
           <div class="landing-signal">
             <span class="landing-signal-name">Audio</span>
-            <span class="landing-signal-note">Speech transcripts and sound-event detection</span>
+            <span class="landing-signal-note">Speech transcripts and sound events, so a spoken mention counts.</span>
           </div>
           <div class="landing-signal">
-            <span class="landing-signal-name">Visuals</span>
-            <span class="landing-signal-note">Scene, object and logo detection on every frame</span>
+            <span class="landing-signal-name">Frames</span>
+            <span class="landing-signal-note">Scene, object and logo detection on sampled frames.</span>
           </div>
           <div class="landing-signal">
             <span class="landing-signal-name">Text</span>
-            <span class="landing-signal-note">Wordmarks and product text read from the frame</span>
+            <span class="landing-signal-note">Wordmarks and product text read straight off the picture.</span>
+          </div>
+          <div class="landing-signal">
+            <span class="landing-signal-name">Time</span>
+            <span class="landing-signal-note">Every claim lands on a timecode you can scrub to and check.</span>
           </div>
         </div>
+
+        <section class="landing-section">
+          <div class="landing-section-head">
+            <span class="section-label">How it reads</span>
+            <h2 class="section-title">Three passes, then one answer you can check.</h2>
+          </div>
+          <div class="how-grid">
+            <article class="how-step">
+              <span class="how-no">01</span>
+              <h3 class="how-title">Watch</h3>
+              <p class="how-note">
+                Sampled frames are checked for logos, objects and on-screen text. Each hit keeps
+                its box, its confidence and its frame number.
+              </p>
+            </article>
+            <article class="how-step">
+              <span class="how-no">02</span>
+              <h3 class="how-title">Listen</h3>
+              <p class="how-note">
+                Speech is transcribed and sound events are classified, so a brand named
+                out loud is captured even when it never appears on screen.
+              </p>
+            </article>
+            <article class="how-step">
+              <span class="how-no">03</span>
+              <h3 class="how-title">Cross-check</h3>
+              <p class="how-note">
+                The signals are fused into one reading. When they disagree, the interface
+                says so instead of averaging the doubt away.
+              </p>
+            </article>
+          </div>
+        </section>
+
+        <section class="landing-section landing-section--evidence">
+          <div class="landing-section-head">
+            <span class="section-label">What you get</span>
+            <h2 class="section-title">A reading with receipts.</h2>
+            <p class="section-copy">
+              No opaque percentage and no clean-looking guess. Each brand carries the
+              signal that found it, the time it was seen and how strong that signal was.
+            </p>
+          </div>
+
+          <div class="evidence-sheet">
+            <div class="evidence-sheet-head">
+              <span>Example read</span>
+              <span>03:42 — 04:18</span>
+              <span>3 signals</span>
+            </div>
+            <div class="evidence-scroll">
+              <table class="evidence-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Timecode</th>
+                    <th scope="col">Signal</th>
+                    <th scope="col">Reading</th>
+                    <th scope="col">Strength</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="evidence-tc">00:00:12</td>
+                    <td><span class="signal-tag signal-tag--logo">Logo</span></td>
+                    <td>Wordmark on the bottle, centre frame</td>
+                    <td class="evidence-score">87%</td>
+                  </tr>
+                  <tr>
+                    <td class="evidence-tc">00:00:19</td>
+                    <td><span class="signal-tag signal-tag--text">Text</span></td>
+                    <td>On-screen title card, lower third</td>
+                    <td class="evidence-score">92%</td>
+                  </tr>
+                  <tr>
+                    <td class="evidence-tc">00:01:03</td>
+                    <td><span class="signal-tag signal-tag--audio">Audio</span></td>
+                    <td>Brand name spoken in the voice-over</td>
+                    <td class="evidence-score">78%</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="evidence-sheet-foot">
+              Example data. Your read links every row back to the frame behind it.
+            </div>
+          </div>
+        </section>
+
+        <section class="landing-cta">
+          <h2 class="cta-title">Your next video already has brands in it.</h2>
+          <div class="cta-side">
+            <p class="cta-copy">Find out which, where, and how confident the read is.</p>
+            <a class="btn-primary" href="#/analyse">Analyse a video</a>
+          </div>
+        </section>
+
+        <footer class="landing-foot">
+          <span class="foot-mark">Contextlens</span>
+          <nav class="foot-nav" aria-label="Footer">
+            <a href="#/analyse">Analyse</a>
+            <a href="#/pipeline">Projects</a>
+            <a href="#/insights">Insights</a>
+            <a href="#/login">Log in</a>
+          </nav>
+          <span class="foot-note">Every reading links back to a frame.</span>
+        </footer>
+
       </div>
     </section>
 
@@ -201,7 +321,10 @@
           <button class="icon-button" id="btn-back-home" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h1 class="page-title page-title-md">Projects</h1>
+          <div>
+            <h1 class="page-title page-title-md">Projects</h1>
+            <p class="view-note">Every read you have kept, newest first.</p>
+          </div>
         </div>
         <div id="pipeline-root"></div>
       </div>
@@ -214,7 +337,10 @@
           <button class="icon-button" id="btn-back-outreach" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h1 class="page-title page-title-md">Outreach</h1>
+          <div>
+            <h1 class="page-title page-title-md">Outreach</h1>
+            <p class="view-note">Drafts are written from on-screen evidence. Nothing is sent for you.</p>
+          </div>
         </div>
         <div id="outreach-root" class="outreach-grid"></div>
       </div>
@@ -227,7 +353,10 @@
           <button class="icon-button" id="btn-back-insights" aria-label="Back to projects" hidden>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 19l-7-7 7-7"/></svg>
           </button>
-          <h1 class="page-title page-title-md">Insights</h1>
+          <div>
+            <h1 class="page-title page-title-md">Insights</h1>
+            <p class="view-note">What a creator's videos say about the brands they already carry.</p>
+          </div>
         </div>
         <div id="insights-root"></div>
       </div>

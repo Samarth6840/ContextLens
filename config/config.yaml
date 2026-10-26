@@ -109,7 +109,8 @@ layer1:
     # visibly contain CMF branding and appear mislabeled. The old detector path
     # named 6/24 and produced 114 false brands. The detector remains available
     # as a diagnostic/legacy mode, but does not invent identity in production.
-    identity_mode: "hybrid"  # "hybrid" | "ocr_primary" | "detector_fusion"
+    identity_mode: "ocr_primary"  # local brand names require a readable wordmark
+    use_detector_proposals: true  # YOLO boxes go to capped online verification only; never name a brand locally
     ocr_min_confidence: 0.70
     backend: "yolo"  # local proposals keep full video frames on-device
     model: "weights/logo_detector/train/weights/best.pt"

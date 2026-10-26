@@ -567,7 +567,7 @@ function summaryStrip(d) {
 // strongest signal — never a number, which lives once in the figure line above.
 const EVIDENCE_LABELS = {
   audio_event: 'Audio events',
-  logo_detected: 'Logo detection',
+  logo_detected: 'Wordmark match',
   ocr_hit: 'On-screen text',
   product_retrieval: 'Product catalog',
   scene_context: 'Scene context',

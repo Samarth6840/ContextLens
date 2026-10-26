@@ -415,6 +415,14 @@ def resolver_acceptance_canary(resolved_logos: List[List[dict]]) -> dict:
     }
 
 
+def _logo_detector_enabled(identity_mode: str, logo_cfg: dict) -> bool:
+    """Run YOLO for identity modes or when it is explicitly proposal-only."""
+    return identity_mode in {"hybrid", "detector_fusion"} or (
+        identity_mode == "ocr_primary"
+        and bool(logo_cfg.get("use_detector_proposals", False))
+    )
+
+
 def _normalize_brand_sentinel(name: str) -> str:
     return (name or "").strip().upper()
 
@@ -1577,9 +1585,11 @@ class Phase1Pipeline:
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {}
 
-            if logo_identity_mode in {"hybrid", "detector_fusion"}:
+            if _logo_detector_enabled(logo_identity_mode, _logo_cfg):
                 # Hybrid keeps model proposals for icon-only and out-of-catalog
                 # marks while OCR remains the strongest local identity signal.
+                # In OCR-primary mode, detector output is search-only: it never
+                # enters BrandResolver or the local brand evidence tally.
                 futures[self._locked_submit(
                     executor, "logo_detector", self.logo_detector.detect_batch,
                     logo_frames, None, batch_size,
@@ -1679,14 +1689,18 @@ class Phase1Pipeline:
 
                 if modality == "logo_detection":
                     timings["logo_detection"] = time.monotonic() - _t_logo
-                    all_logo_detections = [[] for _ in frames]
+                    logo_search_proposals = [[] for _ in frames]
                     for idx, dets in zip(logo_indices, result):
-                        all_logo_detections[idx] = dets
+                        logo_search_proposals[idx] = dets
+                        if logo_identity_mode != "ocr_primary":
+                            if all_logo_detections is None:
+                                all_logo_detections = [[] for _ in frames]
+                            all_logo_detections[idx] = dets
                     if progress:
                         progress(
                             "Logo detection — {} candidate box(es) across {} keyframe(s)".format(
-                                sum(len(d) for d in all_logo_detections),
-                                sum(1 for d in all_logo_detections if d),
+                                sum(len(d) for d in logo_search_proposals),
+                                sum(1 for d in logo_search_proposals if d),
                             )
                         )
                 elif modality == "open_vocab":
@@ -1915,7 +1929,6 @@ class Phase1Pipeline:
             progress=progress,
         )
         if logo_identity_mode in {"ocr_primary", "hybrid"}:
-            logo_search_proposals = [list(row or []) for row in (all_logo_detections or [])]
             detector_resolved = (
                 resolver.resolve(all_logo_detections, frames)
                 if logo_identity_mode == "hybrid"
@@ -1939,7 +1952,6 @@ class Phase1Pipeline:
                 sum(len(dets) for dets in resolved_logos),
             )
         else:
-            logo_search_proposals = [list(row or []) for row in (all_logo_detections or [])]
             resolved_logos = resolver.resolve(all_logo_detections, frames)
         all_logo_detections = resolved_logos
         if progress:
