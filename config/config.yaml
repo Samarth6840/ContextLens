@@ -103,12 +103,15 @@ layer1:
     # Only retrain once that pool carries positive boxes from more than one
     # video; a single-video pool cannot separate logo presence from that video's
     # lighting and framing.
-    # OCR-primary was selected from the frozen realvideo_v1 comparison. On
-    # that holdout, full-frame OCR alone named 13/24 hero brands (54.2%) with
-    # 4 named brands on 135 labeled-free frames; two of those four frames
-    # visibly contain CMF branding and appear mislabeled. The old detector path
-    # named 6/24 and produced 114 false brands. The detector remains available
-    # as a diagnostic/legacy mode, but does not invent identity in production.
+    # OCR-primary was selected from the frozen realvideo_v1 comparison. Current
+    # production OCR-wordmark matching names 15/24 hero labels, with 2 brand
+    # attributions on 135 labeled-free frames. Both attributions are CMF, which
+    # is visibly printed in those frames; the labels appear wrong. A hero frame
+    # labeled SAMSUNG also visibly shows an OPPO handset and Snapdragon branding.
+    # Treat these benchmark figures as provisional until labels are audited.
+    # The old detector path named 6/24 and produced 114 false brands. The
+    # detector remains available as a diagnostic/legacy mode, but does not
+    # invent identity in production.
     identity_mode: "ocr_primary"  # local brand names require a readable wordmark
     use_detector_proposals: true  # YOLO boxes go to capped online verification only; never name a brand locally
     ocr_min_confidence: 0.70
