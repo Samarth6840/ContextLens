@@ -221,6 +221,12 @@ em { font-style: normal; }
   letter-spacing: -0.045em;
   margin-bottom: 8px;
 }
+.page-title--long {
+  max-width: 34ch;
+  font-size: clamp(2.15rem, 4.1vw, 3.5rem);
+  line-height: 1.04;
+  text-wrap: balance;
+}
 .view-note {
   margin-top: 7px;
   font-size: var(--t-sm);
@@ -1041,6 +1047,13 @@ select.input {
   border-top: 1.5px solid var(--ink);
   border-bottom: 1px solid var(--rule-2);
 }
+.figure-line:not(.figure-line--sm) {
+  display: grid;
+  grid-template-columns: max-content max-content max-content minmax(8rem, 1fr) max-content;
+  column-gap: var(--space-4);
+}
+.figure-line:not(.figure-line--sm) > .figure { margin-right: 0; }
+.figure-line:not(.figure-line--sm) > .figure-quiet { margin-left: 0; }
 .figure {
   display: flex;
   flex-direction: column;
@@ -1648,6 +1661,11 @@ select.input {
   .outreach-brands { max-height: 40vh; }
   .insight-grid { grid-template-columns: minmax(0, 1fr); }
   .figure-quiet { margin-left: 0; }
+  .figure-line:not(.figure-line--sm) {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  .figure-line:not(.figure-line--sm) > .figure { margin-right: var(--space-4); }
 }
 
 @media (max-width: 760px) {

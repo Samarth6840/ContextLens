@@ -496,9 +496,7 @@ async function renderJobIndex(root) {
 
 function uniqueBrands(d) {
   const brands = new Set();
-  (d.products || []).forEach((p) => brands.add(p.brand));
-  (d.recommendations || []).forEach((r) => brands.add(r.brand));
-  (d.brands || []).forEach((b) => brands.add(typeof b === 'string' ? b : b.name));
+  (d.products || []).forEach((p) => { if (p.brand) brands.add(p.brand); });
   return brands;
 }
 
@@ -524,7 +522,7 @@ function summaryStrip(d) {
     .join(' · ');
   return `
     <div class="figure-line">
-      ${cell(brands, brands === 1 ? 'brand' : 'brands')}
+      ${cell(brands, brands === 1 ? 'on-screen brand' : 'on-screen brands')}
       ${cell(opps, opps === 1 ? 'opportunity' : 'opportunities')}
       ${cell(scenes, scenes === 1 ? 'scene' : 'scenes')}
       <div class="figure figure-quiet">
@@ -605,7 +603,7 @@ function renderDashboard(root, d, activeTab) {
   };
 
   root.innerHTML = `
-    <h1 class="page-title page-title-huge">${escapeHtml(d.title)}</h1>
+    <h1 class="page-title page-title-huge${String(d.title || '').length > 38 ? ' page-title--long' : ''}">${escapeHtml(d.title)}</h1>
     <p class="project-line">
       <span>${escapeHtml(d.job_id)}</span>
       <span>${escapeHtml(fmtDuration(d.duration_sec))}</span>
