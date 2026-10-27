@@ -168,7 +168,6 @@ function router() {
   else if (page === 'insights') { showView('insights'); renderInsights(id, params); }
   else if (page === 'login') { showView('login'); renderLogin(); }
   else { location.hash = '#/'; }
-  refreshNavAuth();
 }
 
 // Sidebar / back-button wiring
@@ -177,30 +176,6 @@ function router() {
   if (btn) btn.addEventListener('click', () => { location.hash = key === 'home' ? '#/pipeline' : `#/${key}`; });
 });
 window.addEventListener('hashchange', router);
-if (!window.__navBound) {
-  window.__navBound = true;
-  document.addEventListener('click', (e) => {
-    const navAuth = e.target.closest('#nav-auth');
-    if (!navAuth || navAuth.textContent !== 'Log out') return;
-    e.preventDefault();
-    api('/api/logout', { method: 'POST' }).catch(() => {});
-    setToken(null);
-    location.hash = '#/login';
-  });
-}
-
-async function refreshNavAuth() {
-  const link = $('#nav-auth');
-  if (!link) return;
-  try {
-    const me = await api('/api/me');
-    const authed = me.authenticated === true;
-    link.textContent = authed ? 'Log out' : 'Log in';
-    link.classList.toggle('is-authed', authed);
-    link.setAttribute('href', authed ? '#/' : '#/login');
-    if (authed) link.setAttribute('data-user', me.user || '');
-  } catch (e) { /* keep default label */ }
-}
 
 /* ── Analyse page ─────────────────────────────────────────── */
 

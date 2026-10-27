@@ -187,19 +187,6 @@ em { font-style: normal; }
   height: 2px;
   background: var(--signal);
 }
-.nav-item--auth {
-  margin-left: 6px;
-  padding: 7px 14px;
-  border: 1px solid var(--ink);
-  color: var(--ink);
-  font-weight: 600;
-}
-.nav-item--auth:hover { background: var(--ink); color: var(--paper); }
-.nav-item--auth.is-active::after { display: none; }
-.nav-item.is-authed { color: var(--signal); }
-.nav-item--auth.is-authed { border-color: var(--signal); }
-.nav-item--auth.is-authed:hover { background: var(--signal); border-color: var(--signal); color: var(--on-signal); }
-
 .main-content { flex: 1; }
 
 .view { display: none; }
@@ -602,8 +589,8 @@ select.input {
   font-size: clamp(2.25rem, 5vw, 4.4rem);
   font-weight: 700;
   font-stretch: 100%;
-  line-height: 1;
-  letter-spacing: -0.045em;
+  line-height: 1.06;
+  letter-spacing: -0.035em;
 }
 
 .landing-hero-row {
@@ -1672,6 +1659,11 @@ select.input {
     padding-bottom: 10px;
   }
   .nav { gap: var(--space-3); flex-wrap: wrap; }
+  .landing-title {
+    max-width: 21ch;
+    font-size: clamp(2.1rem, 6.8vw, 3.4rem);
+    line-height: 1.08;
+  }
   .landing-title br { display: none; }
   .landing-signals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .landing-signal:nth-child(odd) { padding-left: 0; border-left: 0; }
@@ -1698,7 +1690,6 @@ select.input {
   .masthead-logo { font-size: 0.92rem; }
   .nav { gap: 10px 14px; }
   .nav-item { font-size: var(--t-xs); }
-  .nav-item--auth { padding: 5px 10px; }
   .landing-signals { grid-template-columns: minmax(0, 1fr); }
   .landing-signal { padding: var(--space-3) 0; }
   .landing-signal + .landing-signal,

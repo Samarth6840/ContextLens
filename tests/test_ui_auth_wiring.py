@@ -27,7 +27,6 @@ CSS = (ROOT / "static/styles.css").read_text()
     ("Bearer", "bearer scheme"),
     ("AUTH REQUIRED", "recognises the server's 401 payload"),
     ("#/login", "redirects an expired session to the login view"),
-    ("refreshNavAuth", "flips the nav link between Log in and Log out"),
     ("renderLogin", "renders the sign-in form"),
     ("/api/login", "exchanges credentials for a token"),
     ("/api/logout", "revokes the token"),
@@ -40,7 +39,8 @@ def test_auth_flow_present_in_client(needle, why):
 def test_login_view_present_in_markup():
     assert 'id="view-login"' in HTML, "the login view was dropped from index.html"
     assert 'id="login-root"' in HTML, "renderLogin has no mount point to write into"
-    assert 'id="nav-auth"' in HTML, "no nav link to reach the login view"
+    assert 'id="nav-auth"' not in HTML, "the redundant login button is still in the navigation"
+    assert 'href="#/login">Log in' not in HTML, "the redundant footer login link is still present"
 
 
 def test_login_route_is_routed():
@@ -55,8 +55,5 @@ def test_el_map_includes_login():
 
 
 def test_auth_state_has_a_visual_treatment():
-    # is-authed is toggled on the nav link; with no rule the signed-in state is
-    # indistinguishable from signed-out.
-    assert ".nav-item.is-authed" in CSS, "signed-in nav state has no styling"
     assert ".auth-card" in CSS, "the login card is unstyled"
     assert ".auth-actions" in CSS, "the signed-in action row is unstyled"
