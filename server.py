@@ -88,7 +88,10 @@ MAX_MEMORY_JOBS = 200
 # Each job decodes audio+video, loads ML models, and holds frames in RAM.
 # Without a cap, multiple large uploads can cause OOM crashes. Callers get
 # HTTP 503 when all slots are occupied; they may retry once a slot frees.
-MAX_CONCURRENT_JOBS = 4
+# One video per process keeps the full-resolution frame buffers and shared
+# cross-video state from multiplying under concurrent uploads. Raise only on
+# a host with enough memory and after validating shared-state behavior.
+MAX_CONCURRENT_JOBS = 1
 _ACTIVE_JOBS_SEMA = threading.Semaphore(MAX_CONCURRENT_JOBS)
 
 CONFIG_PATH = ROOT / "config" / "config.yaml"
@@ -1366,6 +1369,7 @@ def analyse():
         job["status"] = "error"
         job["error"] = "SERVER BUSY — TOO MANY CONCURRENT JOBS"
         job["finished_at"] = _now_iso()
+        video_path.unlink(missing_ok=True)
         _persist_job(job)
         return jsonify({
             "error": "SERVER BUSY — TOO MANY CONCURRENT JOBS",

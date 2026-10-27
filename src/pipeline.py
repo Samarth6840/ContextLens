@@ -14,6 +14,7 @@ import os
 import sys
 import threading
 import time
+from copy import copy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import partial
 from pathlib import Path
@@ -1397,6 +1398,19 @@ class Phase1Pipeline:
         """Tiered product→brand resolver (Layer 2b), lazy + fail-closed."""
         return self._get_or_create("_product_resolver", self._product_resolver_factory)
 
+    def _product_resolver_for_video(self, call_counter: list):
+        """Create a per-video resolver while reusing shared lookup caches."""
+        base = self.product_resolver
+        resolver = copy(base)
+        resolver.tier_counts = {}
+        resolver.qwen_calls = 0
+        resolver.low_confidence_candidates = []
+        if base.qwen is not None:
+            resolver.qwen = lambda span, frame=None: self._qwen_product_tier(
+                span, frame, call_counter
+            )
+        return resolver
+
     def _qwen_product_tier(self, product_span: str, frame=None,
                            _call_counter: Optional[list] = None) -> dict:
         """Tier 3: structured Qwen3-VL 'manufacturer or null' query.
@@ -1552,6 +1566,11 @@ class Phase1Pipeline:
         # shared instance attribute so two concurrent videos can't reset each other.
         _qwen_call_counter = [0]
         _creator_id = creator_id or self._creator_id
+        # Resolver counters and diagnostics are per video; its Wikidata cache
+        # and learned-memory callbacks remain shared.
+        _job_product_resolver = self._product_resolver_for_video(
+            _qwen_call_counter
+        )
         logger.info(f"Processing video: {video_path}")
 
         # Load video frames AND extract audio concurrently. Both are independent
@@ -2169,7 +2188,7 @@ class Phase1Pipeline:
             pr_cfg = self.cfg["layer1"].get("product_resolution", {})
             if pr_cfg.get("enable_speech", True):
                 try:
-                    pre = self.product_resolver.resolve(transcript, frame=None)
+                    pre = _job_product_resolver.resolve(transcript, frame=None)
                     for r in pre:
                         if r.get("brand") and r.get("brand") not in [
                             m.get("brand") for m in brand_mentions
@@ -2215,7 +2234,7 @@ class Phase1Pipeline:
             try:
                 ocr_res = _collect_ocr_product_resolutions(
                     all_ocr_results or [],
-                    self.product_resolver,
+                    _job_product_resolver,
                     match_brand,
                 )
                 if ocr_res:
@@ -2530,8 +2549,8 @@ class Phase1Pipeline:
                 "memory_brands": self._brand_memory.brands(),
                 "indirect_resolutions": indirect_resolutions,
                 "product_resolution_tiers": (
-                    self.product_resolver.emit_provenance()
-                    if getattr(self, "_product_resolver", None) is not None
+                    _job_product_resolver.emit_provenance()
+                    if _job_product_resolver is not None
                     else {}
                 ),
             },

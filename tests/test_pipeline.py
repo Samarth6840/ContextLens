@@ -6,6 +6,7 @@ The production data path (./data) is never touched by these tests.
 
 import os
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -562,6 +563,30 @@ class TestAggregateEvidence:
         ev = p._aggregate_evidence(dets, [], [], [])
         # mean([0.90, 0.50]) = 0.70 — NOT the raw-confidence mean of 0.155.
         assert ev["logo_detected"] == pytest.approx(0.70, abs=1e-6)
+
+    def test_product_resolver_counters_are_isolated_per_video(self):
+        from src.pipeline import Phase1Pipeline
+
+        p = Phase1Pipeline(device_override="cpu")
+        p._product_resolver = SimpleNamespace(
+            qwen=object(), tier_counts={"old": 1}, qwen_calls=7,
+            low_confidence_candidates=[{"old": True}],
+        )
+        p._qwen_product_tier = lambda span, frame, counter: (
+            counter.__setitem__(0, counter[0] + 1) or {}
+        )
+        first_counter, second_counter = [0], [0]
+        first = p._product_resolver_for_video(first_counter)
+        second = p._product_resolver_for_video(second_counter)
+
+        first.qwen("product")
+
+        assert first_counter == [1]
+        assert second_counter == [0]
+        assert first.qwen_calls == second.qwen_calls == 0
+        assert first.tier_counts == second.tier_counts == {}
+        assert first.low_confidence_candidates == []
+        assert p._product_resolver.qwen_calls == 7
 
     def test_logo_evidence_falls_back_when_no_quality(self):
         p = self._agg()
