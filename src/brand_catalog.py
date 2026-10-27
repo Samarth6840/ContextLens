@@ -117,11 +117,18 @@ BRAND_CATALOG: Dict[str, dict] = {
         "contact_website": "https://www.sony.com",
     },
     "QUALCOMM": {
-        "product": "Snapdragon",
+        "product": "Qualcomm wireless technology",
         "category": "ELECTRONICS",
         "categories": ["ELECTRONICS", "TECH"],
         "aliases": ['qualcomm', 'क्वालकॉम'],
         "contact_website": "https://www.qualcomm.com",
+    },
+    "SNAPDRAGON": {
+        "product": "Snapdragon processors",
+        "category": "ELECTRONICS",
+        "categories": ["ELECTRONICS", "SEMICONDUCTOR", "TECH"],
+        "aliases": ["snapdragon", "स्नैपड्रैगन"],
+        "contact_website": "https://www.qualcomm.com/snapdragon",
     },
     "LG": {
         "product": "LG OLED",

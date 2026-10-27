@@ -88,6 +88,7 @@ class TestBrandCatalog:
 
     def test_wordmark_matching_rejects_brand_mentions_in_article_copy(self):
         assert match_brand_wordmark("CMF Phone 1") == "CMF"
+        assert match_brand_wordmark("Snapdragon 8 Elite Gen 5") == "SNAPDRAGON"
         assert match_brand_wordmark("Price of every Apple product that got costlier") is None
         assert match_brand_wordmark("growth, Oppo and Vivo suffered amid dependence") is None
 
@@ -99,6 +100,7 @@ class TestBrandCatalog:
             ("CMF Phone", "CMF"),
             ("Broadcom", "BROADCOM"),
             ("HONDA", "HONDA"),
+            ("Snapdragon", "SNAPDRAGON"),
             ("VENGEANCE", "VENGEANCE"),
         ],
     )
@@ -346,10 +348,15 @@ class TestBrandResolver:
         class BatchOCR:
             def __init__(self):
                 self.batch_sizes = []
+                self.single_calls = 0
 
             def extract_text_batch(self, crops):
                 self.batch_sizes.append(len(crops))
-                return [[] for _ in crops]
+                return [[{"text": "Samsung"}] for _ in crops]
+
+            def extract_text(self, crop):
+                self.single_calls += 1
+                return []
 
         ocr = BatchOCR()
         resolver = BrandResolver(
@@ -367,20 +374,22 @@ class TestBrandResolver:
         ]]
 
         cache = resolver._prefetch_ocr([frame], dets)
+        resolver.resolve(dets, [frame])
 
-        # Tight, original-crop fallback, and superset batches are each capped;
-        # highest-confidence detections keep their original cache indexes.
+        # Tight and superset batches are capped; the remaining proposals must
+        # not fall through to one-at-a-time OCR during resolution.
         assert ocr.batch_sizes and all(size <= 3 for size in ocr.batch_sizes)
-        assert {key[1] for key in cache if key[2] == "tight"} == {17, 18, 19}
+        assert ocr.single_calls == 0
+        assert {key[1] for key, texts in cache.items()
+                if key[2] == "tight" and texts} == {17, 18, 19}
 
     def test_multiline_card_ocr_superset_resolves_brand(self):
         # A chip/product card like "Snapdragon / 8 Elite / Gen 5": the detector's
         # tight proposal box wraps only the lower 'Gen 5' line, so OCR on the tight
         # crop reads a fragment that matches no catalog brand -> None. The fix
         # retries OCR on a padded SUPERSET (biased upward where the wordmark line
-        # sits), so the full read "Snapdragon 8 Elite Gen 5" can be resolved. The
-        # catalog no longer aliases the product name 'Snapdragon' -> QUALCOMM; the
-        # tiered product resolver (Tier 2 Wikidata) supplies the brand.
+        # sits), so the full read "Snapdragon 8 Elite Gen 5" can be resolved as
+        # the visible SNAPDRAGON brand rather than falling through as a product.
         TIGHT_H = 32
         class MultiLineOCR:
             def extract_text(self, crop):
@@ -399,8 +408,8 @@ class TestBrandResolver:
             product_resolver=ProductBrandResolver(wikidata=wd))
         dets = [[{"class_name": "text logo", "bbox": [10, 20, 40, 30], "confidence": 0.9}]]
         out = resolver.resolve(dets, [self._frame()])
-        assert out[0][0]["brand"] == "QUALCOMM"
-        assert out[0][0]["resolution_source"] == "product_2"
+        assert out[0][0]["brand"] == "SNAPDRAGON"
+        assert out[0][0]["resolution_source"] == "ocr"
         assert out[0][0].get("superset_ocr") is True
 
     def test_multiline_card_ocr_superset_no_match_stays_unresolved(self):

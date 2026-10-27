@@ -373,10 +373,9 @@ class BrandResolver:
     def _prefetch_ocr(self, frames, logo_detections) -> Dict[tuple, List[str]]:
         """Pre-OCR every crop in each frame using a fixed number of round-trips.
 
-        Returns {(frame_idx, det_idx, "tight"|"superset"): [texts]}. The
-        superset retry is only queued for crops whose tight read did not name a
-        brand, which is exactly the condition `_resolve_detection` uses, so the
-        batched result is identical to resolving one detection at a time.
+        Returns {(frame_idx, det_idx, "tight"|"superset"): [texts]}. Empty
+        entries mark intentionally skipped crops so `_resolve_detection` cannot
+        bypass the per-frame OCR cap with slow single-crop fallbacks.
         """
         cache: Dict[tuple, List[str]] = {}
         if self.ocr is None:
@@ -388,6 +387,9 @@ class BrandResolver:
         for fi, (frame, dets) in enumerate(zip(frames, logo_detections)):
             if frame is None or frame.size == 0:
                 continue
+            for di in range(len(dets)):
+                cache[(fi, di, "tight")] = []
+                cache[(fi, di, "superset")] = []
             if dets:
                 self._emit_progress(
                     f"Brand resolution — reading text on logo crops "
