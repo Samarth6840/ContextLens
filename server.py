@@ -84,6 +84,13 @@ JOBS_LOCK = threading.Lock()
 # server doesn't accumulate unbounded memory.
 MAX_MEMORY_JOBS = 200
 
+# Admission control: cap the number of simultaneously running analysis jobs.
+# Each job decodes audio+video, loads ML models, and holds frames in RAM.
+# Without a cap, multiple large uploads can cause OOM crashes. Callers get
+# HTTP 503 when all slots are occupied; they may retry once a slot frees.
+MAX_CONCURRENT_JOBS = 4
+_ACTIVE_JOBS_SEMA = threading.Semaphore(MAX_CONCURRENT_JOBS)
+
 CONFIG_PATH = ROOT / "config" / "config.yaml"
 
 
@@ -1167,6 +1174,7 @@ def _run_job(job_id: str) -> None:
         job["stage"] = "EXTRACTING AUDIO & VISUAL SIGNALS"
         result = pipeline.process_video(
             job["video_path"], frame_rate=1.0,
+            creator_id=job["creator"],
             progress=_job_feed_push(job),
         )
         if "error" in result:
@@ -1185,6 +1193,7 @@ def _run_job(job_id: str) -> None:
     finally:
         job["finished_at"] = _now_iso()
         _persist_job(job)
+        _ACTIVE_JOBS_SEMA.release()
 
 
 # ── Routes: static ───────────────────────────────────────────
@@ -1352,10 +1361,20 @@ def analyse():
     with JOBS_LOCK:
         JOBS[job_id] = job
 
+    if not _ACTIVE_JOBS_SEMA.acquire(blocking=False):
+        # All slots occupied; reject immediately so the client can retry.
+        job["status"] = "error"
+        job["error"] = "SERVER BUSY — TOO MANY CONCURRENT JOBS"
+        job["finished_at"] = _now_iso()
+        _persist_job(job)
+        return jsonify({
+            "error": "SERVER BUSY — TOO MANY CONCURRENT JOBS",
+            "job_id": job_id,
+            "retry_after_seconds": 30,
+        }), 503
     threading.Thread(target=_run_job, args=(job_id,), daemon=True).start()
 
     return jsonify({"job_id": job_id, "status": "running"})
-
 
 @app.get("/api/analyse/<job_id>")
 @login_required

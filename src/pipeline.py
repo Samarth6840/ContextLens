@@ -524,9 +524,12 @@ class VideoProcessor:
         """
         Load video and extract frames at specified rate, capped at max_frames.
 
-        Stops as soon as max_frames are collected, regardless of video length.
-        This prevents OOM on long videos even when the total frame count is
-        unknown or incorrectly reported by the codec.
+        When the codec reports a valid total frame count, the loader strides
+        uniformly across the full video duration so that all segments are
+        represented (not just the opening). The stride is chosen so at most
+        max_frames frames are returned. When the total is unknown, sequential
+        frames are grabbed at the nominal frame_rate until max_frames is
+        reached (may truncate long videos if the codec hides the length).
 
         Args:
             video_path: Path to video file
@@ -1394,7 +1397,8 @@ class Phase1Pipeline:
         """Tiered product→brand resolver (Layer 2b), lazy + fail-closed."""
         return self._get_or_create("_product_resolver", self._product_resolver_factory)
 
-    def _qwen_product_tier(self, product_span: str, frame=None) -> dict:
+    def _qwen_product_tier(self, product_span: str, frame=None,
+                           _call_counter: Optional[list] = None) -> dict:
         """Tier 3: structured Qwen3-VL 'manufacturer or null' query.
 
         Fails closed to empty on any error / when the central vision model is
@@ -1402,14 +1406,19 @@ class Phase1Pipeline:
         emit_qwen_stats(), and a per-video budget gate (config
         product_resolution.qwen_max_calls_per_video) is enforced here so Qwen
         spend is bounded even if many product spans appear.
+
+        `_call_counter` is a mutable one-element list [count] owned by the
+        calling `process_video` invocation. It is never shared between concurrent
+        jobs so the budget is always per-video, not per-pipeline.
         """
         pr_cfg = self.cfg["layer1"].get("product_resolution", {})
         budget = int(pr_cfg.get("qwen_max_calls_per_video", 0))
-        if budget and self._qwen_product_calls >= budget:
+        counter = _call_counter if _call_counter is not None else [self._qwen_product_calls]
+        if budget and counter[0] >= budget:
             logger.warning(
                 "Qwen product-tier budget exhausted (%d calls, cap %d) — "
                 "failing closed for '%s'",
-                self._qwen_product_calls, budget, product_span,
+                counter[0], budget, product_span,
             )
             return {}
         try:
@@ -1427,7 +1436,7 @@ class Phase1Pipeline:
                 None,  # no per-job wall-times dict on this path (outside process_video)
                 product_span, frame,
             )
-            self._qwen_product_calls += 1
+            counter[0] += 1
             return result or {}
         except Exception as exc:  # noqa: BLE001 — never let Tier 3 crash the pipeline
             logger.warning("Qwen product tier failed for %r: %s", product_span, exc)
@@ -1539,10 +1548,10 @@ class Phase1Pipeline:
         _t_total = time.monotonic()
         # Per-job state: reset each video so concurrent uploads don't overwrite each other.
         _model_wall_times: Dict[str, float] = {}
-        _qwen_product_calls = 0
+        # Per-job mutable counter passed into _qwen_product_tier; never touches the
+        # shared instance attribute so two concurrent videos can't reset each other.
+        _qwen_call_counter = [0]
         _creator_id = creator_id or self._creator_id
-        # Reset per-job Qwen product-call counter so concurrent jobs don't interfere.
-        self._qwen_product_calls = 0
         logger.info(f"Processing video: {video_path}")
 
         # Load video frames AND extract audio concurrently. Both are independent
